@@ -76,7 +76,7 @@ const MarketHeader = () => {
     <div className="w-full bg-[#0f172a]/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-50">
       <div className="max-w-[1600px] mx-auto h-14 flex items-center justify-between px-6">
         <div className="flex items-center">
-          {renderValue(data.nasdaq, 'Nasdaq 100', <Activity size={14} />)}
+          {renderValue(data.nasdaq, 'NASDAQ', <Activity size={14} />)}
           {renderValue(data.exchange_rate, 'USD / KRW', <DollarSign size={14} />)}
         </div>
         

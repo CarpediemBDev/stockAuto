@@ -82,39 +82,28 @@ export function Dashboard() {
 
   return (
     <div className={`min-h-screen transition-colors duration-700 ${isReal && isRealEnabled ? 'bg-red-950/20' : 'bg-black'}`}>
-      <div className="max-w-[1600px] mx-auto p-6 pt-12">
-        <header className="mb-10 flex justify-between items-start">
-          <div>
-            <h1 className={`text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r mb-2 ${isReal && isRealEnabled ? 'from-red-500 to-orange-500' : 'from-blue-400 to-emerald-400'}`}>
-              StockAuto Engine
-            </h1>
+      <div className="max-w-[1600px] mx-auto p-6 pt-6">
+        {/* 실전 모드(REAL)일 때만 상단 비상 안전 스위치 바를 슬림하게 노출하여 세로 공간 극대화 */}
+        {isReal && (
+          <div className="mb-6 flex justify-end items-center border-b border-zinc-900 pb-4">
             <div className="flex items-center gap-3">
-              <p className="text-zinc-400 font-medium">Automated Algorithmic Trading Dashboard</p>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${isReal ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>
-                {tradeMode} MODE
-              </span>
-            </div>
-          </div>
-
-          {isReal && (
-            <div className="flex flex-col items-end gap-2">
               <div className="flex items-center gap-2 bg-zinc-900/50 p-2 rounded-lg border border-zinc-800 backdrop-blur-sm">
-                <span className="text-xs text-zinc-400 font-medium">실전투자 안전 스위치</span>
+                <span className="text-[11px] text-zinc-400 font-semibold">실전투자 안전 스위치</span>
                 <button 
                   onClick={handleToggleReal}
-                  className={`w-12 h-6 rounded-full p-1 transition-colors duration-300 ${isRealEnabled ? 'bg-red-600' : 'bg-zinc-700'}`}
+                  className={`w-10 h-5 rounded-full p-0.5 transition-colors duration-300 ${isRealEnabled ? 'bg-red-600' : 'bg-zinc-700'}`}
                 >
-                  <div className={`w-4 h-4 bg-white rounded-full transition-transform duration-300 ${isRealEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
+                  <div className={`w-4 h-4 bg-white rounded-full transition-transform duration-300 ${isRealEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
                 </button>
               </div>
               {isRealEnabled && (
-                <span className="text-[10px] text-red-500 font-bold animate-pulse">
+                <span className="text-[10px] text-red-500 font-extrabold animate-pulse">
                   ⚠️ WARNING: LIVE TRADING ACTIVE
                 </span>
               )}
             </div>
-          )}
-        </header>
+          </div>
+        )}
 
         <AccountBalance />
         

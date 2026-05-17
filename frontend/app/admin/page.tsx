@@ -34,6 +34,15 @@ export default function AdminPage() {
   const [loading, setLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
 
+  // 페이징 처리 상태 관리 (페이지 당 10개 레코드 출력)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const itemsPerPage = 10;
+
+  // 검색 쿼리가 변경되면 즉시 첫 페이지로 리셋하여 엉뚱한 페이지 공백 현상 방지
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
   // 신규 등록 폼 상태
   const [newTicker, setNewTicker] = useState<string>("");
   const [newNameKo, setNewNameKo] = useState<string>("");
@@ -78,7 +87,7 @@ export default function AdminPage() {
     const nameClean = newNameKo.trim();
 
     if (!tickerClean || !nameClean) {
-      toast.warn("티커와 한국어 이름을 모두 입력해 주세요.");
+      toast.warning("티커와 한국어 이름을 모두 입력해 주세요.");
       return;
     }
 
@@ -106,7 +115,7 @@ export default function AdminPage() {
   const handleUpdate = async (id: number) => {
     const nameClean = editingName.trim();
     if (!nameClean) {
-      toast.warn("한국어 이름을 입력해 주세요.");
+      toast.warning("한국어 이름을 입력해 주세요.");
       return;
     }
 
@@ -309,97 +318,166 @@ export default function AdminPage() {
                         <p className="text-sm font-semibold text-zinc-500">등록되었거나 검색 조건에 부합하는 데이터가 없습니다.</p>
                         <p className="text-xs text-zinc-600 mt-1">상단 폼을 이용하여 첫 번역 주식을 등록해 보세요!</p>
                       </div>
-                    ) : (
-                      <table className="min-w-full divide-y divide-zinc-800/60">
-                        <thead>
-                          <tr className="text-left text-xs uppercase text-zinc-500 font-bold tracking-wider">
-                            <th className="px-6 py-3.5">ID</th>
-                            <th className="px-6 py-3.5">Ticker (티커)</th>
-                            <th className="px-6 py-3.5">Korean Name (한글 이름)</th>
-                            <th className="px-6 py-3.5 text-right">Actions (작업)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-zinc-800/40 text-sm">
-                          {filteredTranslations.map((item) => (
-                            <tr 
-                              key={item.id} 
-                              className={`transition-colors duration-150 hover:bg-zinc-800/10 
-                                ${editingId === item.id ? "bg-blue-950/10" : ""}`}
-                            >
-                              {/* 1. 번역 데이터 고유 ID */}
-                              <td className="px-6 py-4 text-xs font-mono text-zinc-500 font-bold">
-                                {item.id}
-                              </td>
+                    ) : (() => {
+                      // 페이징 계산식 실행
+                      const totalPages = Math.ceil(filteredTranslations.length / itemsPerPage);
+                      const indexOfLastItem = currentPage * itemsPerPage;
+                      const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+                      const currentItems = filteredTranslations.slice(indexOfFirstItem, indexOfLastItem);
+                      
+                      return (
+                        <>
+                          <table className="min-w-full divide-y divide-zinc-800/60">
+                            <thead>
+                              <tr className="text-left text-xs uppercase text-zinc-500 font-bold tracking-wider">
+                                <th className="px-6 py-3.5">ID</th>
+                                <th className="px-6 py-3.5">Ticker (티커)</th>
+                                <th className="px-6 py-3.5">Korean Name (한글 이름)</th>
+                                <th className="px-6 py-3.5 text-right">Actions (작업)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-zinc-800/40 text-sm">
+                              {currentItems.map((item) => (
+                                <tr 
+                                  key={item.id} 
+                                  className={`transition-colors duration-150 hover:bg-zinc-800/10 
+                                    ${editingId === item.id ? "bg-blue-950/10" : ""}`}
+                                >
+                                  {/* 1. 번역 데이터 고유 ID */}
+                                  <td className="px-6 py-4 text-xs font-mono text-zinc-500 font-bold">
+                                    {item.id}
+                                  </td>
+                                  
+                                  {/* 2. 티커 (영문 모노체 스타일링) */}
+                                  <td className="px-6 py-4 font-mono font-bold text-slate-300 tracking-wider">
+                                    {item.ticker}
+                                  </td>
+                                  
+                                  {/* 3. 한국어 이름 셀 (인라인 에디터 변신 기믹!) */}
+                                  <td className="px-6 py-4">
+                                    {editingId === item.id ? (
+                                      <input
+                                        type="text"
+                                        value={editingName}
+                                        onChange={(e) => setEditingName(e.target.value)}
+                                        className="bg-[#05080f] border border-blue-500/50 rounded-lg px-3 py-1 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") handleUpdate(item.id);
+                                          if (e.key === "Escape") setEditingId(null);
+                                        }}
+                                        autoFocus
+                                      />
+                                    ) : (
+                                      <span className="text-slate-100 font-medium">
+                                        {item.name_ko}
+                                      </span>
+                                    )}
+                                  </td>
+                                  
+                                  {/* 4. 작업 액션 버튼셋 (수정/삭제/저장/취소) */}
+                                  <td className="px-6 py-4 text-right space-x-2">
+                                    {editingId === item.id ? (
+                                      <>
+                                        <button
+                                          onClick={() => handleUpdate(item.id)}
+                                          className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                                          title="저장"
+                                        >
+                                          <Check size={16} />
+                                        </button>
+                                        <button
+                                          onClick={() => setEditingId(null)}
+                                          className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors"
+                                          title="취소"
+                                        >
+                                          <X size={16} />
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button
+                                          onClick={() => startEdit(item)}
+                                          className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
+                                          title="수정"
+                                        >
+                                          <Edit2 size={16} />
+                                        </button>
+                                        <button
+                                          onClick={() => handleDelete(item.id, item.ticker)}
+                                          className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-colors"
+                                          title="삭제"
+                                        >
+                                          <Trash2 size={16} />
+                                        </button>
+                                      </>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+
+                          {/* Premium Dark-mode Pagination Controller */}
+                          {totalPages > 1 && (
+                            <div className="flex flex-col sm:flex-row items-center justify-between border-t border-zinc-800/80 pt-5 mt-4 gap-4">
+                              <span className="text-xs text-zinc-500 font-semibold">
+                                Showing <strong className="text-zinc-300">{indexOfFirstItem + 1}</strong> to <strong className="text-zinc-300">{Math.min(indexOfLastItem, filteredTranslations.length)}</strong> of <strong className="text-zinc-300">{filteredTranslations.length}</strong> items
+                              </span>
                               
-                              {/* 2. 티커 (영문 모노체 스타일링) */}
-                              <td className="px-6 py-4 font-mono font-bold text-slate-300 tracking-wider">
-                                {item.ticker}
-                              </td>
-                              
-                              {/* 3. 한국어 이름 셀 (인라인 에디터 변신 기믹!) */}
-                              <td className="px-6 py-4">
-                                {editingId === item.id ? (
-                                  <input
-                                    type="text"
-                                    value={editingName}
-                                    onChange={(e) => setEditingName(e.target.value)}
-                                    className="bg-[#05080f] border border-blue-500/50 rounded-lg px-3 py-1 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") handleUpdate(item.id);
-                                      if (e.key === "Escape") setEditingId(null);
-                                    }}
-                                    autoFocus
-                                  />
-                                ) : (
-                                  <span className="text-slate-100 font-medium">
-                                    {item.name_ko}
-                                  </span>
-                                )}
-                              </td>
-                              
-                              {/* 4. 작업 액션 버튼셋 (수정/삭제/저장/취소) */}
-                              <td className="px-6 py-4 text-right space-x-2">
-                                {editingId === item.id ? (
-                                  <>
-                                    <button
-                                      onClick={() => handleUpdate(item.id)}
-                                      className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
-                                      title="저장"
-                                    >
-                                      <Check size={16} />
-                                    </button>
-                                    <button
-                                      onClick={() => setEditingId(null)}
-                                      className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors"
-                                      title="취소"
-                                    >
-                                      <X size={16} />
-                                    </button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <button
-                                      onClick={() => startEdit(item)}
-                                      className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
-                                      title="수정"
-                                    >
-                                      <Edit2 size={16} />
-                                    </button>
-                                    <button
-                                      onClick={() => handleDelete(item.id, item.ticker)}
-                                      className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-colors"
-                                      title="삭제"
-                                    >
-                                      <Trash2 size={16} />
-                                    </button>
-                                  </>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                                  disabled={currentPage === 1}
+                                  className="px-3 py-2 rounded-xl text-xs font-bold border border-zinc-800 bg-[#0a0f1d] hover:bg-zinc-800/60 disabled:opacity-40 disabled:hover:bg-[#0a0f1d] text-zinc-400 hover:text-white transition-all"
+                                >
+                                  Previous
+                                </button>
+                                
+                                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                  .filter(page => {
+                                    return (
+                                      page === 1 ||
+                                      page === totalPages ||
+                                      Math.abs(page - currentPage) <= 1
+                                    );
+                                  })
+                                  .map((page, idx, arr) => {
+                                    const showEllipsisBefore = page > 1 && arr[idx - 1] !== page - 1;
+                                    return (
+                                      <React.Fragment key={page}>
+                                        {showEllipsisBefore && (
+                                          <span className="text-zinc-600 px-1 text-xs">...</span>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => setCurrentPage(page)}
+                                          className={`w-9 h-9 rounded-xl text-xs font-bold transition-all flex items-center justify-center
+                                            ${currentPage === page
+                                              ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-teal-950/20 border border-teal-500/20"
+                                              : "border border-zinc-800 bg-[#0a0f1d] hover:bg-zinc-800/60 text-zinc-400 hover:text-white"
+                                            }`}
+                                        >
+                                          {page}
+                                        </button>
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                  
+                                <button
+                                  type="button"
+                                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                                  disabled={currentPage === totalPages}
+                                  className="px-3 py-2 rounded-xl text-xs font-bold border border-zinc-800 bg-[#0a0f1d] hover:bg-zinc-800/60 disabled:opacity-40 disabled:hover:bg-[#0a0f1d] text-zinc-400 hover:text-white transition-all"
+                                >
+                                  Next
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
 

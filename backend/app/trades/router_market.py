@@ -39,7 +39,7 @@ async def get_market_overview():
     """나스닥, 환율, 시장 심리를 종합하여 반환합니다."""
     # 1. 병렬로 데이터 수집
     sentiment_task = check_market_sentiment()
-    nasdaq_task = get_ticker_summary("QQQ") # 나스닥 100 ETF 기준
+    nasdaq_task = get_ticker_summary("^IXIC") # 나스닥 종합 지수 기준
     fx_task = get_ticker_summary("USDKRW=X") # 달러/원 환율
     
     sentiment, nasdaq, fx = await asyncio.gather(sentiment_task, nasdaq_task, fx_task)
