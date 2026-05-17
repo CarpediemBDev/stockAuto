@@ -1,0 +1,44 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.log
+backend/.env*
+!backend/.env.*.example
+
+# Database files (Root and subfolders)
+*.db
+*.sqlite
+*.sqlite3
+stockauto.db
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.env*
+!frontend/.env.*.example
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.bak
+
+# Gemini / Antigravity
+.gemini/
+**/__pycache__/
+
+# Core Strategy & Implementation Docs (Public vs Private)
+docs/*.md
+!docs/README.md
+!docs/SYSTEM_MANUAL.md
+!docs/REACT_GUIDE.md
+!docs/RULES.md
+
+# Private workspace task logs and scratch logs
+docs/task.md
+docs/private_*
+
+
