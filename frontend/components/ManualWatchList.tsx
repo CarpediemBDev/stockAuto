@@ -2,13 +2,19 @@
 
 import React, { useState, useCallback } from 'react';
 import { Eye, Plus, Trash2 } from 'lucide-react';
-import { watchlistAPI } from '@/lib/api';
+import { watchlistAPI, translationAPI } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
+import { getErrorMessage } from '@/lib/utils';
 
 interface WatchItem {
   id: number;
   ticker: string;
   ticker_name: string;
+}
+
+interface TranslationItem {
+  ticker: string;
+  name_ko: string;
 }
 
 const ManualWatchList = () => {
@@ -17,6 +23,7 @@ const ManualWatchList = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [allTranslations, setAllTranslations] = useState<TranslationItem[]>([]);
 
   const fetchWatchList = React.useCallback(async () => {
     try {
@@ -28,6 +35,25 @@ const ManualWatchList = () => {
       setLoading(false);
     }
   }, []);
+
+  const fetchTranslations = useCallback(async () => {
+    try {
+      const res = await translationAPI.getAll();
+      setAllTranslations(res.data);
+    } catch (error) {
+      console.error('Failed to fetch translations for autocomplete:', error);
+    }
+  }, []);
+
+  const handleToggleAddForm = useCallback(() => {
+    setShowAddForm(prev => {
+      const next = !prev;
+      if (next) {
+        fetchTranslations();
+      }
+      return next;
+    });
+  }, [fetchTranslations]);
 
   const handleAdd = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,11 +73,27 @@ const ManualWatchList = () => {
       await fetchWatchList();
     } catch (error) {
       console.error('Failed to add ticker:', error);
-      alert('관심종목 등록에 실패했습니다. 올바른 티커인지 확인해 주세요.');
+      // 백엔드가 던져주는 세밀한 검증 에러 메시지(예: 영문 Ticker 규격 미달, 상장 미확인 등)를 사용자에게 즉시 전달!
+      alert(getErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
   }, [inputValue, fetchWatchList]);
+
+  const handleSelectSuggestion = useCallback(async (ticker: string, nameKo: string) => {
+    setIsSubmitting(true);
+    try {
+      await watchlistAPI.add(ticker, nameKo);
+      setInputValue('');
+      setShowAddForm(false);
+      await fetchWatchList();
+    } catch (error) {
+      console.error('Failed to add suggestion:', error);
+      alert(getErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [fetchWatchList]);
 
   const handleDelete = useCallback(async (id: number) => {
     try {
@@ -64,6 +106,15 @@ const ManualWatchList = () => {
 
   usePolling(fetchWatchList, 30000);
 
+  // 실시간 필터링 Suggestions 계산
+  const query = inputValue.trim().toLowerCase();
+  const suggestions = query
+    ? allTranslations.filter(t => 
+        t.ticker.toLowerCase().includes(query) || 
+        t.name_ko.toLowerCase().includes(query)
+      ).slice(0, 5)
+    : [];
+
   if (loading) return <div className="h-64 bg-slate-900/50 rounded-2xl animate-pulse"></div>;
 
   return (
@@ -74,7 +125,7 @@ const ManualWatchList = () => {
           <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">{"User's Watch List"}</h3>
         </div>
         <button 
-          onClick={() => setShowAddForm(prev => !prev)}
+          onClick={handleToggleAddForm}
           className={`p-1 hover:bg-slate-800 rounded transition-all duration-200 ${showAddForm ? 'text-blue-400 bg-slate-800/80 rotate-45' : 'text-slate-500'}`}
         >
           <Plus size={16} />
@@ -87,7 +138,7 @@ const ManualWatchList = () => {
             <label className="block text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
               Add Stock Manually
             </label>
-            <div className="flex gap-2">
+            <div className="flex gap-2 relative">
               <input
                 type="text"
                 required
@@ -103,6 +154,39 @@ const ManualWatchList = () => {
               >
                 {isSubmitting ? "Adding..." : "Add"}
               </button>
+
+              {/* 실시간 한글명/티커 자동 완성 오토컴플릿 드롭다운 (유저 캡처 구현) */}
+              {suggestions.length > 0 && (
+                <div className="absolute left-0 right-[78px] top-full mt-1.5 bg-slate-950/95 backdrop-blur-md border border-slate-850 rounded-xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-800/40">
+                  {suggestions.map((sug) => {
+                    // 유저 캡처 화면처럼 매칭된 검색어를 주황색/금색(amber)으로 하이라이팅하여 가독성 극대화!
+                    const nameParts = sug.name_ko.split(new RegExp(`(${query})`, 'gi'));
+                    return (
+                      <div
+                        key={sug.ticker}
+                        onClick={() => handleSelectSuggestion(sug.ticker, sug.name_ko)}
+                        className="px-3.5 py-2.5 hover:bg-slate-800/60 transition-colors cursor-pointer flex items-center justify-between text-xs group"
+                      >
+                        <div className="flex items-center space-x-3">
+                          <span className="font-mono font-bold text-slate-400 group-hover:text-slate-200 w-12">{sug.ticker}</span>
+                          <span className="text-slate-300 group-hover:text-white font-medium">
+                            {nameParts.map((part, i) => 
+                              part.toLowerCase() === query 
+                                ? <span key={i} className="text-amber-500 font-bold">{part}</span>
+                                : <span key={i}>{part}</span>
+                            )}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 group-hover:text-slate-400 font-medium">나스닥</span>
+                      </div>
+                    );
+                  })}
+                  <div className="px-3.5 py-1.5 bg-slate-950/40 text-[9px] text-slate-600 flex items-center justify-between">
+                    <span>ⓘ 사전 매핑된 한글명을 클릭하면 즉시 등록됩니다.</span>
+                    <span className="text-slate-700">StockAuto i18n</span>
+                  </div>
+                </div>
+              )}
             </div>
             <p className="text-[10px] text-slate-600">
               * 첫 단어는 티커로, 뒤의 단어는 이름으로 자동 처리됩니다 (예: <span className="text-slate-500 font-bold">TSLA Tesla</span>)
