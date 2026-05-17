@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback } from "react";
-import { Radar, RefreshCw, TrendingUp, Plus, Zap, Eye, Minus } from "lucide-react";
+import { Radar, RefreshCw, TrendingUp, Plus, Zap, Eye, Minus, Info } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { scannerAPI, isCancel } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
@@ -30,6 +30,23 @@ const SIGNAL_CONFIG = {
   WATCH:      { label: "WATCH",      color: "text-blue-400",  bg: "bg-blue-500/15 border-blue-500/30",  icon: Eye },
   NEUTRAL:    { label: "NEUTRAL",    color: "text-zinc-500",  bg: "bg-zinc-500/10 border-zinc-700/30",  icon: Minus },
 };
+
+// 프리미엄 마켓 스캐너 툴팁 설명 가이드 컴포넌트
+interface HeaderTooltipProps {
+  title: string;
+  desc: string;
+}
+function HeaderTooltip({ title, desc }: HeaderTooltipProps) {
+  return (
+    <span className="group/tip relative inline-flex items-center gap-1 cursor-help justify-center">
+      <span className="font-semibold text-zinc-500 group-hover/tip:text-zinc-300 transition-colors">{title}</span>
+      <Info size={11} className="text-zinc-600 group-hover/tip:text-zinc-400 transition-colors" />
+      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 scale-90 opacity-0 group-hover/tip:scale-100 group-hover/tip:opacity-100 transition-all duration-200 bg-zinc-950 text-zinc-300 text-[10px] font-normal leading-relaxed p-2.5 rounded-lg shadow-xl border border-zinc-850 z-50 text-left normal-case whitespace-normal">
+        {desc}
+      </span>
+    </span>
+  );
+}
 
 interface OverseasScannerProps {
   onAddToWatchlist?: (ticker: string, name: string) => void;
@@ -110,10 +127,18 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
                 <th className="py-4 px-5 font-semibold">Rank</th>
                 <th className="py-4 px-2 font-semibold">Ticker / Name</th>
                 <th className="py-4 px-4 font-semibold text-right">Price</th>
-                <th className="py-4 px-4 font-semibold text-center">Gap / RVOL</th>
-                <th className="py-4 px-4 font-semibold text-center">Trend / RS</th>
-                <th className="py-4 px-4 font-semibold text-center">Risk / Wick</th>
-                <th className="py-4 px-4 font-semibold text-center">Signal Score</th>
+                <th className="py-4 px-4 font-semibold text-center">
+                  <HeaderTooltip title="Gap / RVOL" desc="Gap: 전일 종가 대비 시가의 갭 상승비율. RVOL: 최근 20일 평균 대비 현재 거래량 비율 (2.0배 돌파 시 강세)." />
+                </th>
+                <th className="py-4 px-4 font-semibold text-center">
+                  <HeaderTooltip title="Trend / RS" desc="Trend: EMA(9/20일 이평선) 정배열 상승 상태. RS: QQQ 지수 대비 실시간 초과수익 성향 (시장 극복 지표)." />
+                </th>
+                <th className="py-4 px-4 font-semibold text-center">
+                  <HeaderTooltip title="Risk / Wick" desc="Risk: 고점 윗꼬리에 따른 물림 위험도. Wick: 1분봉 캔들의 윗꼬리 비율 (30% 이하인 꽉 찬 몸통이 안전)." />
+                </th>
+                <th className="py-4 px-4 font-semibold text-center">
+                  <HeaderTooltip title="Signal Score" desc="시장 추세, 거래량, 갭, 정배열, 윗꼬리, 뉴스 등 6대 핵심 지표를 종합 합산한 추천 점수 (80점 이상 STRONG BUY)." />
+                </th>
                 <th className="py-4 px-5 font-semibold text-right w-12"></th>
               </tr>
             </thead>
