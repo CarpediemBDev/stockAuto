@@ -41,7 +41,7 @@ function HeaderTooltip({ title, desc }: HeaderTooltipProps) {
     <span className="group/tip relative inline-flex items-center gap-1 cursor-help justify-center">
       <span className="font-semibold text-zinc-500 group-hover/tip:text-zinc-300 transition-colors">{title}</span>
       <Info size={11} className="text-zinc-600 group-hover/tip:text-zinc-400 transition-colors" />
-      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 scale-90 opacity-0 group-hover/tip:scale-100 group-hover/tip:opacity-100 transition-all duration-200 bg-zinc-950 text-zinc-300 text-[10px] font-normal leading-relaxed p-2.5 rounded-lg shadow-xl border border-zinc-850 z-50 text-left normal-case whitespace-normal">
+      <span className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 w-56 scale-90 opacity-0 group-hover/tip:scale-100 group-hover/tip:opacity-100 transition-all duration-200 bg-zinc-950 text-zinc-300 text-[10px] font-normal leading-relaxed p-2.5 rounded-lg shadow-xl border border-zinc-850 z-50 text-left normal-case whitespace-normal">
         {desc}
       </span>
     </span>
