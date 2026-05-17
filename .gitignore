@@ -30,15 +30,18 @@ frontend/.env*
 .gemini/
 **/__pycache__/
 
-# Core Strategy & Implementation Docs (Public vs Private)
+# Core Strategy & Implementation Docs (Whitelist ONLY specified documents)
 docs/*.md
 !docs/README.md
 !docs/SYSTEM_MANUAL.md
 !docs/REACT_GUIDE.md
 !docs/RULES.md
+!docs/task.md
+!docs/implementation_plan.md
 
-# Private workspace task logs and scratch logs
-docs/task.md
+# Private workspace logs
 docs/private_*
+
+
 
 
