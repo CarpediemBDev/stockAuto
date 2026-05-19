@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { Eye, Plus, Trash2 } from 'lucide-react';
-import { watchlistAPI, translationAPI } from '@/lib/api';
+import { watchlistAPI, translationAPI, scannerAPI } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
 import { getErrorMessage } from '@/lib/utils';
 
@@ -19,6 +19,7 @@ interface TranslationItem {
 
 const ManualWatchList = () => {
   const [items, setItems] = useState<WatchItem[]>([]);
+  const [signals, setSignals] = useState<any[]>([]); // 실시간 스캐너 시그널 저장
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -27,10 +28,15 @@ const ManualWatchList = () => {
 
   const fetchWatchList = React.useCallback(async () => {
     try {
-      const res = await watchlistAPI.getAll();
-      setItems(res.data);
+      // 관심종목과 실시간 스캔 데이터를 병렬로 로드
+      const [watchRes, scannerRes] = await Promise.all([
+        watchlistAPI.getAll(),
+        scannerAPI.getLatest()
+      ]);
+      setItems(watchRes.data);
+      setSignals(scannerRes.data || []);
     } catch (error) {
-      console.error('Failed to fetch watchlist:', error);
+      console.error('Failed to fetch watchlist or scanner signals:', error);
     } finally {
       setLoading(false);
     }
@@ -219,10 +225,21 @@ const ManualWatchList = () => {
                     </div>
                   </td>
                   <td className="px-2 py-4">
-                    {/* 수동 관심종목의 현재 점수 시각화 (예시 데이터) */}
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full max-w-[80px]">
-                      <div className="h-full bg-blue-500 rounded-full" style={{ width: '65%' }}></div>
-                    </div>
+                    {/* 수동 관심종목의 현재 점수 시각화 (스캐너 엔진 연동) */}
+                    {(() => {
+                      const sig = signals.find(s => s.ticker.toUpperCase() === item.ticker.toUpperCase());
+                      const score = sig ? sig.signal_score : 50; // 없을 경우 기본 50
+                      const scoreLabel = sig ? `${score}점` : '스캔 대기';
+                      const scoreColor = score >= 80 ? 'bg-rose-500' : score >= 60 ? 'bg-amber-500' : 'bg-blue-500';
+                      return (
+                        <div className="flex flex-col gap-1">
+                          <div className="w-full h-1.5 bg-slate-800 rounded-full max-w-[80px] overflow-hidden">
+                            <div className={`h-full ${scoreColor} rounded-full transition-all duration-500`} style={{ width: `${score}%` }}></div>
+                          </div>
+                          <span className="text-[10px] text-slate-500 font-mono font-semibold">{scoreLabel}</span>
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-5 py-4 text-right">
                     <button 

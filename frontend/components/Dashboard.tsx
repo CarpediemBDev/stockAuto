@@ -80,6 +80,8 @@ export function Dashboard() {
     }
   };
 
+  const [displayCurrency, setDisplayCurrency] = useState<"KRW" | "USD">("KRW");
+
   return (
     <div className={`min-h-screen transition-colors duration-700 ${isReal && isRealEnabled ? 'bg-red-950/20' : 'bg-black'}`}>
       <div className="max-w-[1600px] mx-auto p-6 pt-6">
@@ -105,14 +107,45 @@ export function Dashboard() {
           </div>
         )}
 
-        <AccountBalance />
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center gap-3">
+            <span className="bg-indigo-600 w-2.5 h-6 rounded-full"></span>
+            기본계좌 현황
+          </h1>
+          
+          {/* Premium Segmented Control for Currency Selector */}
+          <div className="flex bg-zinc-900 border border-zinc-800 p-0.5 rounded-lg shadow-inner">
+            <button
+              onClick={() => setDisplayCurrency("USD")}
+              className={`px-3 py-1 rounded-md text-xs font-bold transition-all duration-300 ${
+                displayCurrency === "USD"
+                  ? "bg-zinc-800 text-white shadow"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              $ USD
+            </button>
+            <button
+              onClick={() => setDisplayCurrency("KRW")}
+              className={`px-3 py-1 rounded-md text-xs font-bold transition-all duration-300 ${
+                displayCurrency === "KRW"
+                  ? "bg-zinc-800 text-white shadow"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              원 KRW
+            </button>
+          </div>
+        </div>
+
+        <AccountBalance displayCurrency={displayCurrency} />
         
         <div className="mb-10">
           <h2 className="text-xl font-bold text-slate-100 mb-4 flex items-center">
             <div className="w-1.5 h-6 bg-blue-500 rounded-full mr-3"></div>
             실시간 포트폴리오 (Portfolio)
           </h2>
-          <PortfolioView />
+          <PortfolioView displayCurrency={displayCurrency} />
         </div>
 
 

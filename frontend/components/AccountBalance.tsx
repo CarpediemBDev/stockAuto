@@ -12,9 +12,13 @@ interface BalanceData {
   cash_balance: number;
   stock_balance: number;
   profit_rate: number;
+  is_mock?: boolean;
+  provider?: string;
+  profit_loss?: number;
+  fx_rate?: number;
 }
 
-export function AccountBalance() {
+export function AccountBalance({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | "USD" }) {
   const [balance, setBalance] = useState<BalanceData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,15 +73,45 @@ export function AccountBalance() {
       {/* Total Asset */}
       <div className="bg-gradient-to-br from-indigo-900/40 to-purple-900/40 backdrop-blur-md border border-indigo-500/20 rounded-2xl p-6 shadow-xl relative overflow-hidden transition-transform hover:scale-[1.02] duration-300">
         <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-indigo-500/10 rounded-full blur-xl"></div>
-        <div className="flex items-center gap-3 mb-2">
-          <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-400">
-            <Wallet size={20} />
+        <div className="flex items-center justify-between mb-2 w-full">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-400">
+              <Wallet size={20} />
+            </div>
+            <h3 className="text-zinc-400 font-medium text-sm">Total Asset (총 자산)</h3>
           </div>
-          <h3 className="text-zinc-400 font-medium text-sm">Total Asset (총 자산)</h3>
+          <span className={cn(
+            "text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wider uppercase",
+            balance.is_mock === false
+              ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30 animate-pulse"
+              : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+          )}>
+            {balance.provider || (balance.is_mock === false ? "Live KIS" : "Simulated")}
+          </span>
         </div>
         <div className="text-3xl font-extrabold text-white tracking-tight">
-          ₩{balance.total_asset.toLocaleString()}
+          {displayCurrency === "KRW"
+            ? `${balance.total_asset.toLocaleString()}원`
+            : `$${(balance.fx_rate && balance.fx_rate > 0
+                ? balance.total_asset / balance.fx_rate
+                : balance.total_asset / 1350).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          }
         </div>
+        {balance.profit_loss !== undefined && (
+          <span className={`text-xs font-semibold mt-1.5 flex items-center gap-1 ${
+            balance.profit_loss >= 0 ? "text-emerald-400" : "text-rose-400"
+          }`}>
+            <span>{balance.profit_loss >= 0 ? "▲" : "▼"}</span>
+            <span>
+              {displayCurrency === "KRW"
+                ? `${balance.profit_loss >= 0 ? "+" : "-"}${Math.abs(balance.profit_loss).toLocaleString()}원`
+                : `${balance.profit_loss >= 0 ? "+" : "-"}$${(balance.fx_rate && balance.fx_rate > 0
+                    ? Math.abs(balance.profit_loss) / balance.fx_rate
+                    : Math.abs(balance.profit_loss) / 1350).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              }
+            </span>
+          </span>
+        )}
       </div>
 
       {/* Profit Rate */}
@@ -102,7 +136,12 @@ export function AccountBalance() {
           <h3 className="text-zinc-400 font-medium text-sm">Cash (예수금)</h3>
         </div>
         <div className="text-2xl font-bold text-white tracking-tight mt-1">
-          ₩{balance.cash_balance.toLocaleString()}
+          {displayCurrency === "KRW"
+            ? `${balance.cash_balance.toLocaleString()}원`
+            : `$${(balance.fx_rate && balance.fx_rate > 0
+                ? balance.cash_balance / balance.fx_rate
+                : balance.cash_balance / 1350).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          }
         </div>
       </div>
 
@@ -115,7 +154,12 @@ export function AccountBalance() {
           <h3 className="text-zinc-400 font-medium text-sm">Stock (주식 평가금)</h3>
         </div>
         <div className="text-2xl font-bold text-white tracking-tight mt-1">
-          ₩{balance.stock_balance.toLocaleString()}
+          {displayCurrency === "KRW"
+            ? `${balance.stock_balance.toLocaleString()}원`
+            : `$${(balance.fx_rate && balance.fx_rate > 0
+                ? balance.stock_balance / balance.fx_rate
+                : balance.stock_balance / 1350).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          }
         </div>
       </div>
     </div>

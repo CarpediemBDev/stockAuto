@@ -73,17 +73,89 @@ class KISClient:
         except Exception as e:
             print(f"[KIS API] Token request exception: {e}")
             return None
-
     def get_account_balance(self):
+        import yfinance as yf
+        import pandas as pd
+
+        # 실시간 환율을 조회하여 모든 분기(가상 및 KIS 실전)에서 환율을 공유합니다.
+        exchange_rate = 1350.0
+        try:
+            df_fx = yf.download("USDKRW=X", period="1d", progress=False)
+            if not df_fx.empty:
+                if isinstance(df_fx.columns, pd.MultiIndex):
+                    df_fx.columns = df_fx.columns.get_level_values(0)
+                exchange_rate = float(df_fx['Close'].iloc[-1])
+        except Exception as e:
+            print(f"[KIS API] FX rate download failed, using 1350.0: {e}")
+
         token = self.get_access_token()
         if not token or not self.app_key or self.app_key in ["YOUR_APP_KEY_HERE", "your_virtual_app_key_here"]:
-            # API 키가 없거나 토큰 발급 실패 시 UI 테스트를 위한 멋진 가짜(Mock) 데이터를 반환합니다.
-            print(f"[KIS API] Using mock data for account balance (Mode: {settings.TRADE_MODE})")
+            # API 키가 없거나 토큰 발급 실패 시 가상 모의 투자(Paper Trading) 데이터를 동적 계산하여 반환합니다.
+            print(f"[KIS API] Generating dynamic virtual balance (Mode: {settings.TRADE_MODE})")
+            from app.core.database import SessionLocal
+            from app.core.models import Holding
+
+            db = SessionLocal()
+            try:
+                holdings = db.query(Holding).all()
+            finally:
+                db.close()
+
+            initial_cash = 10000000.0  # 가상 시작 예수금: 1,000만 원 (10,000,000 KRW)
+
+            total_purchase_krw = 0.0
+            total_eval_krw = 0.0
+
+            if holdings:
+                tickers = [h.ticker for h in holdings]
+                try:
+                    data = yf.download(tickers, period="1d", interval="1m", group_by="ticker", progress=False)
+                    for h in holdings:
+                        current_price = h.avg_price  # 기본 폴백값
+                        try:
+                            if len(tickers) == 1:
+                                if isinstance(data.columns, pd.MultiIndex):
+                                    df = data[h.ticker].dropna() if h.ticker in data.columns.levels[0] else data.dropna()
+                                else:
+                                    df = data.dropna()
+                            else:
+                                if isinstance(data.columns, pd.MultiIndex):
+                                    df = data[h.ticker].dropna() if h.ticker in data.columns.levels[0] else pd.DataFrame()
+                                else:
+                                    df = data.dropna()
+                            
+                            if not df.empty:
+                                current_price = float(df['Close'].iloc[-1])
+                        except Exception as e:
+                            print(f"[Virtual Balance] Failed to parse price for {h.ticker}: {e}")
+
+                        # KRW 기준 누적금 계산
+                        total_purchase_krw += (h.avg_price * h.quantity) * exchange_rate
+                        total_eval_krw += (current_price * h.quantity) * exchange_rate
+                except Exception as e:
+                    print(f"[Virtual Balance] Failed to download prices: {e}")
+                    # 실패 시 평단가 기준으로 가치 환산
+                    for h in holdings:
+                        total_purchase_krw += (h.avg_price * h.quantity) * exchange_rate
+                        total_eval_krw += (h.avg_price * h.quantity) * exchange_rate
+
+            # 남은 예수금 = 1천만 원 - 주식 매입 원금 (원화)
+            cash_balance = max(0.0, initial_cash - total_purchase_krw)
+            stock_balance = total_eval_krw
+            total_asset = cash_balance + stock_balance
+            
+            # 수익률 = ((전체 자산 - 투자 원금) / 투자 원금) * 100
+            profit_rate = round(((total_asset - initial_cash) / initial_cash) * 100, 2)
+
             return {
-                "total_asset": 15420000,
-                "cash_balance": 4500000,
-                "stock_balance": 10920000,
-                "profit_rate": 8.45
+                "total_asset": int(total_asset),
+                "cash_balance": int(cash_balance),
+                "stock_balance": int(stock_balance),
+                "profit_rate": profit_rate,
+                "profit_loss": int(total_asset - initial_cash),
+                "fx_rate": exchange_rate,
+                "is_mock": True,
+                "provider": "Simulated"
             }
 
         account_prefix = self.account_no.split("-")[0] if "-" in self.account_no else self.account_no[:8]
@@ -117,11 +189,24 @@ class KISClient:
                 cash_balance = int(output2.get("prvs_rcdl_excc_amt", 0))
                 profit_rate = float(output2.get("evlu_pfls_rt", 0.0))
                 
+                try:
+                    profit_loss = int(output2.get("evlu_pfls_amt", 0))
+                except Exception:
+                    if profit_rate != -100.0:
+                        initial_capital = total_asset / (1.0 + profit_rate / 100.0)
+                        profit_loss = int(total_asset - initial_capital)
+                    else:
+                        profit_loss = -total_asset
+
                 return {
                     "total_asset": total_asset,
                     "cash_balance": cash_balance,
                     "stock_balance": stock_balance,
-                    "profit_rate": profit_rate
+                    "profit_rate": profit_rate,
+                    "profit_loss": profit_loss,
+                    "fx_rate": exchange_rate,
+                    "is_mock": not settings.IS_REAL,
+                    "provider": "KIS Live" if settings.IS_REAL else "KIS Mock"
                 }
             else:
                 print(f"[KIS API] Balance check failed: {res.text}")

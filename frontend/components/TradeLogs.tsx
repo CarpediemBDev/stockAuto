@@ -56,10 +56,10 @@ export function TradeLogs({ logs }: TradeLogsProps) {
                       {log.trade_type}
                     </span>
                   </td>
-                  <td className="p-4 text-zinc-300">₩{log.price.toLocaleString()}</td>
-                  <td className="p-4 text-zinc-300">{log.quantity}</td>
-                  <td className="p-4 text-right font-medium text-white">
-                    ₩{(log.price * log.quantity).toLocaleString()}
+                  <td className="p-4 text-zinc-300 font-mono">${log.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td className="p-4 text-zinc-300 font-mono">{log.quantity.toLocaleString()}주</td>
+                  <td className="p-4 text-right font-medium text-white font-mono">
+                    ${(log.price * log.quantity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
               ))

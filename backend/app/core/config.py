@@ -26,6 +26,7 @@ class Settings:
     시스템 전역 설정을 관리하는 클래스.
     환경별 .env 파일에서 설정값을 읽어오며, TRADE_MODE에 따라 API URL과 TR_ID를 자동으로 설정합니다.
     """
+    BROKER_PROVIDER = os.getenv("BROKER_PROVIDER", "KIS").upper()
     TRADE_MODE = os.getenv("TRADE_MODE", "VIRTUAL").upper()
     IS_REAL = TRADE_MODE == "REAL"
 
