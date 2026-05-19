@@ -16,18 +16,8 @@ class KISBroker(BaseBroker):
 
     def get_holdings(self) -> list:
         # KIS API를 통한 실시간 해외 보유 종목 조회
-        import yfinance as yf
-        import pandas as pd
-        
-        exchange_rate = 1350.0
-        try:
-            df_fx = yf.download("USDKRW=X", period="1d", progress=False)
-            if not df_fx.empty:
-                if isinstance(df_fx.columns, pd.MultiIndex):
-                    df_fx.columns = df_fx.columns.get_level_values(0)
-                exchange_rate = float(df_fx['Close'].iloc[-1])
-        except Exception as e:
-            print(f"[KISBroker] FX rate download failed, using 1350.0: {e}")
+        from app.bot.fx_cache import FXRateCache
+        exchange_rate = FXRateCache.get_rate()
 
         try:
             actual_holdings = self.client.get_overseas_present_balance()

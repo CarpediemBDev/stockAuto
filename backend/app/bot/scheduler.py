@@ -119,17 +119,8 @@ async def async_trading_loop():
                     cash_balance_krw = balance_data.get("cash_balance", 4500000.0)
                     
                     # 실시간 환율 조회 (기본 1350원 가정)
-                    exchange_rate = 1350.0
-                    try:
-                        import yfinance as yf
-                        import pandas as pd
-                        df_fx = await asyncio.to_thread(yf.download, "USDKRW=X", period="1d", progress=False)
-                        if not df_fx.empty:
-                            if isinstance(df_fx.columns, pd.MultiIndex):
-                                df_fx.columns = df_fx.columns.get_level_values(0)
-                            exchange_rate = float(df_fx['Close'].iloc[-1])
-                    except Exception as fx_err:
-                        print(f"[Scheduler] FX rate fetch error: {fx_err}")
+                    from app.bot.fx_cache import FXRateCache
+                    exchange_rate = FXRateCache.get_rate()
                     
                     # 자산을 달러로 환산
                     total_asset_usd = total_asset_krw / exchange_rate

@@ -74,19 +74,9 @@ class KISClient:
             print(f"[KIS API] Token request exception: {e}")
             return None
     def get_account_balance(self):
-        import yfinance as yf
-        import pandas as pd
-
+        from app.bot.fx_cache import FXRateCache
         # 실시간 환율을 조회하여 모든 분기(가상 및 KIS 실전)에서 환율을 공유합니다.
-        exchange_rate = 1350.0
-        try:
-            df_fx = yf.download("USDKRW=X", period="1d", progress=False)
-            if not df_fx.empty:
-                if isinstance(df_fx.columns, pd.MultiIndex):
-                    df_fx.columns = df_fx.columns.get_level_values(0)
-                exchange_rate = float(df_fx['Close'].iloc[-1])
-        except Exception as e:
-            print(f"[KIS API] FX rate download failed, using 1350.0: {e}")
+        exchange_rate = FXRateCache.get_rate()
 
         token = self.get_access_token()
         if not token or not self.app_key or self.app_key in ["YOUR_APP_KEY_HERE", "your_virtual_app_key_here"]:

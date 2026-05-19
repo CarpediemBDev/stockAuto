@@ -17,9 +17,14 @@ interface TranslationItem {
   name_ko: string;
 }
 
+interface ScannerSignal {
+  ticker: string;
+  signal_score: number;
+}
+
 const ManualWatchList = () => {
   const [items, setItems] = useState<WatchItem[]>([]);
-  const [signals, setSignals] = useState<any[]>([]); // 실시간 스캐너 시그널 저장
+  const [signals, setSignals] = useState<ScannerSignal[]>([]); // 실시간 스캐너 시그널 저장
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [inputValue, setInputValue] = useState('');

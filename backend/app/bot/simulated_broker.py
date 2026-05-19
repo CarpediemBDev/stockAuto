@@ -4,6 +4,7 @@ from app.bot.base_broker import BaseBroker
 from app.core.database import SessionLocal
 from app.core.models import Holding
 from app.core.config import settings
+from app.bot.fx_cache import FXRateCache
 
 class LocalSimulatedBroker(BaseBroker):
     """
@@ -19,17 +20,7 @@ class LocalSimulatedBroker(BaseBroker):
             db.close()
 
         initial_cash = 10000000.0  # 가상 시작 예수금: 1,000만 원 (10,000,000 KRW)
-        exchange_rate = 1350.0      # 기본 환율 폴백
-        
-        # 실시간 환율 조회
-        try:
-            df_fx = yf.download("USDKRW=X", period="1d", progress=False)
-            if not df_fx.empty:
-                if isinstance(df_fx.columns, pd.MultiIndex):
-                    df_fx.columns = df_fx.columns.get_level_values(0)
-                exchange_rate = float(df_fx['Close'].iloc[-1])
-        except Exception as e:
-            print(f"[SimulatedBroker] FX rate download failed, using 1350.0: {e}")
+        exchange_rate = FXRateCache.get_rate()
 
         total_purchase_krw = 0.0
         total_eval_krw = 0.0
@@ -95,15 +86,7 @@ class LocalSimulatedBroker(BaseBroker):
         if not holdings:
             return []
 
-        exchange_rate = 1350.0
-        try:
-            df_fx = yf.download("USDKRW=X", period="1d", progress=False)
-            if not df_fx.empty:
-                if isinstance(df_fx.columns, pd.MultiIndex):
-                    df_fx.columns = df_fx.columns.get_level_values(0)
-                exchange_rate = float(df_fx['Close'].iloc[-1])
-        except Exception as e:
-            print(f"[SimulatedBroker] FX rate download failed, using 1350.0: {e}")
+        exchange_rate = FXRateCache.get_rate()
 
         tickers = [h.ticker for h in holdings]
         try:
