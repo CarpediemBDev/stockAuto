@@ -45,5 +45,6 @@
 - [x] 도메인별 5대 격리 패키지 이식 (`translations`, `watchlist`, `scanner`, `bot`, `trades`)
 - [x] 통합 main.py 진입점 구축 및 Uvicorn 0.0.0.0 바인딩 포트 8000 재가동
 - [x] 설계도와 헌법 문서 (`RULES.md`, `SYSTEM_MANUAL.md`, `README.md`) 동기화 (Doc-Code Sync)
-- [ ] simulated 실전 투자 라이브 테스트 검증 및 트레일링 스탑 알고리즘 미세 튜닝
+- [x] **[전략조정] 초고수익 동전주(Penny Stock) 매매 허용을 위한 $5 최소 가격 필터 전면 제거 및 문서 동기화**
+- [/] simulated 실전 투자 라이브 테스트 검증 및 트레일링 스탑 알고리즘 미세 튜닝 (진행중: 초고수 단타 지표 거래대금 필터 및 ATR 동적 변동성 매매 알고리즘 구현 중)
 - [ ] 봇 자율 체결 알림 발송 및 텔레그램 메신저 브릿지 연동

@@ -68,12 +68,23 @@ async def async_trading_loop():
                     log_action(db, f"New Peak for {ticker}: ${current_price}", "SIGNAL")
                     db.commit()
 
+                # 3-1. ATR 기반 동적 익절/손절선 계산
+                atr = current_data.get('details', {}).get('atr', 0.0)
+                stop_loss_pct = 3.0 # 디폴트 3%
+                trailing_stop_pct = 2.0 # 디폴트 2%
+                
+                if atr > 0:
+                    atr_pct = (atr / current_price) * 100
+                    # 최소값 보장 및 ATR의 1.5배/1.0배 동적 반영하여 변동성 노이즈 털림 방지
+                    stop_loss_pct = max(3.0, atr_pct * 1.5)
+                    trailing_stop_pct = max(2.0, atr_pct * 1.0)
+
                 # 매도 조건 체크
                 sell_reason = None
-                if profit_rate <= -3.0:
-                    sell_reason = f"Stop Loss ({profit_rate:.1f}%)"
-                elif current_price <= h.highest_price * 0.98 and profit_rate > 0:
-                    sell_reason = f"Trailing Stop (-2% from peak ${h.highest_price})"
+                if profit_rate <= -stop_loss_pct:
+                    sell_reason = f"Dynamic Stop Loss ({profit_rate:.2f}% <= -{stop_loss_pct:.2f}%)"
+                elif current_price <= h.highest_price * (1 - trailing_stop_pct / 100) and profit_rate > 0:
+                    sell_reason = f"Dynamic Trailing Stop (-{trailing_stop_pct:.2f}% from peak ${h.highest_price})"
                 elif current_score < 40:
                     sell_reason = f"Signal Weakened ({current_score} pts)"
 

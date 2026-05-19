@@ -195,6 +195,30 @@ def calculate_ema(series: pd.Series, period: int) -> pd.Series:
     """EMA 계산"""
     return series.ewm(span=period, adjust=False).mean()
 
+def calculate_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """
+    ATR (Average True Range) 계산.
+    TR = max(High - Low, abs(High - Close_prev), abs(Low - Close_prev))
+    """
+    if df.empty or len(df) < period + 1: return pd.Series()
+    
+    temp_df = df.copy()
+    if isinstance(temp_df.columns, pd.MultiIndex):
+        temp_df.columns = temp_df.columns.get_level_values(0)
+        
+    high = temp_df['High']
+    low = temp_df['Low']
+    close_prev = temp_df['Close'].shift(1)
+    
+    tr1 = high - low
+    tr2 = (high - close_prev).abs()
+    tr3 = (low - close_prev).abs()
+    
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    # EMA 방식으로 ATR 스무딩
+    atr = tr.ewm(span=period, adjust=False).mean()
+    return atr
+
 # --- Seed Ticker Discovery (Modular) ---
 
 def fetch_db_watchlist() -> list:
@@ -341,8 +365,19 @@ async def scan_market_expert():
                     prev_close = float(df['Close'].iloc[-2])
                     open_price = float(df['Open'].iloc[-1])
                     
-                    # 1) 최소 가격 필터 ($5)
-                    if last_close < 5.0: continue
+                    # 1) 최소 가격 필터 제거 (1안: 초고수익 동전주 전략 반영)
+                    # if last_close < 5.0: continue
+                    
+                    # 1-1) 당일 누적 거래대금(Dollar Volume) 계산 (종가 * 거래량의 합)
+                    temp_df = df.copy()
+                    temp_df['Date'] = pd.to_datetime(temp_df.index).date
+                    today = temp_df['Date'].max()
+                    today_df = temp_df[temp_df['Date'] == today]
+                    today_dollar_volume = float((today_df['Close'] * today_df['Volume']).sum())
+                    
+                    # 초고수 단타 핵심: 거래대금 최소 $1,000,000(100만 달러) 이상인 주도주만 선별 (유동성 쓰레기 잡주 필터링)
+                    if today_dollar_volume < 1000000.0:
+                        continue
                     
                     # 2) 갭 상승 (%)
                     gap_pct = (open_price / prev_close - 1) * 100
@@ -385,7 +420,8 @@ async def scan_market_expert():
                             "rvol": rvol,
                             "dist_to_high": round(dist_to_high, 2),
                             "rs": round(relative_strength * 100, 2),
-                            "ema_aligned": is_aligned
+                            "ema_aligned": is_aligned,
+                            "dollar_volume": round(today_dollar_volume, 2)
                         })
                 except: continue
             await asyncio.sleep(0.3) # API 속도 조절
@@ -444,6 +480,10 @@ async def scan_market_expert():
                 elif sentiment == "BULLISH":
                     final_score += 5   # 상승장에서는 약간의 가점
                 
+                # ATR 계산 추가
+                atr_series = calculate_atr(df_1m, period=14)
+                latest_atr = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
+
                 final_results.append({
                     "ticker": ticker,
                     "name": get_ticker_name(ticker),
@@ -457,7 +497,9 @@ async def scan_market_expert():
                         "has_news": has_news,
                         "risk": risk_level,
                         "rs": cand['rs'],
-                        "ema_aligned": cand.get('ema_aligned', True)
+                        "ema_aligned": cand.get('ema_aligned', True),
+                        "atr": round(latest_atr, 4),
+                        "dollar_volume": cand.get('dollar_volume', 0.0)
                     }
                 })
             except: continue
