@@ -67,4 +67,5 @@
 - [x] **[스캐너 뉴스 병렬화]** `scanner.py` 내 Stage 2 후보군 25개에 대한 yfinance 뉴스 조회를 순차 방식에서 `asyncio.gather` 병렬 방식으로 전면 개편하여 분석 지연을 30초에서 1초 미만으로 단축 및 API 차단 완벽 방어
 - [x] **[관심종목 검증 속도화]** `watchlist/router.py` 관심종목 추가 시 티커 실존 여부 검증에 사용되던 극도로 무겁고 느린 `yf.Ticker.info` 호출을 초경량 `history(period="1d")` 호출로 변경하여 로딩 시간 5초에서 0.1초로 단축
 - [x] **[DB 번역 사전 인코딩 정화]** 이중 인코딩 및 NFD 조합형 한글로 오염된 번역 사전(`stock_translations`), 보유종목(`holdings`), 거래로그(`trade_logs`)의 모든 한글명을 표준 완성형(NFC) 한글로 원클릭 완전 복합 복원 및 정화 완료
+- [x] **[프론트엔드 UX 고도화]** `ManualWatchList.tsx` 내의 구식 브라우저 `alert` 팝업 경고창을 다른 컴포넌트들과 완벽히 조화되는 최신 `sonner` 토스트 알림으로 교체하여 디자인 일관성 200% 정규화
 

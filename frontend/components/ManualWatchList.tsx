@@ -5,6 +5,7 @@ import { Eye, Plus, Trash2 } from 'lucide-react';
 import { watchlistAPI, translationAPI, scannerAPI } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
 import { getErrorMessage } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface WatchItem {
   id: number;
@@ -82,10 +83,10 @@ const ManualWatchList = () => {
       setInputValue('');
       setShowAddForm(false);
       await fetchWatchList();
+      toast.success(`${tickerClean} (${nameClean})이(가) 관심종목에 추가되었습니다.`);
     } catch (error) {
       console.error('Failed to add ticker:', error);
-      // 백엔드가 던져주는 세밀한 검증 에러 메시지(예: 영문 Ticker 규격 미달, 상장 미확인 등)를 사용자에게 즉시 전달!
-      alert(getErrorMessage(error));
+      toast.error(getErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
@@ -98,9 +99,10 @@ const ManualWatchList = () => {
       setInputValue('');
       setShowAddForm(false);
       await fetchWatchList();
+      toast.success(`${ticker} (${nameKo})이(가) 관심종목에 추가되었습니다.`);
     } catch (error) {
       console.error('Failed to add suggestion:', error);
-      alert(getErrorMessage(error));
+      toast.error(getErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
@@ -110,8 +112,10 @@ const ManualWatchList = () => {
     try {
       await watchlistAPI.delete(id);
       await fetchWatchList();
+      toast.success("관심종목에서 성공적으로 제거되었습니다.");
     } catch (error) {
       console.error('Failed to delete ticker:', error);
+      toast.error(`삭제 실패: ${getErrorMessage(error)}`);
     }
   }, [fetchWatchList]);
 
