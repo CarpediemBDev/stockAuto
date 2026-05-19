@@ -68,8 +68,8 @@ def add_to_watchlist(item: WatchListCreate, db: Session = Depends(get_db)):
         # 실제 존재하는 주식인지 yfinance로 검증
         try:
             ticker_obj = yf.Ticker(ticker_upper)
-            info = ticker_obj.info
-            if not info or "symbol" not in info or not info.get("symbol"):
+            hist = ticker_obj.history(period="1d")
+            if hist.empty:
                 raise StockAutoException(code="TICKER_NOT_FOUND", message=f"나스닥 시장에 존재하지 않는 티커입니다: {ticker_upper}")
         except StockAutoException:
             raise

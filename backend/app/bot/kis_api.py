@@ -82,6 +82,8 @@ class KISClient:
         if not token or not self.app_key or self.app_key in ["YOUR_APP_KEY_HERE", "your_virtual_app_key_here"]:
             # API 키가 없거나 토큰 발급 실패 시 가상 모의 투자(Paper Trading) 데이터를 동적 계산하여 반환합니다.
             print(f"[KIS API] Generating dynamic virtual balance (Mode: {settings.TRADE_MODE})")
+            import yfinance as yf
+            import pandas as pd
             from app.core.database import SessionLocal
             from app.core.models import Holding
 
@@ -151,42 +153,39 @@ class KISClient:
         account_prefix = self.account_no.split("-")[0] if "-" in self.account_no else self.account_no[:8]
         account_suffix = self.account_no.split("-")[1] if "-" in self.account_no else self.account_no[8:]
 
-        headers = self._get_default_headers(settings.TR_ID_BALANCE)
+        # 미국 주식(해외 주식) 전용 잔고 조회로 대수선하여 국내 계좌 API 호출 오류 방지
+        headers = self._get_default_headers(settings.TR_ID_OVERSEAS_BALANCE)
         
         params = {
             "CANO": account_prefix,
             "ACNT_PRDT_CD": account_suffix,
-            "AFHR_FLPR_YN": "N",
-            "OFL_YN": "",
-            "INQR_DVSN": "02",
-            "UNPR_DVSN": "01",
-            "FUND_STTL_ICLD_YN": "N",
-            "FNCG_AMT_AUTO_RDPT_YN": "N",
-            "PRCS_DVSN": "00",
-            "CTX_AREA_FK100": "",
-            "CTX_AREA_NK100": ""
+            "WCRC_FRCR_DVSN_CD": "02", # 02: 외화 기준 (USD)
+            "NATN_CD": "840",          # 840: 미국
+            "TR_P_CS_DVSN_CD": "00",
+            "CTX_AREA_FK200": "",
+            "CTX_AREA_NK200": ""
         }
         
-        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
+        url = f"{self.base_url}/uapi/overseas-stock/v1/trading/inquire-present-balance"
         try:
             res = requests.get(url, headers=headers, params=params, timeout=10)
             if res.status_code == 200:
                 data = res.json()
-                output2 = data.get("output2", [{}])[0]
+                output2 = data.get("output2", {})
                 
-                total_asset = int(output2.get("tot_evlu_amt", 0))
-                stock_balance = int(output2.get("scts_evlu_amt", 0))
-                cash_balance = int(output2.get("prvs_rcdl_excc_amt", 0))
-                profit_rate = float(output2.get("evlu_pfls_rt", 0.0))
+                # KIS 해외 주식 잔고 API output2 매핑
+                total_asset = int(float(output2.get("tot_asst_amt", 0)))
+                usd_cash = float(output2.get("frcr_use_psbl_amt", 0))
+                cash_balance = int(usd_cash * exchange_rate)
+                stock_balance = int(float(output2.get("tot_evlu_amt", 0)))
+                
+                profit_rate = float(output2.get("tot_evlu_pfls_rt", 0.0))
                 
                 try:
-                    profit_loss = int(output2.get("evlu_pfls_amt", 0))
+                    profit_loss = int(float(output2.get("tot_evlu_pft_amt", 0)))
                 except Exception:
-                    if profit_rate != -100.0:
-                        initial_capital = total_asset / (1.0 + profit_rate / 100.0)
-                        profit_loss = int(total_asset - initial_capital)
-                    else:
-                        profit_loss = -total_asset
+                    initial_capital = total_asset / (1.0 + profit_rate / 100.0) if profit_rate != -100.0 else 0
+                    profit_loss = int(total_asset - initial_capital)
 
                 return {
                     "total_asset": total_asset,
@@ -199,10 +198,10 @@ class KISClient:
                     "provider": "KIS Live" if settings.IS_REAL else "KIS Mock"
                 }
             else:
-                print(f"[KIS API] Balance check failed: {res.text}")
+                print(f"[KIS API] Overseas balance check failed: {res.text}")
                 return {"total_asset": 0, "cash_balance": 0, "stock_balance": 0, "profit_rate": 0.0}
         except Exception as e:
-            print(f"[KIS API] Error checking balance: {e}")
+            print(f"[KIS API] Error checking overseas balance: {e}")
             return {"total_asset": 0, "cash_balance": 0, "stock_balance": 0, "profit_rate": 0.0}
 
     def buy_market_order(self, ticker: str, quantity: int):

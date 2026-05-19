@@ -73,5 +73,5 @@ app.include_router(translations_router, prefix="/api/v1/translations", tags=["Sy
 
 @app.get("/")
 def read_root():
-    # Trigger reload to refresh translation cache
+    # Trigger reload to refresh translation cache dynamically
     return {"message": "StockAuto FastAPI Server is running in Modular Layered Architecture!"}

@@ -442,6 +442,23 @@ async def scan_market_expert():
         data_1m = await asyncio.to_thread(yf.download, candidate_tickers, period="2d", interval="1m", group_by="ticker", progress=False)
         if data_1m.empty: return []
         
+        # 1. 후보 종목들의 뉴스를 병렬(Parallel)로 동시에 조회하여 병목 제거
+        async def fetch_news_parallel(ticker: str) -> bool:
+            try:
+                ticker_obj = yf.Ticker(ticker)
+                news = await asyncio.to_thread(lambda: ticker_obj.news)
+                for n in (news[:5] if news else []):
+                    title = n.get("title", "").lower()
+                    if any(kw in title for kw in CATALYST_KEYWORDS):
+                        return True
+            except Exception as news_err:
+                print(f"[Scanner News] Failed for {ticker}: {news_err}")
+            return False
+
+        news_tasks = [fetch_news_parallel(c['ticker']) for c in candidates]
+        news_results = await asyncio.gather(*news_tasks)
+        news_map = {c['ticker']: res for c, res in zip(candidates, news_results)}
+        
         for cand in candidates:
             ticker = cand['ticker']
             try:
@@ -452,18 +469,8 @@ async def scan_market_expert():
                     df_1m = data_1m.dropna()
                 if df_1m.empty: continue
                 
-                # 7) 뉴스 확인 (병목 방지를 위해 비동기 스레드에서 실행)
-                has_news = False
-                try:
-                    ticker_obj = yf.Ticker(ticker)
-                    news = await asyncio.to_thread(lambda: ticker_obj.news)
-                    for n in (news[:5] if news else []):
-                        title = n.get("title", "").lower()
-                        if any(kw in title for kw in CATALYST_KEYWORDS):
-                            has_news = True
-                            break
-                except Exception as news_err:
-                    print(f"News fetch failed for {ticker}: {news_err}")
+                # 병렬 조회 결과를 O(1) 해시 맵에서 가져오기
+                has_news = news_map.get(ticker, False)
                 
                 vwap = calculate_vwap(df_1m)
                 risk_level, wick_ratio = detect_fakeout_risk(df_1m)
