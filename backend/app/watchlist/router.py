@@ -30,30 +30,6 @@ class WatchListResponse(BaseModel):
 
 from app.translations.translator import Translator
 
-def _resolve_ticker_name(ticker: str, db: Session) -> str:
-    """Translator의 메모리 캐시를 확인하고, 없으면 yfinance를 조회한 뒤 DB와 캐시에 자동 동적 학습 적재합니다."""
-    ticker_upper = ticker.upper().strip()
-    
-    # 1. Translator 캐시에서 조회 (0ms)
-    korean_name = Translator.translate(ticker_upper, default_name=None)
-    if korean_name != ticker_upper:
-        return korean_name
-        
-    # 2. 캐시에 없으면 yfinance로 영문명을 조회하고, 이를 번역 사전에 자동 저장(자가학습)
-    try:
-        info = yf.Ticker(ticker).info
-        fetched_name = info.get("shortName", "") or info.get("longName", "") or ticker_upper
-        
-        # 새로운 티커와 정식 명칭을 번역 테이블에 등록 및 캐시 동기화
-        new_trans = models.StockTranslation(ticker=ticker_upper, name_ko=fetched_name)
-        db.add(new_trans)
-        db.commit()
-        Translator.update_cache_item(ticker_upper, fetched_name)
-        
-        return fetched_name
-    except Exception:
-        return ticker_upper
-
 from app.core.response import success_response
 from app.core.exceptions import StockAutoException
 

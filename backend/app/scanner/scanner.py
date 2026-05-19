@@ -1,6 +1,5 @@
 import yfinance as yf # pyrefly: ignore [missing-import]
 import pandas as pd
-from datetime import datetime, timedelta
 import asyncio
 import numpy as np
 import requests

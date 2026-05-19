@@ -2,8 +2,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.bot.kis_api import KISClient
 from app.core.database import SessionLocal
 from app.core.models import BotStatus, TradeLog, Holding, ActionLog
-from datetime import datetime, timedelta
-import pandas as pd
+from datetime import datetime
 import asyncio
 
 from app.scanner.scanner import scan_overseas_market
