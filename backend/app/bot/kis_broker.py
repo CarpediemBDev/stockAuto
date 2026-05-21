@@ -6,6 +6,9 @@ class KISBroker(BaseBroker):
     """
     한국투자증권(KIS) API 실연동 브로커 클라이언트.
     BaseBroker 인터페이스 규격에 맞춰 KIS API의 실제 응답 데이터를 매핑합니다.
+    
+    MOCK 모드: KIS 모의투자 서버(vts-openapi)에 주문 전송
+    REAL 모드: KIS 실전 서버(openapi)에 주문 전송
     """
     def __init__(self):
         self.client = KISClient()
@@ -39,3 +42,70 @@ class KISBroker(BaseBroker):
         except Exception as e:
             print(f"[KISBroker] Failed to fetch holdings from KIS: {e}")
             raise e
+
+    def buy_order(self, ticker: str, quantity: int, price: float) -> dict:
+        """
+        KIS API를 통한 해외주식 매수 주문.
+        KISClient.buy_overseas_order()를 호출하고 결과를 표준 형식으로 매핑합니다.
+        """
+        try:
+            res = self.client.buy_overseas_order(ticker, quantity, price=price)
+            if res and res.get("rt_cd") == "0":
+                order_no = res.get("output", {}).get("ODNO", "")
+                return {
+                    "success": True,
+                    "order_no": order_no,
+                    "filled_qty": quantity,  # 발주 수량 (체결 확인은 check_order_status로)
+                    "filled_price": price,
+                    "message": f"KIS buy order submitted: {ticker} x{quantity} at ${price:.2f}"
+                }
+            else:
+                msg = res.get("msg1", "Unknown error") if res else "No response"
+                return {
+                    "success": False,
+                    "order_no": "",
+                    "filled_qty": 0,
+                    "filled_price": 0,
+                    "message": f"KIS buy order rejected: {msg}"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "order_no": "",
+                "filled_qty": 0,
+                "filled_price": 0,
+                "message": f"KIS buy order exception: {str(e)}"
+            }
+
+    def sell_order(self, ticker: str, quantity: int, price: float) -> dict:
+        """
+        KIS API를 통한 해외주식 매도 주문.
+        """
+        try:
+            res = self.client.sell_overseas_order(ticker, quantity, price=price)
+            if res and res.get("rt_cd") == "0":
+                order_no = res.get("output", {}).get("ODNO", "")
+                return {
+                    "success": True,
+                    "order_no": order_no,
+                    "filled_qty": quantity,
+                    "filled_price": price,
+                    "message": f"KIS sell order submitted: {ticker} x{quantity} at ${price:.2f}"
+                }
+            else:
+                msg = res.get("msg1", "Unknown error") if res else "No response"
+                return {
+                    "success": False,
+                    "order_no": "",
+                    "filled_qty": 0,
+                    "filled_price": 0,
+                    "message": f"KIS sell order rejected: {msg}"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "order_no": "",
+                "filled_qty": 0,
+                "filled_price": 0,
+                "message": f"KIS sell order exception: {str(e)}"
+            }

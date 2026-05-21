@@ -58,8 +58,11 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
   const [isLoading, setIsLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
+  const [isSpinning, setIsSpinning] = useState(false);
+
   const fetchScan = useCallback(async (signal?: AbortSignal) => {
     setIsLoading(true);
+    setIsSpinning(true);
     try {
       const res = await scannerAPI.getLatest({ signal });
       setResults(res.data);
@@ -71,6 +74,7 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
       toast.error(`스캐너 데이터 갱신 실패: ${msg}`);
     } finally {
       setIsLoading(false);
+      setTimeout(() => setIsSpinning(false), 1000); // 최소 1초 동안 스핀 애니메이션 유지
     }
   }, []);
 
@@ -101,7 +105,7 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
             disabled={isLoading}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium transition-all active:scale-95 disabled:opacity-50"
           >
-            <RefreshCw size={13} className={cn(isLoading && "animate-spin")} />
+            <RefreshCw size={13} className={cn(isSpinning && "animate-spin text-indigo-400")} />
             {isLoading ? "Scanning..." : "Rescan"}
           </button>
         </div>

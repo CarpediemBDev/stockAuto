@@ -9,7 +9,7 @@ import { botAPI } from "@/lib/api";
 const navItems = [
   { href: "/", label: "📈 Auto Trading" },
   { href: "/scanner", label: "🔭 Market Scanner" },
-  { href: "/admin", label: "⚙️ System Admin" },
+  { href: "/admin/settings", label: "⚙️ System Admin" },
 ];
 
 export function NavBar() {
@@ -28,7 +28,12 @@ export function NavBar() {
   }, []);
 
   useEffect(() => {
-    fetchStatus();
+    // Wrap initial fetch in an async function to avoid ESLint warning
+    const initFetch = async () => {
+      await fetchStatus();
+    };
+    initFetch();
+    
     const interval = setInterval(fetchStatus, 8000); // 8초 주기로 전역 상태 동기화
     return () => clearInterval(interval);
   }, [fetchStatus]);
@@ -48,12 +53,16 @@ export function NavBar() {
             </div>
             <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider transition-colors duration-500 select-none ${
               tradeMode === 'REAL' 
-                ? (isRealEnabled ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30') 
-                : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                ? (isRealEnabled ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-red-900/40 text-red-300 border border-red-700/50') 
+                : tradeMode === 'MOCK'
+                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
             }`}>
               {tradeMode === 'REAL' 
-                ? (isRealEnabled ? 'PRO / LIVE' : 'PRO / REAL') 
-                : 'FREE / VIRTUAL'}
+                ? (isRealEnabled ? '🔥 PREMIUM / LIVE' : '🔒 PREMIUM / REAL (LOCKED)') 
+                : tradeMode === 'MOCK'
+                ? '⚡ PRO / MOCK'
+                : '📝 FREE / SIMULATED'}
             </span>
           </Link>
 

@@ -57,3 +57,18 @@ class StockTranslation(Base):
     id = Column(Integer, primary_key=True, index=True)
     ticker = Column(String, unique=True, index=True)
     name_ko = Column(String, nullable=False)
+
+class SystemSettings(Base):
+    """
+    어드민 설정 대시보드 전용 글로벌 시스템 설정 (Phase 10).
+    .env 파일보다 우선하여 런타임에 핫 리로드 적용됩니다.
+    """
+    __tablename__ = "system_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    trade_mode = Column(String, default="SIMULATED") # SIMULATED, MOCK, REAL
+    broker_provider = Column(String, default="KIS")
+    kis_app_key = Column(String, nullable=True)
+    kis_app_secret = Column(String, nullable=True)
+    kis_account_no = Column(String, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

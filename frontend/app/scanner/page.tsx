@@ -2,7 +2,8 @@
 
 import { OverseasScanner } from "@/components/OverseasScanner";
 import ManualWatchList from "@/components/ManualWatchList";
-import { Search, Zap, Eye } from "lucide-react";
+import BotSignals from "@/components/BotSignals";
+import { Search, Zap, Eye, Bot } from "lucide-react";
 import { useState, useCallback, useEffect } from "react";
 import { watchlistAPI } from "@/lib/api";
 
@@ -15,6 +16,7 @@ interface WatchItem {
 export default function ScannerPage() {
   const [watchlistKey, setWatchlistKey] = useState(0);
   const [watchlistTickers, setWatchlistTickers] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'user' | 'bot'>('user');
 
   useEffect(() => {
     let isMounted = true;
@@ -66,10 +68,6 @@ export default function ScannerPage() {
           </div>
           <div className="lg:col-span-4">
             <div className="sticky top-6 space-y-4">
-              <h2 className="text-xl font-bold text-slate-100 flex items-center">
-                <Eye size={20} className="text-blue-400 mr-3" />
-                {"사용자 관심종목 (User's View)"}
-              </h2>
               <ManualWatchList key={watchlistKey} />
             </div>
           </div>

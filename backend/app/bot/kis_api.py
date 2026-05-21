@@ -3,6 +3,9 @@ import json
 from datetime import datetime, timedelta
 from app.core.config import settings
 
+# 티커 → 거래소 코드 메모리 캐시 (서버 수명 동안 유지)
+_exchange_cache: dict[str, str] = {}
+
 class KISClient:
     def __init__(self):
         self.app_key = settings.KIS_APP_KEY
@@ -204,24 +207,41 @@ class KISClient:
             print(f"[KIS API] Error checking overseas balance: {e}")
             return {"total_asset": 0, "cash_balance": 0, "stock_balance": 0, "profit_rate": 0.0}
 
-    def buy_market_order(self, ticker: str, quantity: int):
-        # TODO: 실제 한국투자증권 매수 API 연동 구현
-        print(f"[KIS API] Buying {quantity} of {ticker} at market price")
-        return {"rt_cd": "0", "msg1": "Success", "price": 50000} # Mock response
-
-    def sell_market_order(self, ticker: str, quantity: int):
-        # TODO: 실제 한국투자증권 매도 API 연동 구현
-        print(f"[KIS API] Selling {quantity} of {ticker} at market price")
-        return {"rt_cd": "0", "msg1": "Success", "price": 50000} # Mock response
-
-    def _get_exchange_code(self, ticker: str):
+    def _get_exchange_code(self, ticker: str) -> str:
         """
-        심볼을 기반으로 KIS 해외 거래소 코드를 반환합니다.
-        기본적으로 NASD(나스닥)를 반환하며, 향후 DB나 메타데이터 기반으로 고도화 가능합니다.
+        yfinance의 fast_info를 활용하여 티커의 실제 거래소를 판별하고
+        KIS API 규격의 거래소 코드(NASD/NYSE/AMEX)로 매핑합니다.
+        결과는 메모리에 캐싱하여 동일 티커에 대한 반복 조회를 방지합니다.
         """
-        # TODO: 실제 종목별 거래소 매핑 로직 추가 필요
-        # 현재는 대부분의 기술주가 나스닥에 있으므로 NASD를 기본값으로 사용
-        return "NASD"
+        global _exchange_cache
+
+        if ticker in _exchange_cache:
+            return _exchange_cache[ticker]
+
+        # yfinance 거래소명 → KIS 거래소 코드 매핑 테이블
+        EXCHANGE_MAP = {
+            "NMS": "NASD",   # NASDAQ Global Select Market
+            "NGM": "NASD",   # NASDAQ Global Market
+            "NCM": "NASD",   # NASDAQ Capital Market
+            "NYQ": "NYSE",   # New York Stock Exchange
+            "NYS": "NYSE",   # NYSE 별칭
+            "ASE": "AMEX",   # American Stock Exchange (NYSE AMEX)
+            "PCX": "AMEX",   # NYSE Arca (AMEX 계열)
+            "BTS": "AMEX",   # BATS Exchange → AMEX로 분류
+        }
+
+        try:
+            import yfinance as yf
+            info = yf.Ticker(ticker).fast_info
+            raw_exchange = getattr(info, 'exchange', '') or ''
+            kis_code = EXCHANGE_MAP.get(raw_exchange, "NASD")
+            _exchange_cache[ticker] = kis_code
+            print(f"[KIS API] Exchange resolved: {ticker} → {raw_exchange} → {kis_code}")
+            return kis_code
+        except Exception as e:
+            print(f"[KIS API] Exchange lookup failed for {ticker}, defaulting to NASD: {e}")
+            _exchange_cache[ticker] = "NASD"
+            return "NASD"
 
     def buy_overseas_order(self, ticker: str, quantity: int, price: float = 0):
         """
@@ -290,6 +310,85 @@ class KISClient:
         except Exception as e:
             print(f"[KIS API] Order Exception: {e}")
             return None
+
+    def check_order_status(self, order_no: str, order_date: str = None) -> dict:
+        """
+        해외주식 주문 체결 상태를 조회합니다.
+        KIS 해외주식 주문체결내역 API (JTTT3010R / VTTS3010R)를 호출하여
+        주문번호(ODNO)에 해당하는 체결 상태(전량 체결 / 부분 체결 / 미체결)를 확인합니다.
+
+        반환:
+        {
+            "status": "FILLED" | "PARTIAL" | "UNFILLED" | "ERROR",
+            "filled_qty": int,     # 체결된 수량
+            "ordered_qty": int,    # 주문한 수량
+            "filled_price": float, # 체결 단가
+            "order_no": str
+        }
+        """
+        token = self.get_access_token()
+        if not token:
+            return {"status": "ERROR", "message": "No access token"}
+
+        account_prefix = self.account_no.split("-")[0] if "-" in self.account_no else self.account_no[:8]
+        account_suffix = self.account_no.split("-")[1] if "-" in self.account_no else self.account_no[8:]
+
+        # 실전/모의 TR_ID 분기
+        tr_id = "JTTT3010R" if settings.IS_REAL else "VTTS3010R"
+        headers = self._get_default_headers(tr_id)
+
+        # 조회 기간: 기본값은 오늘
+        from datetime import date
+        today = order_date or date.today().strftime("%Y%m%d")
+
+        params = {
+            "CANO": account_prefix,
+            "ACNT_PRDT_CD": account_suffix,
+            "PDNO": "",               # 전체 종목
+            "ORD_STRT_DT": today,
+            "ORD_END_DT": today,
+            "SLL_BUY_DVSN_CD": "00",  # 00: 전체
+            "CTX_AREA_FK200": "",
+            "CTX_AREA_NK200": ""
+        }
+
+        url = f"{self.base_url}/uapi/overseas-stock/v1/trading/inquire-ccnl"
+        try:
+            res = requests.get(url, headers=headers, params=params, timeout=10)
+            if res.status_code == 200:
+                data = res.json()
+                orders = data.get("output", [])
+
+                # 주문번호가 일치하는 건 찾기
+                for order in orders:
+                    if order.get("odno") == order_no:
+                        ordered_qty = int(float(order.get("ft_ord_qty", 0)))
+                        filled_qty = int(float(order.get("ft_ccld_qty", 0)))
+                        filled_price = float(order.get("ft_ccld_unpr3", 0))
+
+                        if filled_qty >= ordered_qty:
+                            status = "FILLED"
+                        elif filled_qty > 0:
+                            status = "PARTIAL"
+                        else:
+                            status = "UNFILLED"
+
+                        return {
+                            "status": status,
+                            "filled_qty": filled_qty,
+                            "ordered_qty": ordered_qty,
+                            "filled_price": filled_price,
+                            "order_no": order_no
+                        }
+
+                # 주문번호를 찾지 못한 경우
+                return {"status": "UNFILLED", "filled_qty": 0, "ordered_qty": 0, "filled_price": 0, "order_no": order_no}
+            else:
+                print(f"[KIS API] Order status check failed: {res.text}")
+                return {"status": "ERROR", "message": res.text}
+        except Exception as e:
+            print(f"[KIS API] Order status check exception: {e}")
+            return {"status": "ERROR", "message": str(e)}
 
     def get_overseas_ranking(self, exchange: str = "NAS", rank_type: str = "2"):
         """

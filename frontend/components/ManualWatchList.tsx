@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { Eye, Plus, Trash2 } from 'lucide-react';
+import { Eye, Plus, Trash2, Bot } from 'lucide-react';
+import BotSignals from '@/components/BotSignals';
 import { watchlistAPI, translationAPI, scannerAPI } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
 import { getErrorMessage } from '@/lib/utils';
@@ -31,6 +32,7 @@ const ManualWatchList = () => {
   const [inputValue, setInputValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allTranslations, setAllTranslations] = useState<TranslationItem[]>([]);
+  const [activeTab, setActiveTab] = useState<'user' | 'bot'>('user');
 
   const fetchWatchList = React.useCallback(async () => {
     try {
@@ -134,20 +136,42 @@ const ManualWatchList = () => {
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-      <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
-        <div className="flex items-center space-x-2">
-          <Eye size={16} className="text-blue-400" />
-          <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">{"User's Watch List"}</h3>
+      <div className="px-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+        <div className="flex items-center space-x-6 px-2">
+          <button 
+            onClick={() => setActiveTab('user')}
+            className={`flex items-center space-x-2 py-3.5 text-xs font-bold uppercase tracking-wider transition-all border-b-2 -mb-[1px] ${
+              activeTab === 'user' 
+                ? 'border-white text-white' 
+                : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-600'
+            }`}
+          >
+            <Eye size={16} className={activeTab === 'user' ? "text-blue-400" : ""} />
+            <span>MY LIST</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('bot')}
+            className={`flex items-center space-x-2 py-3.5 text-xs font-bold uppercase tracking-wider transition-all border-b-2 -mb-[1px] ${
+              activeTab === 'bot' 
+                ? 'border-white text-white' 
+                : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-600'
+            }`}
+          >
+            <Bot size={16} className={activeTab === 'bot' ? "text-amber-400" : ""} />
+            <span>BOT SIGNALS</span>
+          </button>
         </div>
-        <button 
-          onClick={handleToggleAddForm}
-          className={`p-1 hover:bg-slate-800 rounded transition-all duration-200 ${showAddForm ? 'text-blue-400 bg-slate-800/80 rotate-45' : 'text-slate-500'}`}
-        >
-          <Plus size={16} />
-        </button>
+        {activeTab === 'user' && (
+          <button 
+            onClick={handleToggleAddForm}
+            className={`p-1.5 hover:bg-slate-800 rounded transition-all duration-200 ${showAddForm ? 'text-blue-400 bg-slate-800/80 rotate-45' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            <Plus size={18} />
+          </button>
+        )}
       </div>
 
-      {showAddForm && (
+      {showAddForm && activeTab === 'user' && (
         <form onSubmit={handleAdd} className="p-4 border-b border-slate-800/60 bg-slate-950/40 transition-all duration-300">
           <div className="space-y-1.5">
             <label className="block text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
@@ -210,60 +234,81 @@ const ManualWatchList = () => {
         </form>
       )}
       
-      <div className="overflow-x-auto min-h-[300px]">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="text-slate-500 border-b border-slate-800/50 text-[11px] uppercase tracking-tighter">
-              <th className="px-5 py-3 font-semibold">Ticker</th>
-              <th className="px-2 py-3 font-semibold">Live Score</th>
-              <th className="px-5 py-3 font-semibold text-right">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800/30">
-            {items.length === 0 ? (
-              <tr>
-                <td colSpan={3} className="px-5 py-10 text-center text-slate-600 italic">No manual watch items.</td>
+      {activeTab === 'user' ? (
+        <div className="overflow-x-auto min-h-[300px]">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="text-slate-500 border-b border-slate-800/50 text-[10px] uppercase tracking-wider">
+                <th className="px-5 py-3 font-semibold">Ticker</th>
+                <th className="px-2 py-3 font-semibold">SIGNAL SCORE</th>
+                <th className="px-5 py-3 font-semibold text-right"></th>
               </tr>
-            ) : (
-              items.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-800/30 transition-colors group">
-                  <td className="px-5 py-4">
-                    <div className="flex flex-col">
-                      <span className="font-bold text-slate-200">{item.ticker}</span>
-                      <span className="text-[10px] text-slate-500">{item.ticker_name}</span>
-                    </div>
-                  </td>
-                  <td className="px-2 py-4">
-                    {/* 수동 관심종목의 현재 점수 시각화 (스캐너 엔진 연동) */}
-                    {(() => {
-                      const sig = signals.find(s => s.ticker.toUpperCase() === item.ticker.toUpperCase());
-                      const score = sig ? sig.signal_score : 50; // 없을 경우 기본 50
-                      const scoreLabel = sig ? `${score}점` : '스캔 대기';
-                      const scoreColor = score >= 80 ? 'bg-rose-500' : score >= 60 ? 'bg-amber-500' : 'bg-blue-500';
-                      return (
-                        <div className="flex flex-col gap-1">
-                          <div className="w-full h-1.5 bg-slate-800 rounded-full max-w-[80px] overflow-hidden">
-                            <div className={`h-full ${scoreColor} rounded-full transition-all duration-500`} style={{ width: `${score}%` }}></div>
-                          </div>
-                          <span className="text-[10px] text-slate-500 font-mono font-semibold">{scoreLabel}</span>
-                        </div>
-                      );
-                    })()}
-                  </td>
-                  <td className="px-5 py-4 text-right">
-                    <button 
-                      onClick={() => handleDelete(item.id)}
-                      className="text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+            </thead>
+            <tbody className="divide-y divide-slate-800/30">
+              {items.length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="px-5 py-12 text-center text-slate-500 text-xs">
+                    <p className="mb-1">관심종목이 비어있습니다.</p>
+                    <p className="text-[10px] text-slate-600">위의 + 버튼을 눌러 티커를 추가하세요.</p>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                items.map((item) => (
+                  <tr key={item.id} className="hover:bg-slate-800/20 transition-colors group">
+                    <td className="px-5 py-3">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-slate-200 text-sm tracking-tight">{item.ticker}</span>
+                        <span className="text-[10px] text-slate-500 truncate max-w-[120px]">{item.ticker_name}</span>
+                      </div>
+                    </td>
+                    <td className="px-2 py-3">
+                      {/* Premium Score Visualization */}
+                      {(() => {
+                        const sig = signals.find(s => s.ticker.toUpperCase() === item.ticker.toUpperCase());
+                        if (sig) {
+                          const score = sig.signal_score;
+                          const scoreColor = score >= 80 ? 'text-rose-500 bg-rose-500/10 border-rose-500/20' : 
+                                            score >= 60 ? 'text-amber-500 bg-amber-500/10 border-amber-500/20' : 
+                                            'text-blue-400 bg-blue-500/10 border-blue-500/20';
+                          const barColor = score >= 80 ? 'bg-rose-500' : score >= 60 ? 'bg-amber-500' : 'bg-blue-400';
+                          return (
+                            <div className="flex items-center space-x-3">
+                              <div className={`w-8 h-8 rounded-full border flex items-center justify-center text-[11px] font-black ${scoreColor}`}>
+                                {score}
+                              </div>
+                              <div className="flex-1 max-w-[50px] h-1.5 bg-slate-800 rounded-full overflow-hidden hidden sm:block">
+                                <div className={`h-full ${barColor} rounded-full`} style={{ width: `${score}%` }}></div>
+                              </div>
+                            </div>
+                          );
+                        } else {
+                          return (
+                            <div className="flex items-center space-x-2 py-1.5">
+                              <div className="w-1.5 h-1.5 rounded-full bg-slate-600 animate-pulse"></div>
+                              <span className="text-[10px] text-slate-500 font-medium tracking-tight">대기중</span>
+                            </div>
+                          );
+                        }
+                      })()}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <button 
+                        onClick={() => handleDelete(item.id)}
+                        className="p-1.5 text-slate-600 hover:text-rose-400 hover:bg-rose-400/10 rounded-md transition-all opacity-40 group-hover:opacity-100 cursor-pointer"
+                        title="관심종목 삭제"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <BotSignals hideHeader={true} />
+      )}
     </div>
   );
 };

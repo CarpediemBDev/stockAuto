@@ -16,8 +16,11 @@ interface Signal {
   rsi?: number;
   rvol?: number;
 }
+interface BotSignalsProps {
+  hideHeader?: boolean;
+}
 
-const BotSignals = () => {
+const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -40,14 +43,16 @@ const BotSignals = () => {
   if (loading) return <div className="h-64 bg-slate-900/50 rounded-2xl animate-pulse"></div>;
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-      <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
-        <div className="flex items-center space-x-2">
-          <Zap size={16} className="text-amber-400" />
-          <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">{"Bot's Detected Signals"}</h3>
+    <div className={hideHeader ? "" : "bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden"}>
+      {!hideHeader && (
+        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+          <div className="flex items-center space-x-2">
+            <Zap size={16} className="text-amber-400" />
+            <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">{"Bot's Detected Signals"}</h3>
+          </div>
+          <span className="text-[10px] text-slate-500 font-mono italic text-rose-400 animate-pulse">LIVE SCANNING...</span>
         </div>
-        <span className="text-[10px] text-slate-500 font-mono italic text-rose-400 animate-pulse">LIVE SCANNING...</span>
-      </div>
+      )}
       
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">

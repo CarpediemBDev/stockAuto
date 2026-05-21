@@ -1,5 +1,6 @@
 import yfinance as yf
 import pandas as pd
+from datetime import datetime
 from app.bot.base_broker import BaseBroker
 from app.core.database import SessionLocal
 from app.core.models import Holding
@@ -8,8 +9,11 @@ from app.bot.fx_cache import FXRateCache
 
 class LocalSimulatedBroker(BaseBroker):
     """
-    API 연동이 없을 때 로컬 SQLite 데이터베이스와 yfinance를 활용하여
+    증권사 API 연동 없이 로컬 SQLite 데이터베이스와 yfinance를 활용하여
     가상으로 작동하는 모의투자(Paper Trading) 브로커 클라이언트.
+    
+    buy_order / sell_order는 yfinance 실시간 시세를 기반으로
+    DB에 가상 체결 기록을 생성합니다.
     """
 
     def get_account_balance(self) -> dict:
@@ -141,3 +145,51 @@ class LocalSimulatedBroker(BaseBroker):
                     "provider": "Simulated"
                 })
             return result
+
+    def _get_live_price(self, ticker: str) -> float | None:
+        """yfinance에서 단일 종목의 최신 가격을 조회합니다."""
+        try:
+            data = yf.download(ticker, period="1d", interval="1m", progress=False)
+            if not data.empty:
+                if isinstance(data.columns, pd.MultiIndex):
+                    data.columns = data.columns.get_level_values(0)
+                return float(data['Close'].iloc[-1])
+        except Exception as e:
+            print(f"[SimulatedBroker] Failed to fetch live price for {ticker}: {e}")
+        return None
+
+    def buy_order(self, ticker: str, quantity: int, price: float) -> dict:
+        """
+        가상 매수 체결: yfinance 실시간 시세를 기반으로 즉시 체결을 시뮬레이션합니다.
+        실제 증권사 API를 호출하지 않고 DB에 직접 Holding/TradeLog를 기록합니다.
+        """
+        # 실시간 시세 확인 (가능하면 실시간 가격 사용, 불가시 전달된 price 사용)
+        live_price = self._get_live_price(ticker)
+        fill_price = live_price if live_price else price
+
+        order_no = f"SIM-BUY-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        return {
+            "success": True,
+            "order_no": order_no,
+            "filled_qty": quantity,
+            "filled_price": fill_price,
+            "message": f"Simulated buy: {quantity} shares of {ticker} at ${fill_price:.2f}"
+        }
+
+    def sell_order(self, ticker: str, quantity: int, price: float) -> dict:
+        """
+        가상 매도 체결: yfinance 실시간 시세를 기반으로 즉시 체결을 시뮬레이션합니다.
+        """
+        live_price = self._get_live_price(ticker)
+        fill_price = live_price if live_price else price
+
+        order_no = f"SIM-SELL-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        return {
+            "success": True,
+            "order_no": order_no,
+            "filled_qty": quantity,
+            "filled_price": fill_price,
+            "message": f"Simulated sell: {quantity} shares of {ticker} at ${fill_price:.2f}"
+        }
