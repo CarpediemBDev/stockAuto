@@ -7,11 +7,28 @@ from app.core.config import settings
 _exchange_cache: dict[str, str] = {}
 
 class KISClient:
-    def __init__(self):
-        self.app_key = settings.KIS_APP_KEY
-        self.app_secret = settings.KIS_APP_SECRET
-        self.account_no = settings.KIS_ACCOUNT_NO
-        self.base_url = settings.KIS_BASE_URL
+    def __init__(self, user_settings=None):
+        if user_settings:
+            self.user_id = user_settings.user_id
+            self.app_key = user_settings.kis_app_key
+            self.app_secret = user_settings.kis_app_secret
+            self.account_no = user_settings.kis_account_no
+            self.trade_mode = user_settings.trade_mode
+            self.is_real = user_settings.trade_mode == "REAL"
+            
+            if self.is_real:
+                self.base_url = "https://openapi.koreainvestment.com:9443"
+            else:
+                self.base_url = "https://vts-openapi.koreainvestment.com:29443"
+        else:
+            self.user_id = None
+            self.app_key = settings.KIS_APP_KEY
+            self.app_secret = settings.KIS_APP_SECRET
+            self.account_no = settings.KIS_ACCOUNT_NO
+            self.base_url = settings.KIS_BASE_URL
+            self.trade_mode = settings.TRADE_MODE
+            self.is_real = settings.IS_REAL
+
         self.token = None
         self.token_expired_at = None
 
@@ -76,6 +93,7 @@ class KISClient:
         except Exception as e:
             print(f"[KIS API] Token request exception: {e}")
             return None
+
     def get_account_balance(self):
         from app.bot.fx_cache import FXRateCache
         # 실시간 환율을 조회하여 모든 분기(가상 및 KIS 실전)에서 환율을 공유합니다.
@@ -84,7 +102,7 @@ class KISClient:
         token = self.get_access_token()
         if not token or not self.app_key or self.app_key in ["YOUR_APP_KEY_HERE", "your_virtual_app_key_here"]:
             # API 키가 없거나 토큰 발급 실패 시 가상 모의 투자(Paper Trading) 데이터를 동적 계산하여 반환합니다.
-            print(f"[KIS API] Generating dynamic virtual balance (Mode: {settings.TRADE_MODE})")
+            print(f"[KIS API] Generating dynamic virtual balance (Mode: {self.trade_mode})")
             import yfinance as yf
             import pandas as pd
             from app.core.database import SessionLocal
@@ -92,7 +110,11 @@ class KISClient:
 
             db = SessionLocal()
             try:
-                holdings = db.query(Holding).all()
+                # 멀티유저 대응: user_id가 존재하면 해당 유저의 보유종목만 조회
+                if self.user_id:
+                    holdings = db.query(Holding).filter(Holding.user_id == self.user_id).all()
+                else:
+                    holdings = db.query(Holding).all()
             finally:
                 db.close()
 
@@ -156,8 +178,9 @@ class KISClient:
         account_prefix = self.account_no.split("-")[0] if "-" in self.account_no else self.account_no[:8]
         account_suffix = self.account_no.split("-")[1] if "-" in self.account_no else self.account_no[8:]
 
-        # 미국 주식(해외 주식) 전용 잔고 조회로 대수선하여 국내 계좌 API 호출 오류 방지
-        headers = self._get_default_headers(settings.TR_ID_OVERSEAS_BALANCE)
+        # 미국 주식(해외 주식) 전용 잔고 조회
+        tr_id_balance = "CTRP6504R" if self.is_real else "VTRP6504R"
+        headers = self._get_default_headers(tr_id_balance)
         
         params = {
             "CANO": account_prefix,
@@ -197,8 +220,8 @@ class KISClient:
                     "profit_rate": profit_rate,
                     "profit_loss": profit_loss,
                     "fx_rate": exchange_rate,
-                    "is_mock": not settings.IS_REAL,
-                    "provider": "KIS Live" if settings.IS_REAL else "KIS Mock"
+                    "is_mock": not self.is_real,
+                    "provider": "KIS Live" if self.is_real else "KIS Mock"
                 }
             else:
                 print(f"[KIS API] Overseas balance check failed: {res.text}")
@@ -211,23 +234,21 @@ class KISClient:
         """
         yfinance의 fast_info를 활용하여 티커의 실제 거래소를 판별하고
         KIS API 규격의 거래소 코드(NASD/NYSE/AMEX)로 매핑합니다.
-        결과는 메모리에 캐싱하여 동일 티커에 대한 반복 조회를 방지합니다.
         """
         global _exchange_cache
 
         if ticker in _exchange_cache:
             return _exchange_cache[ticker]
 
-        # yfinance 거래소명 → KIS 거래소 코드 매핑 테이블
         EXCHANGE_MAP = {
-            "NMS": "NASD",   # NASDAQ Global Select Market
-            "NGM": "NASD",   # NASDAQ Global Market
-            "NCM": "NASD",   # NASDAQ Capital Market
-            "NYQ": "NYSE",   # New York Stock Exchange
-            "NYS": "NYSE",   # NYSE 별칭
-            "ASE": "AMEX",   # American Stock Exchange (NYSE AMEX)
-            "PCX": "AMEX",   # NYSE Arca (AMEX 계열)
-            "BTS": "AMEX",   # BATS Exchange → AMEX로 분류
+            "NMS": "NASD",
+            "NGM": "NASD",
+            "NCM": "NASD",
+            "NYQ": "NYSE",
+            "NYS": "NYSE",
+            "ASE": "AMEX",
+            "PCX": "AMEX",
+            "BTS": "AMEX",
         }
 
         try:
@@ -245,7 +266,7 @@ class KISClient:
 
     def buy_overseas_order(self, ticker: str, quantity: int, price: float = 0):
         """
-        해외주식 매수 주문 (Hashkey 보안 인증 적용)
+        해외주식 매수 주문
         """
         token = self.get_access_token()
         if not token: return None
@@ -261,10 +282,11 @@ class KISClient:
             "ORD_QTY": str(quantity),
             "OVRS_ORD_UNPR": f"{price:.2f}",
             "ORD_SVR_DVSN_CD": "0",
-            "ORD_DVSN": "00" # 00: 지정가
+            "ORD_DVSN": "00"
         }
 
-        headers = self._get_default_headers(settings.TR_ID_BUY_OVERSEAS, self.get_hashkey(body))
+        tr_id = "JTTT1002U" if self.is_real else "VTTT1002U"
+        headers = self._get_default_headers(tr_id, self.get_hashkey(body))
 
         url = f"{self.base_url}/uapi/overseas-stock/v1/trading/order"
         try:
@@ -279,7 +301,7 @@ class KISClient:
 
     def sell_overseas_order(self, ticker: str, quantity: int, price: float = 0):
         """
-        해외주식 매도 주문 (Hashkey 보안 인증 적용)
+        해외주식 매도 주문
         """
         token = self.get_access_token()
         if not token: return None
@@ -295,10 +317,11 @@ class KISClient:
             "ORD_QTY": str(quantity),
             "OVRS_ORD_UNPR": f"{price:.2f}",
             "ORD_SVR_DVSN_CD": "0",
-            "ORD_DVSN": "00" # 00: 지정가
+            "ORD_DVSN": "00"
         }
 
-        headers = self._get_default_headers(settings.TR_ID_SELL_OVERSEAS, self.get_hashkey(body))
+        tr_id = "JTTT1001U" if self.is_real else "VTTT1001U"
+        headers = self._get_default_headers(tr_id, self.get_hashkey(body))
 
         url = f"{self.base_url}/uapi/overseas-stock/v1/trading/order"
         try:
@@ -314,17 +337,6 @@ class KISClient:
     def check_order_status(self, order_no: str, order_date: str = None) -> dict:
         """
         해외주식 주문 체결 상태를 조회합니다.
-        KIS 해외주식 주문체결내역 API (JTTT3010R / VTTS3010R)를 호출하여
-        주문번호(ODNO)에 해당하는 체결 상태(전량 체결 / 부분 체결 / 미체결)를 확인합니다.
-
-        반환:
-        {
-            "status": "FILLED" | "PARTIAL" | "UNFILLED" | "ERROR",
-            "filled_qty": int,     # 체결된 수량
-            "ordered_qty": int,    # 주문한 수량
-            "filled_price": float, # 체결 단가
-            "order_no": str
-        }
         """
         token = self.get_access_token()
         if not token:
@@ -333,21 +345,19 @@ class KISClient:
         account_prefix = self.account_no.split("-")[0] if "-" in self.account_no else self.account_no[:8]
         account_suffix = self.account_no.split("-")[1] if "-" in self.account_no else self.account_no[8:]
 
-        # 실전/모의 TR_ID 분기
-        tr_id = "JTTT3010R" if settings.IS_REAL else "VTTS3010R"
+        tr_id = "JTTT3010R" if self.is_real else "VTTS3010R"
         headers = self._get_default_headers(tr_id)
 
-        # 조회 기간: 기본값은 오늘
         from datetime import date
         today = order_date or date.today().strftime("%Y%m%d")
 
         params = {
             "CANO": account_prefix,
             "ACNT_PRDT_CD": account_suffix,
-            "PDNO": "",               # 전체 종목
+            "PDNO": "",
             "ORD_STRT_DT": today,
             "ORD_END_DT": today,
-            "SLL_BUY_DVSN_CD": "00",  # 00: 전체
+            "SLL_BUY_DVSN_CD": "00",
             "CTX_AREA_FK200": "",
             "CTX_AREA_NK200": ""
         }
@@ -359,7 +369,6 @@ class KISClient:
                 data = res.json()
                 orders = data.get("output", [])
 
-                # 주문번호가 일치하는 건 찾기
                 for order in orders:
                     if order.get("odno") == order_no:
                         ordered_qty = int(float(order.get("ft_ord_qty", 0)))
@@ -381,7 +390,6 @@ class KISClient:
                             "order_no": order_no
                         }
 
-                # 주문번호를 찾지 못한 경우
                 return {"status": "UNFILLED", "filled_qty": 0, "ordered_qty": 0, "filled_price": 0, "order_no": order_no}
             else:
                 print(f"[KIS API] Order status check failed: {res.text}")
@@ -422,13 +430,14 @@ class KISClient:
         account_prefix = self.account_no.split("-")[0] if "-" in self.account_no else self.account_no[:8]
         account_suffix = self.account_no.split("-")[1] if "-" in self.account_no else self.account_no[8:]
 
-        headers = self._get_default_headers(settings.TR_ID_OVERSEAS_BALANCE)
+        tr_id = "CTRP6504R" if self.is_real else "VTRP6504R"
+        headers = self._get_default_headers(tr_id)
         
         params = {
             "CANO": account_prefix,
             "ACNT_PRDT_CD": account_suffix,
-            "WCRC_FRCR_DVSN_CD": "02", # 01: 원화, 02: 외화
-            "NATN_CD": "840", # 840: 미국
+            "WCRC_FRCR_DVSN_CD": "02",
+            "NATN_CD": "840",
             "TR_P_CS_DVSN_CD": "00",
             "CTX_AREA_FK200": "",
             "CTX_AREA_NK200": ""

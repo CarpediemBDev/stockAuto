@@ -15,11 +15,16 @@ class LocalSimulatedBroker(BaseBroker):
     buy_order / sell_order는 yfinance 실시간 시세를 기반으로
     DB에 가상 체결 기록을 생성합니다.
     """
+    def __init__(self, user_id=None):
+        self.user_id = user_id
 
     def get_account_balance(self) -> dict:
         db = SessionLocal()
         try:
-            holdings = db.query(Holding).all()
+            if self.user_id:
+                holdings = db.query(Holding).filter(Holding.user_id == self.user_id).all()
+            else:
+                holdings = db.query(Holding).all()
         finally:
             db.close()
 
@@ -83,7 +88,10 @@ class LocalSimulatedBroker(BaseBroker):
     def get_holdings(self) -> list:
         db = SessionLocal()
         try:
-            holdings = db.query(Holding).all()
+            if self.user_id:
+                holdings = db.query(Holding).filter(Holding.user_id == self.user_id).all()
+            else:
+                holdings = db.query(Holding).all()
         finally:
             db.close()
 

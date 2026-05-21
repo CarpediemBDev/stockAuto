@@ -2,10 +2,9 @@
 
 import { OverseasScanner } from "@/components/OverseasScanner";
 import ManualWatchList from "@/components/ManualWatchList";
-import BotSignals from "@/components/BotSignals";
-import { Search, Zap, Eye, Bot } from "lucide-react";
 import { useState, useCallback, useEffect } from "react";
 import { watchlistAPI } from "@/lib/api";
+import { useRouter } from "next/navigation";
 
 interface WatchItem {
   id: number;
@@ -14,11 +13,24 @@ interface WatchItem {
 }
 
 export default function ScannerPage() {
+  const router = useRouter();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [watchlistKey, setWatchlistKey] = useState(0);
   const [watchlistTickers, setWatchlistTickers] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'user' | 'bot'>('user');
+
+  // Auth Guard
+  useEffect(() => {
+    const token = localStorage.getItem("stockauto_token");
+    if (!token) {
+      router.push("/login");
+    } else {
+      setIsAuthenticated(true);
+    }
+  }, [router]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+    
     let isMounted = true;
 
     async function loadWatchlist() {
@@ -37,7 +49,7 @@ export default function ScannerPage() {
     return () => {
       isMounted = false;
     };
-  }, [watchlistKey]);
+  }, [watchlistKey, isAuthenticated]);
 
   const handleAddToWatchlist = useCallback(async (ticker: string, name: string) => {
     try {
@@ -45,9 +57,16 @@ export default function ScannerPage() {
       setWatchlistKey(prev => prev + 1);
     } catch (error) {
       console.error("Failed to add to watchlist", error);
-      alert("관심종목 추가에 실패했습니다.");
     }
   }, []);
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] bg-black flex items-center justify-center text-zinc-400 text-sm">
+        인증 정보 확인 중...
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-black p-6 pt-12">

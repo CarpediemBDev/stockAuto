@@ -10,8 +10,9 @@ class KISBroker(BaseBroker):
     MOCK 모드: KIS 모의투자 서버(vts-openapi)에 주문 전송
     REAL 모드: KIS 실전 서버(openapi)에 주문 전송
     """
-    def __init__(self):
-        self.client = KISClient()
+    def __init__(self, user_settings=None):
+        self.user_settings = user_settings
+        self.client = KISClient(user_settings)
 
     def get_account_balance(self) -> dict:
         # KISClient의 계좌 조회 실행 (내부에 이미 dynamic provider가 구현됨)
@@ -35,8 +36,8 @@ class KISBroker(BaseBroker):
                     "highest_price": max(item["buy_price"], item["current_price"]),
                     "current_price": item["current_price"],
                     "fx_rate": exchange_rate,
-                    "is_mock": not settings.IS_REAL,
-                    "provider": "KIS Live" if settings.IS_REAL else "KIS Mock"
+                    "is_mock": not (self.user_settings.trade_mode == "REAL" if self.user_settings else settings.IS_REAL),
+                    "provider": "KIS Live" if (self.user_settings.trade_mode == "REAL" if self.user_settings else settings.IS_REAL) else "KIS Mock"
                 })
             return result
         except Exception as e:

@@ -517,3 +517,90 @@ async def scan_market_expert():
 
 async def scan_overseas_market():
     return await scan_market_expert()
+
+
+async def analyze_single_ticker(ticker: str) -> dict:
+    """
+    보유 종목에 대한 실시간 정밀 기술적 지표 및 스코어를 산출합니다. (폭락/약세 판정용)
+    """
+    import yfinance as yf
+    try:
+        # 1. 지수 데이터 및 시장 감정 확보
+        df_qqq = await fetch_index_data()
+        qqq_perf = (df_qqq['Close'].iloc[-1] / df_qqq['Close'].iloc[0] - 1) if not df_qqq.empty else 0
+        sentiment = await check_market_sentiment()
+
+        # 2. 15분봉 & 1분봉 데이터 동시 확보
+        df_15m = await asyncio.to_thread(yf.download, ticker, period="5d", interval="15m", progress=False)
+        df_1m = await asyncio.to_thread(yf.download, ticker, period="1d", interval="1m", progress=False)
+        
+        if df_15m.empty or df_1m.empty or len(df_15m) < 5:
+            return None
+
+        # 3. 기술적 지표 계산 (Stage 1 필터와 정합성 유지)
+        last_close = float(df_1m['Close'].iloc[-1])
+        
+        # 1) RVOL
+        rvol = calculate_rvol(df_15m)
+        
+        # 2) EMA & Trend
+        ema9 = calculate_ema(df_15m, 9)
+        ema20 = calculate_ema(df_15m, 20)
+        ema_aligned = False
+        if not ema9.empty and not ema20.empty:
+            ema_aligned = ema9.iloc[-1] > ema20.iloc[-1]
+
+        # 3) Relative Strength (RS)
+        stock_perf = (df_15m['Close'].iloc[-1] / df_15m['Close'].iloc[0] - 1)
+        rs = stock_perf - qqq_perf
+
+        # Stage 1 기본 점수 빌드
+        s1_score = 30 # 기본 점수
+        if ema_aligned: s1_score += 15
+        if rs > 0: s1_score += 10
+        if rvol >= 2.0: s1_score += 30
+        elif rvol >= 1.2: s1_score += 15
+
+        # 4. Stage 2 세부 지표 계산 (VWAP, Wick, Fakeout Risk)
+        vwap = calculate_vwap(df_1m)
+        risk_level, wick_ratio = detect_fakeout_risk(df_1m)
+        
+        final_score = s1_score
+        if not vwap.empty and last_close > vwap.iloc[-1]: 
+            final_score += 10
+        else:
+            final_score -= 15 # VWAP 붕괴 시 패널티
+
+        if risk_level == "LOW": final_score += 10
+        elif risk_level == "HIGH": final_score -= 20
+
+        # 시장 감정 필터
+        if sentiment == "BEARISH":
+            final_score -= 30
+        elif sentiment == "BULLISH":
+            final_score += 5
+
+        # ATR 계산
+        atr_series = calculate_atr(df_1m, period=14)
+        latest_atr = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
+
+        return {
+            "ticker": ticker,
+            "name": get_ticker_name(ticker),
+            "price": last_close,
+            "signal_score": max(0, min(final_score, 100)),
+            "signal_type": "STRONG_BUY" if final_score >= 80 else "BUY" if final_score >= 60 else "WATCH",
+            "details": {
+                "gap": 0.0, # 단독 종목은 갭 생략
+                "rvol": rvol,
+                "wick": round(wick_ratio, 2),
+                "has_news": False,
+                "risk": risk_level,
+                "rs": rs,
+                "ema_aligned": ema_aligned,
+                "atr": round(latest_atr, 4)
+            }
+        }
+    except Exception as e:
+        print(f"[Scanner] Dedicated analysis failed for {ticker}: {e}")
+        return None

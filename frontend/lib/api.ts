@@ -4,30 +4,65 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000/api/
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 10000,
+  timeout: 15000,
 });
+
+// Request Interceptor: JWT 토큰 자동 바인딩 (로컬스토리지 토큰 주입)
+api.interceptors.request.use(
+  (config) => {
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('stockauto_token');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
 
 // Response Interceptor: 데이터 추출 및 에러 메시지 통일
 api.interceptors.response.use(
   (response) => {
-    // 성공 시 data 필드만 반환
+    // 성공 시 data 필드만 반환 (FastAPI APIResponse 구조 분해)
     if (response.data && response.data.code === 'SUCCESS') {
       return { ...response, data: response.data.data };
     }
     return response;
   },
   (error) => {
-    // 요청 취소(Abort)인 경우는 에러 메시지를 띄우지 않음
     if (axios.isCancel(error)) {
         return Promise.reject(error);
     }
-    // 에러 발생 시 규격화된 메시지 추출
+    
+    // 401 Unauthorized 에러 감지 시 로컬스토리지 정리 및 로그인 이동
+    if (error.response && error.response.status === 401) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('stockauto_token');
+        localStorage.removeItem('stockauto_username');
+        // 현재 로그인 페이지가 아니라면 리다이렉트
+        if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/signup')) {
+          window.location.href = '/login';
+        }
+      }
+    }
+
     if (error.response && error.response.data && error.response.data.error) {
       error.message = error.response.data.error.message;
+    } else if (error.response && error.response.data && error.response.data.detail) {
+      error.message = error.response.data.detail;
     }
     return Promise.reject(error);
   }
 );
+
+export const authAPI = {
+  signup: (username: string, password: string) => api.post('/auth/signup', { username, password }),
+  login: (username: string, password: string) => api.post('/auth/login', { username, password }),
+  getMe: (config?: AxiosRequestConfig) => api.get('/auth/me', config),
+};
 
 export const botAPI = {
   getStatus: (config?: AxiosRequestConfig) => api.get('/bot/status', config),
