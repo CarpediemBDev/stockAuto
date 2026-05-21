@@ -14,6 +14,8 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+import { EnvironmentBadge } from "@/components/EnvironmentBadge";
+
 export const metadata: Metadata = {
   title: "StockAuto - 자동매매 대시보드",
   description: "글로벌 우량주 퀀트 시그널 스캐너 & 자동매매 시스템",
@@ -29,7 +31,7 @@ export default function RootLayout({
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-black text-white">
+      <body className="min-h-full flex flex-col bg-black text-white relative">
         {/* 글로벌 상단 네비게이션 바 */}
         <NavBar />
         
@@ -38,6 +40,9 @@ export default function RootLayout({
           {children}
         </div>
         
+        {/* 환경 식별 뱃지 (좌측 하단 띠) */}
+        <EnvironmentBadge />
+
         {/* 토스트 알림 컨테이너 */}
         <Toaster richColors position="bottom-right" theme="dark" closeButton />
       </body>

@@ -36,12 +36,14 @@ const MarketHeader = () => {
 
   useEffect(() => {
     const controller = new AbortController();
-    const timer = setTimeout(() => {
-      fetchMarketData(controller.signal);
-    }, 0);
+    
+    const loadInitialData = async () => {
+      await fetchMarketData(controller.signal);
+    };
+    loadInitialData();
+
     const interval = setInterval(() => fetchMarketData(controller.signal), 60000); 
     return () => {
-      clearTimeout(timer);
       clearInterval(interval);
       controller.abort();
     };

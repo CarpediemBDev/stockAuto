@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import NavBar from "@/components/NavBar";
+import { NavBar } from "@/components/NavBar";
 import { toast } from "sonner";
-import { AlertTriangle, Server, ShieldCheck, ShieldAlert, Key, Save, Loader2 } from "lucide-react";
+import { AlertTriangle, Server, ShieldCheck, ShieldAlert, Key, Save, Loader2, Send } from "lucide-react";
 
 interface SystemSettings {
   trade_mode: string;
@@ -11,6 +11,11 @@ interface SystemSettings {
   kis_app_key: string;
   kis_app_secret: string;
   kis_account_no: string;
+  
+  // Telegram Bot Settings (Phase 11)
+  telegram_bot_token: string;
+  telegram_chat_id: string;
+  telegram_enabled: boolean;
 }
 
 export default function AdminSettingsPage() {
@@ -20,14 +25,13 @@ export default function AdminSettingsPage() {
     kis_app_key: "",
     kis_app_secret: "",
     kis_account_no: "",
+    telegram_bot_token: "",
+    telegram_chat_id: "",
+    telegram_enabled: false,
   });
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [showRealWarning, setShowRealWarning] = useState(false);
-
-  useEffect(() => {
-    fetchSettings();
-  }, []);
 
   const fetchSettings = async () => {
     try {
@@ -40,6 +44,9 @@ export default function AdminSettingsPage() {
           kis_app_key: data.kis_app_key || "",
           kis_app_secret: data.kis_app_secret || "",
           kis_account_no: data.kis_account_no || "",
+          telegram_bot_token: data.telegram_bot_token || "",
+          telegram_chat_id: data.telegram_chat_id || "",
+          telegram_enabled: data.telegram_enabled || false,
         });
       }
     } catch (error) {
@@ -48,6 +55,13 @@ export default function AdminSettingsPage() {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    const loadData = async () => {
+      await fetchSettings();
+    };
+    loadData();
+  }, []);
 
   const handleSave = async (forceReal = false) => {
     if (settings.trade_mode === "REAL" && !forceReal) {
@@ -133,7 +147,7 @@ export default function AdminSettingsPage() {
                 <span className="font-bold text-orange-400">MOCK</span>
                 <Server className="w-5 h-5 text-orange-400" />
               </div>
-              <p className="text-sm text-gray-400">Virtual trading via broker's mock server. Requires Mock API keys.</p>
+              <p className="text-sm text-gray-400">Virtual trading via broker&apos;s mock server. Requires Mock API keys.</p>
             </div>
 
             {/* REAL */}
@@ -205,6 +219,61 @@ export default function AdminSettingsPage() {
                 placeholder="e.g. 12345678-01"
                 className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm"
               />
+            </div>
+          </div>
+        </div>
+
+        {/* Telegram Configuration (Phase 11) */}
+        <div className="bg-gray-800 rounded-xl border border-gray-700 p-6 mb-6 shadow-lg">
+          <div className="flex justify-between items-center mb-6 border-b border-gray-700/50 pb-4">
+            <div className="flex items-center gap-2">
+              <Send className="w-5 h-5 text-indigo-400" />
+              <h2 className="text-xl font-semibold">Telegram Bridge</h2>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer select-none">
+              <input 
+                type="checkbox" 
+                checked={settings.telegram_enabled} 
+                onChange={(e) => setSettings({ ...settings, telegram_enabled: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-400 after:border-gray-400 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+              <span className="ml-3 text-sm font-medium text-gray-300">알림 연동 활성화</span>
+            </label>
+          </div>
+          
+          <div className="space-y-5">
+            <div>
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="block text-sm font-medium text-gray-300">BOT TOKEN</label>
+                <span className="text-[10px] text-gray-500 font-mono">TELEGRAM_BOT_TOKEN</span>
+              </div>
+              <input 
+                type="password" 
+                value={settings.telegram_bot_token || ""}
+                onChange={(e) => setSettings({ ...settings, telegram_bot_token: e.target.value })}
+                placeholder="봇 토큰 입력 (예: 123456789:ABCdef...)"
+                disabled={!settings.telegram_enabled}
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-white focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm disabled:opacity-40 transition-all"
+              />
+            </div>
+
+            <div>
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="block text-sm font-medium text-gray-300">CHAT ID</label>
+                <span className="text-[10px] text-gray-500 font-mono">TELEGRAM_CHAT_ID</span>
+              </div>
+              <input 
+                type="text" 
+                value={settings.telegram_chat_id || ""}
+                onChange={(e) => setSettings({ ...settings, telegram_chat_id: e.target.value })}
+                placeholder="챗 ID 입력 (예: 987654321)"
+                disabled={!settings.telegram_enabled}
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-white focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm disabled:opacity-40 transition-all"
+              />
+              <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
+                ℹ️ 등록된 챗 ID 소유자에게만 `/status`(계좌 잔고 조회), `/stop`(봇 정지), `/run`(봇 재개) 명령어가 승인되며, 자동 매수/매도 내역이 실시간으로 비동기 전송됩니다.
+              </p>
             </div>
           </div>
         </div>

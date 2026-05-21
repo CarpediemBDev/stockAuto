@@ -38,11 +38,6 @@ export default function AdminPage() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const itemsPerPage = 10;
 
-  // 검색 쿼리가 변경되면 즉시 첫 페이지로 리셋하여 엉뚱한 페이지 공백 현상 방지
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery]);
-
   // 신규 등록 폼 상태
   const [newTicker, setNewTicker] = useState<string>("");
   const [newNameKo, setNewNameKo] = useState<string>("");
@@ -73,10 +68,12 @@ export default function AdminPage() {
       setLoading(false);
     }
   };
-
   useEffect(() => {
     if (activeTab === "translation") {
-      fetchTranslations();
+      const loadData = async () => {
+        await fetchTranslations();
+      };
+      loadData();
     }
   }, [activeTab]);
 
@@ -299,7 +296,10 @@ export default function AdminPage() {
                         type="text"
                         placeholder="티커 또는 한글명 검색..."
                         value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onChange={(e) => {
+                          setSearchQuery(e.target.value);
+                          setCurrentPage(1); // useEffect 대신 이벤트 핸들러에서 직접 리셋하는 것이 React 18+ 표준입니다
+                        }}
                         className="w-full bg-[#0a0f1d] border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                       />
                     </div>

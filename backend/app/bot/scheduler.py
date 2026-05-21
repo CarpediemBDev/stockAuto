@@ -109,6 +109,16 @@ async def async_trading_loop():
                         db.delete(h)
                         db.commit()
                         log_action(db, f"SUCCESS: {ticker} sold via {sell_reason} | Order: {res['order_no']}", "INFO")
+                        
+                        # 💡 텔레그램 매도 알림 전송 (Phase 11)
+                        from app.core.telegram import send_message_async
+                        send_message_async(
+                            f"🔴 *[자동매도 체결]* {ticker} ({h.ticker_name})\n"
+                            f"• *체결 단가:* `${res['filled_price']:,.2f}`\n"
+                            f"• *체결 수량:* `{res['filled_qty']}주`\n"
+                            f"• *매도 사유:* {sell_reason}\n"
+                            f"• *주문 번호:* `{res['order_no']}`"
+                        )
                     else:
                         log_action(db, f"SELL FAILED: {ticker} | {res['message']}", "ERROR")
             except Exception as item_err:
@@ -200,6 +210,16 @@ async def async_trading_loop():
                         ))
                         db.commit()
                         log_action(db, f"SUCCESS: {ticker} purchased ({res['filled_qty']} shares) | Order: {res['order_no']}", "INFO")
+                        
+                        # 💡 텔레그램 매수 알림 전송 (Phase 11)
+                        from app.core.telegram import send_message_async
+                        send_message_async(
+                            f"🟢 *[자동매수 체결]* {ticker} ({s['name']})\n"
+                            f"• *체결 단가:* `${res['filled_price']:,.2f}`\n"
+                            f"• *체결 수량:* `{res['filled_qty']}주`\n"
+                            f"• *시그널 스코어:* `{score}점`\n"
+                            f"• *주문 번호:* `{res['order_no']}`"
+                        )
                     else:
                         log_action(db, f"BUY FAILED: {ticker} | {res['message']}", "ERROR")
 

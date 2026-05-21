@@ -15,6 +15,11 @@ class SettingsUpdateSchema(BaseModel):
     kis_app_key: Optional[str] = None
     kis_app_secret: Optional[str] = None
     kis_account_no: Optional[str] = None
+    
+    # Telegram Bot Settings (Phase 11)
+    telegram_bot_token: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    telegram_enabled: Optional[bool] = False
 
 @router.get("/")
 def get_system_settings(db: Session = Depends(get_db)):
@@ -27,6 +32,9 @@ def get_system_settings(db: Session = Depends(get_db)):
             kis_app_key=settings.KIS_APP_KEY,
             kis_app_secret=settings.KIS_APP_SECRET,
             kis_account_no=settings.KIS_ACCOUNT_NO,
+            telegram_bot_token=settings.TELEGRAM_BOT_TOKEN,
+            telegram_chat_id=settings.TELEGRAM_CHAT_ID,
+            telegram_enabled=settings.TELEGRAM_ENABLED,
         )
         db.add(db_settings)
         db.commit()
@@ -48,6 +56,11 @@ def update_system_settings(payload: SettingsUpdateSchema, db: Session = Depends(
     db_settings.kis_app_secret = payload.kis_app_secret
     db_settings.kis_account_no = payload.kis_account_no
     
+    # Telegram settings (Phase 11)
+    db_settings.telegram_bot_token = payload.telegram_bot_token
+    db_settings.telegram_chat_id = payload.telegram_chat_id
+    db_settings.telegram_enabled = payload.telegram_enabled
+    
     db.commit()
     db.refresh(db_settings)
     
@@ -61,6 +74,11 @@ def update_system_settings(payload: SettingsUpdateSchema, db: Session = Depends(
     settings.KIS_APP_KEY = payload.kis_app_key
     settings.KIS_APP_SECRET = payload.kis_app_secret
     settings.KIS_ACCOUNT_NO = payload.kis_account_no
+    
+    # Telegram Memory settings
+    settings.TELEGRAM_BOT_TOKEN = payload.telegram_bot_token
+    settings.TELEGRAM_CHAT_ID = payload.telegram_chat_id
+    settings.TELEGRAM_ENABLED = payload.telegram_enabled
     
     # 3-Mode에 따른 TR_ID 및 Base URL 동적 업데이트
     if settings.IS_REAL:
@@ -78,6 +96,12 @@ def update_system_settings(payload: SettingsUpdateSchema, db: Session = Depends(
         settings.TR_ID_OVERSEAS_BALANCE = "VTRP6504R"
         settings.TR_ID_ORDER_HISTORY = "VTTS3010R"
         
-    print(f"[*] Admin Settings Hot Reloaded: Mode={settings.TRADE_MODE}, Provider={settings.BROKER_PROVIDER}")
+    print(f"[*] Admin Settings Hot Reloaded: Mode={settings.TRADE_MODE}, Provider={settings.BROKER_PROVIDER} | Telegram={settings.TELEGRAM_ENABLED}")
+    
+    # 💡 텔레그램 데몬 실시간 재부팅 (토큰 갱신 시 대응)
+    from app.core.telegram import stop_telegram_bot, start_telegram_bot
+    print("[*] Hot reloading Telegram Polling thread...")
+    stop_telegram_bot()
+    start_telegram_bot()
     
     return db_settings

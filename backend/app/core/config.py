@@ -1,25 +1,23 @@
 import os
 from dotenv import load_dotenv
 
-# Determine which environment to load
-APP_ENV = os.getenv("APP_ENV", "dev").lower()
+# Determine which environment to load (Default to local)
+APP_ENV = os.getenv("APP_ENV", "local").lower()
 env_file = f".env.{APP_ENV}"
 
-# app/core/config.py의 위치 기준, 두 단계 위인 backend/ 루트 디렉터리를 찾아 .env를 로드합니다.
+# app/core/config.py의 위치 기준, 두 단계 위인 backend/ 루트 디렉터리를 찾아 해당 환경 파일만 로드합니다.
 core_dir = os.path.dirname(os.path.abspath(__file__))
 app_dir = os.path.dirname(core_dir)
 backend_dir = os.path.dirname(app_dir)
-full_env_path = os.path.join(backend_dir, env_file)
 
-# Load the specific environment file
+# 지정한 단일 환경 설정 파일만 로드 (중복/오버라이드 없음)
+full_env_path = os.path.join(backend_dir, env_file)
 if os.path.exists(full_env_path):
-    load_dotenv(full_env_path, override=True)
-    print(f"[*] Configuration loaded from {full_env_path}")
+    # 12-Factor App 원칙: 실제 클라우드 OS 환경변수가 우선이어야 하므로 override=False (기본값) 사용
+    load_dotenv(full_env_path, override=False)
+    print(f"[*] Environment loaded from: {full_env_path} (APP_ENV: {APP_ENV.upper()})")
 else:
-    # Fallback to default .env if specific one not found
-    fallback_path = os.path.join(backend_dir, ".env")
-    load_dotenv(fallback_path, override=True)
-    print(f"[!] {env_file} not found. Falling back to default .env at {fallback_path}")
+    print(f"[⚠️ WARNING] Environment file not found: {full_env_path}")
 
 # 유효한 트레이딩 모드 목록
 VALID_TRADE_MODES = ("SIMULATED", "MOCK", "REAL")
@@ -34,52 +32,76 @@ class Settings:
       - MOCK:      증권사 모의투자 서버에 실제 API 호출 (KIS 모의투자 등)
       - REAL:      증권사 실전 서버에 실제 API 호출 (진짜 돈)
     """
-    # 브로커 공급자 (KIS, TOSS 등)
-    BROKER_PROVIDER = os.getenv("BROKER_PROVIDER", "KIS").upper()
+    # 💡 Spring Boot style Active Profile (local, dev, prod)
+    PROFILE = APP_ENV
+    IS_LOCAL = PROFILE == "local"
+    IS_DEV = PROFILE == "dev"
+    IS_PROD = PROFILE == "prod"
 
-    # 3-Mode 트레이딩 모드
-    _raw_trade_mode = os.getenv("TRADE_MODE", "SIMULATED").upper()
+    # 브로커 공급자 초기 기본값 (main.py에서 DB 값을 읽어와 덮어씌웁니다)
+    BROKER_PROVIDER = "KIS"
 
-    # 하위 호환: 기존 "VIRTUAL" 값을 "MOCK"으로 자동 변환
-    if _raw_trade_mode == "VIRTUAL":
-        _raw_trade_mode = "MOCK"
+    # 3-Mode 트레이딩 모드 기본값 세팅
+    TRADE_MODE = "SIMULATED"
+    IS_SIMULATED = True
+    IS_MOCK = False
+    IS_REAL = False
+    
+    # API endpoints
+    KIS_BASE_URL = ""
+    TR_ID_BALANCE = ""
+    TR_ID_BUY_OVERSEAS = ""
+    TR_ID_SELL_OVERSEAS = ""
+    TR_ID_OVERSEAS_BALANCE = ""
+    TR_ID_ORDER_HISTORY = ""
 
-    # 유효하지 않은 모드인 경우 안전하게 SIMULATED로 폴백
-    if _raw_trade_mode not in VALID_TRADE_MODES:
-        print(f"[!] Invalid TRADE_MODE '{_raw_trade_mode}'. Falling back to SIMULATED.")
-        _raw_trade_mode = "SIMULATED"
+    def __init__(self):
+        # KIS API Keys (Integrated Names)
+        self.KIS_APP_KEY = os.getenv("KIS_APP_KEY")
+        self.KIS_APP_SECRET = os.getenv("KIS_APP_SECRET")
+        self.KIS_ACCOUNT_NO = os.getenv("KIS_ACCOUNT_NO")
 
-    TRADE_MODE = _raw_trade_mode
-    IS_SIMULATED = TRADE_MODE == "SIMULATED"
-    IS_MOCK = TRADE_MODE == "MOCK"
-    IS_REAL = TRADE_MODE == "REAL"
+        # Telegram Bot Settings (Phase 11)
+        self.TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+        self.TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+        self.TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "false").lower() == "true"
 
-    # KIS API Keys (Integrated Names)
-    KIS_APP_KEY = os.getenv("KIS_APP_KEY")
-    KIS_APP_SECRET = os.getenv("KIS_APP_SECRET")
-    KIS_ACCOUNT_NO = os.getenv("KIS_ACCOUNT_NO")
+        # 1. 초기 생성 시 무조건 안전한 SIMULATED 모드로 하드코딩 셋업
+        # (이후 main.py에서 사용자가 화면(어드민)을 통해 저장한 DB 값을 읽어와 덮어씌웁니다)
+        self.apply_trade_mode("SIMULATED")
 
-    # Mode-based Dynamic Settings
-    if IS_REAL:
-        KIS_BASE_URL = "https://openapi.koreainvestment.com:9443"
-        TR_ID_BALANCE = "TTTC8434R" # 실전 잔고조회
-        TR_ID_BUY_OVERSEAS = "JTTT1002U" # 해외주식 매수
-        TR_ID_SELL_OVERSEAS = "JTTT1001U" # 해외주식 매도
-        TR_ID_OVERSEAS_BALANCE = "CTRP6504R" # 해외주식 잔고조회 (실전)
-        TR_ID_ORDER_HISTORY = "JTTT3010R" # 해외주식 체결내역 (실전)
-    else:
-        # MOCK과 SIMULATED 모두 모의투자 서버 설정 사용
-        # (SIMULATED 모드에서는 실제로 호출되지 않지만, 설정은 유지)
-        KIS_BASE_URL = "https://vts-openapi.koreainvestment.com:29443"
-        TR_ID_BALANCE = "VTTC8434R" # 모의 잔고조회
-        TR_ID_BUY_OVERSEAS = "VTTT1002U" # 해외주식 매수 (모의)
-        TR_ID_SELL_OVERSEAS = "VTTT1001U" # 해외주식 매도 (모의)
-        TR_ID_OVERSEAS_BALANCE = "VTRP6504R" # 해외주식 잔고조회 (모의)
-        TR_ID_ORDER_HISTORY = "VTTS3010R" # 해외주식 체결내역 (모의)
+    def apply_trade_mode(self, mode: str):
+        """
+        TRADE_MODE에 따라 IS_* 플래그와 KIS API 엔드포인트/TR_ID를 
+        단일 창구에서 일괄 업데이트하는 핵심 함수. (중복 로직 제거)
+        """
+        if mode not in VALID_TRADE_MODES:
+            mode = "SIMULATED"
+            
+        self.TRADE_MODE = mode
+        self.IS_SIMULATED = self.TRADE_MODE == "SIMULATED"
+        self.IS_MOCK = self.TRADE_MODE == "MOCK"
+        self.IS_REAL = self.TRADE_MODE == "REAL"
+
+        if self.IS_REAL:
+            self.KIS_BASE_URL = "https://openapi.koreainvestment.com:9443"
+            self.TR_ID_BALANCE = "TTTC8434R" # 실전 잔고조회
+            self.TR_ID_BUY_OVERSEAS = "JTTT1002U" # 해외주식 매수
+            self.TR_ID_SELL_OVERSEAS = "JTTT1001U" # 해외주식 매도
+            self.TR_ID_OVERSEAS_BALANCE = "CTRP6504R" # 해외 잔고조회 (실전)
+            self.TR_ID_ORDER_HISTORY = "JTTT3010R" # 체결내역 (실전)
+        else:
+            # MOCK과 SIMULATED 모두 모의투자 서버 설정 사용
+            self.KIS_BASE_URL = "https://vts-openapi.koreainvestment.com:29443"
+            self.TR_ID_BALANCE = "VTTC8434R" # 모의 잔고조회
+            self.TR_ID_BUY_OVERSEAS = "VTTT1002U" # 해외주식 매수 (모의)
+            self.TR_ID_SELL_OVERSEAS = "VTTT1001U" # 해외주식 매도 (모의)
+            self.TR_ID_OVERSEAS_BALANCE = "VTRP6504R" # 해외 잔고조회 (모의)
+            self.TR_ID_ORDER_HISTORY = "VTTS3010R" # 체결내역 (모의)
 
     # Global Constants
     API_TITLE = "StockAuto API"
     VERSION = "2.0.0" # 3-Mode Architecture
 
 settings = Settings()
-print(f"[*] Trade Mode: {settings.TRADE_MODE} | Broker: {settings.BROKER_PROVIDER} | Real: {settings.IS_REAL}")
+print(f"[*] Active Profile: {settings.PROFILE.upper()} | Trade Mode: {settings.TRADE_MODE} | Real-Trading Ready: {settings.IS_REAL}")

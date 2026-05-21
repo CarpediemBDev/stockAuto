@@ -34,40 +34,48 @@ async def lifespan(app: FastAPI):
     print("Backend Lifespan: Loading Admin Settings from DB...")
     db = SessionLocal()
     try:
-        db_settings = db.query(SystemSettings).first()
+        try:
+            db_settings = db.query(SystemSettings).first()
+        except Exception as e:
+            print(f"[!] DB Schema mismatch detected: {e}. Dropping and recreating system_settings table...")
+            db.rollback()
+            db.close()
+            SystemSettings.__table__.drop(bind=engine, checkfirst=True)
+            SystemSettings.__table__.create(bind=engine, checkfirst=True)
+            db = SessionLocal()
+            db_settings = db.query(SystemSettings).first()
+
         if db_settings:
-            settings.TRADE_MODE = db_settings.trade_mode
-            settings.IS_SIMULATED = db_settings.trade_mode == "SIMULATED"
-            settings.IS_MOCK = db_settings.trade_mode == "MOCK"
-            settings.IS_REAL = db_settings.trade_mode == "REAL"
+            # 단일 창구 함수(apply_trade_mode)를 통해 모드와 API 엔드포인트를 한 번에 동기화! (중복 로직 완벽 제거)
+            settings.apply_trade_mode(db_settings.trade_mode)
             settings.BROKER_PROVIDER = db_settings.broker_provider
+            
             settings.KIS_APP_KEY = db_settings.kis_app_key
             settings.KIS_APP_SECRET = db_settings.kis_app_secret
             settings.KIS_ACCOUNT_NO = db_settings.kis_account_no
             
-            if settings.IS_REAL:
-                settings.KIS_BASE_URL = "https://openapi.koreainvestment.com:9443"
-                settings.TR_ID_BALANCE = "TTTC8434R"
-                settings.TR_ID_BUY_OVERSEAS = "JTTT1002U"
-                settings.TR_ID_SELL_OVERSEAS = "JTTT1001U"
-                settings.TR_ID_OVERSEAS_BALANCE = "CTRP6504R"
-                settings.TR_ID_ORDER_HISTORY = "JTTT3010R"
-            else:
-                settings.KIS_BASE_URL = "https://vts-openapi.koreainvestment.com:29443"
-                settings.TR_ID_BALANCE = "VTTC8434R"
-                settings.TR_ID_BUY_OVERSEAS = "VTTT1002U"
-                settings.TR_ID_SELL_OVERSEAS = "VTTT1001U"
-                settings.TR_ID_OVERSEAS_BALANCE = "VTRP6504R"
-                settings.TR_ID_ORDER_HISTORY = "VTTS3010R"
-            print(f"[*] Admin Settings Applied: Mode={settings.TRADE_MODE}")
+            # Telegram Bot Settings (Phase 11)
+            settings.TELEGRAM_BOT_TOKEN = db_settings.telegram_bot_token
+            settings.TELEGRAM_CHAT_ID = db_settings.telegram_chat_id
+            settings.TELEGRAM_ENABLED = db_settings.telegram_enabled
+            
+            print(f"[*] Admin Settings Applied: Mode={settings.TRADE_MODE} | Telegram={settings.TELEGRAM_ENABLED}")
     finally:
         db.close()
     
     # Start the background trading loop scheduler
     print("Backend Lifespan: Initializing Scheduler...")
     start_scheduler()
+    
+    # 💡 Telegram Polling Daemon Startup (Phase 11)
+    from app.core.telegram import start_telegram_bot, stop_telegram_bot
+    print("Backend Lifespan: Starting Telegram Bot...")
+    start_telegram_bot()
+    
     yield
-    print("Backend Lifespan Ending...")
+    
+    print("Backend Lifespan Ending: Stopping Telegram Bot...")
+    stop_telegram_bot()
 
 app = FastAPI(title="StockAuto API", description="주식 자동매매 API 서버", lifespan=lifespan)
 

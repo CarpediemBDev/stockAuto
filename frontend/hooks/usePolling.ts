@@ -14,16 +14,16 @@ export function usePolling(callback: (signal: AbortSignal) => Promise<void> | vo
   useEffect(() => {
     const controller = new AbortController();
 
-    const tick = () => {
+    const tick = async () => {
       // 콜백에 현재 컨트롤러의 시그널을 전달
-      savedCallback.current(controller.signal);
+      await savedCallback.current(controller.signal);
     };
     
-    const timer = setTimeout(tick, 0);
+    // setTimeout 꼼수 대신 직접 즉시 실행
+    tick();
     const id = setInterval(tick, interval);
 
     return () => {
-      clearTimeout(timer);
       clearInterval(id);
       controller.abort(); // 언마운트 또는 interval 변경 시 진행 중인 요청 취소
     };

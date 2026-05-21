@@ -226,15 +226,21 @@ graph TD
 
 ### 1. 백엔드 실행 (Backend Startup)
 
-백엔드는 **모듈형 레이어드 아키텍처**로 구성되어 있으므로, `/backend` 폴더에서 `app` 패키지 진입점을 지정하여 실행해야 합니다.
+백엔드는 OS 환경변수 주입 실수를 원천 방지하기 위해 **Spring Boot Style 통합 프로필 런처 (`run.py`)** 를 지원합니다. `/backend` 폴더에서 아래 명령어 중 하나를 실행하십시오.
 
 ```bash
-# 가상환경 활성화 후 실행
-uvicorn app.main:app --host 0.0.0.0 --reload
+# 1. 로컬 개발 환경 (소스코드 자동 릴로드 ON, .env.local 로드)
+python run.py local  # (또는 인자 생략 시 기본값: python run.py)
+
+# 2. 개발 서버 환경 (소스코드 자동 릴로드 ON, .env.dev 로드)
+python run.py dev
+
+# 3. 실전 운영 환경 (자동 릴로드 OFF로 안정성 극대화, .env.prod 로드)
+python run.py prod
 ```
 
 > [!IMPORTANT]
-> 루트에 남겨진 레거시 `backend/main.py`가 아닌, 반드시 **`app.main:app`** 경로를 지정해 주어야 임포트 에러가 발생하지 않습니다.
+> 더 이상 터미널에서 복잡하게 `uvicorn app.main:app --reload` 명령어를 직접 타이핑하거나 OS별 환경변수를 억지로 세팅할 필요가 없습니다. `run.py` 런처가 프로필 파라미터를 읽어 완벽히 안전하게 구동해 줍니다.
 
 ### 2. 프론트엔드 실행 (Frontend Startup)
 
