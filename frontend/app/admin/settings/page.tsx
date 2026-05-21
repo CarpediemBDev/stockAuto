@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { 
   AlertTriangle, Server, ShieldCheck, ShieldAlert, Key, Save, Loader2, Send, 
-  Users, UserMinus, ToggleLeft, ToggleRight, RefreshCw, Trash2, Ban 
+  Users, UserMinus, ToggleLeft, ToggleRight, RefreshCw, Trash2, Ban,
+  Globe, Plus, Search, Edit2, Check, X, HelpCircle
 } from "lucide-react";
-import api from "@/lib/api";
+import api, { translationAPI } from "@/lib/api";
 
 interface UserSettings {
   trade_mode: string;
@@ -31,12 +32,30 @@ interface ManagedUser {
   is_running: boolean;
 }
 
+interface TranslationItem {
+  id: number;
+  ticker: string;
+  name_ko: string;
+}
+
 export default function AdminSettingsPage() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [activeTab, setActiveTab] = useState<"settings" | "users">("settings");
+  const [activeTab, setActiveTab] = useState<"settings" | "users" | "translation">("settings");
   
+  // --- 다국어 번역 사전(Translation) 상태 관리 ---
+  const [translations, setTranslations] = useState<TranslationItem[]>([]);
+  const [loadingTranslations, setLoadingTranslations] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const itemsPerPage = 10;
+  const [newTicker, setNewTicker] = useState<string>("");
+  const [newNameKo, setNewNameKo] = useState<string>("");
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState<string>("");
+
   // 개인 투자 설정 관련 State
   const [settings, setSettings] = useState<UserSettings>({
     trade_mode: "SIMULATED",
@@ -114,13 +133,32 @@ export default function AdminSettingsPage() {
     }
   };
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchSettings();
-      if (isAdmin && activeTab === "users") {
-        fetchUsers();
-      }
+  const fetchTranslations = async () => {
+    setLoadingTranslations(true);
+    try {
+      const res = await translationAPI.getAll();
+      setTranslations(res.data);
+    } catch (err) {
+      const error = err as Error;
+      toast.error(`사전 데이터 로드 실패: ${error.message}`);
+    } finally {
+      setLoadingTranslations(false);
     }
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    void (async () => {
+      await fetchSettings();
+      if (isAdmin) {
+        if (activeTab === "users") {
+          await fetchUsers();
+        } else if (activeTab === "translation") {
+          await fetchTranslations();
+        }
+      }
+    })();
   }, [isAuthenticated, isAdmin, activeTab]);
 
   const handleSave = async (forceReal = false) => {
@@ -219,6 +257,80 @@ export default function AdminSettingsPage() {
     }
   };
 
+  // 새로운 번역 신규 저장
+  const handleCreateTranslation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const tickerClean = newTicker.trim().toUpperCase();
+    const nameClean = newNameKo.trim();
+
+    if (!tickerClean || !nameClean) {
+      toast.warning("티커와 한국어 이름을 모두 입력해 주세요.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await translationAPI.save(tickerClean, nameClean);
+      toast.success(`${tickerClean} (${nameClean}) 등록 완료! (메모리 캐시 자동 핫싱크)`);
+      setNewTicker("");
+      setNewNameKo("");
+      await fetchTranslations();
+    } catch (err) {
+      const error = err as Error;
+      toast.error(`번역 등록 실패: ${error.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // 인라인 에디팅 시작
+  const startEditTranslation = (item: TranslationItem) => {
+    setEditingId(item.id);
+    setEditingName(item.name_ko);
+  };
+
+  // 인라인 에디팅 저장
+  const handleUpdateTranslation = async (id: number) => {
+    const nameClean = editingName.trim();
+    if (!nameClean) {
+      toast.warning("한국어 이름을 입력해 주세요.");
+      return;
+    }
+
+    try {
+      await translationAPI.update(id, nameClean);
+      toast.success("번역이 수정되었으며 백엔드 캐시가 즉시 동기화되었습니다!");
+      setEditingId(null);
+      await fetchTranslations();
+    } catch (err) {
+      const error = err as Error;
+      toast.error(`수정 실패: ${error.message}`);
+    }
+  };
+
+  // 번역 데이터 삭제
+  const handleDeleteTranslation = async (id: number, ticker: string) => {
+    if (!confirm(`${ticker} 번역 매핑을 정말 삭제하시겠습니까?\n삭제 즉시 메모리 캐시에서도 분리됩니다.`)) {
+      return;
+    }
+
+    try {
+      await translationAPI.delete(id);
+      toast.success(`${ticker} 번역 매핑이 성공적으로 제거되었습니다.`);
+      await fetchTranslations();
+    } catch (err) {
+      const error = err as Error;
+      toast.error(`삭제 실패: ${error.message}`);
+    }
+  };
+
+  // 실시간 타이핑 필터 필터링 결과 계산
+  const filteredTranslations = translations.filter(
+    (t) =>
+      t.ticker.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.name_ko.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   if (isLoading || !isAuthenticated) {
     return (
       <div className="min-h-[calc(100vh-4rem)] bg-zinc-950 text-white flex items-center justify-center">
@@ -249,7 +361,7 @@ export default function AdminSettingsPage() {
             <div className="flex space-x-1.5 bg-zinc-900/60 p-1 rounded-xl border border-zinc-800/80 self-start">
               <button
                 onClick={() => setActiveTab("settings")}
-                className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
+                className={`px-4 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${
                   activeTab === "settings"
                     ? "bg-zinc-800 text-white shadow-inner"
                     : "text-zinc-400 hover:text-white"
@@ -259,7 +371,7 @@ export default function AdminSettingsPage() {
               </button>
               <button
                 onClick={() => setActiveTab("users")}
-                className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer ${
+                className={`px-4 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${
                   activeTab === "users"
                     ? "bg-zinc-800 text-white shadow-inner"
                     : "text-zinc-400 hover:text-white"
@@ -267,11 +379,21 @@ export default function AdminSettingsPage() {
               >
                 👥 전체 사용자 관리 (Admin)
               </button>
+              <button
+                onClick={() => setActiveTab("translation")}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${
+                  activeTab === "translation"
+                    ? "bg-zinc-800 text-white shadow-inner"
+                    : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                🌐 다국어 번역 관리 (Admin)
+              </button>
             </div>
           )}
         </div>
 
-        {activeTab === "settings" ? (
+        {activeTab === "settings" && (
           /* ========================================================================= */
           /* ⚙️ 나의 투자 설정 뷰 (Vercel / Linear Style Sidebar Navigation Layout)    */
           /* ========================================================================= */
@@ -609,7 +731,9 @@ export default function AdminSettingsPage() {
 
             </div>
           </div>
-        ) : (
+        )}
+
+        {activeTab === "users" && (
           /* ========================================================================= */
           /* 👥 전체 사용자 관리 뷰 (Super Admin 전용)                                  */
           /* ========================================================================= */
@@ -732,6 +856,289 @@ export default function AdminSettingsPage() {
                 </table>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === "translation" && (
+          /* ========================================================================= */
+          /* 🌐 다국어 번역 관리 뷰 (Super Admin 전용)                                   */
+          /* ========================================================================= */
+          <div className="space-y-6 animate-in fade-in duration-200">
+            
+            {/* A. 새로운 번역 등록 인라인 폼 */}
+            <div className="bg-zinc-900/30 backdrop-blur-xl rounded-2xl border border-zinc-800 p-6 shadow-lg space-y-4">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <h2 className="text-base font-semibold flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-blue-400" />
+                  신규 주식 한글명 커스텀 등록
+                </h2>
+                <span className="text-[10px] text-zinc-400 font-semibold bg-zinc-800 px-2 py-0.5 rounded">
+                  AUTO SYNC ACTIVE
+                </span>
+              </div>
+              
+              <form onSubmit={handleCreateTranslation} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                <div className="text-xs">
+                  <label className="block text-zinc-400 font-semibold mb-1.5 uppercase tracking-wider">
+                    미국 주식 Ticker (영어)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="예: TSLA"
+                    value={newTicker}
+                    onChange={(e) => setNewTicker(e.target.value)}
+                    className="w-full bg-[#0a0f1d] border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 tracking-widest font-mono uppercase"
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className="text-xs">
+                  <label className="block text-zinc-400 font-semibold mb-1.5 uppercase tracking-wider">
+                    한국어 치환 이름 (한글)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="예: 테슬라"
+                    value={newNameKo}
+                    onChange={(e) => setNewNameKo(e.target.value)}
+                    className="w-full bg-[#0a0f1d] border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-lg shadow-indigo-950/20 hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      등록 중...
+                    </>
+                  ) : (
+                    "번역 사전에 즉시 등록"
+                  )}
+                </button>
+              </form>
+            </div>
+
+            {/* B. 데이터 테이블 필터 및 조회 영역 */}
+            <div className="bg-zinc-900/30 backdrop-blur-xl rounded-2xl border border-zinc-800 p-6 shadow-lg space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-zinc-800 pb-4">
+                <div>
+                  <h2 className="text-base font-semibold flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-emerald-400" />
+                    주식 한글화 기준정보 데이터 목록
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    전체 사전에 저장된 번역 데이터 수: <strong className="text-emerald-400">{translations.length}개</strong>
+                  </p>
+                </div>
+                
+                {/* 실시간 필터 인풋 필드 */}
+                <div className="relative max-w-xs w-full">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                  <input
+                    type="text"
+                    placeholder="티커 또는 한글명 검색..."
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full bg-[#0a0f1d] border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* C. 데이터 그리드 테이블 */}
+              <div className="overflow-x-auto rounded-xl border border-zinc-800/80 bg-zinc-950/40">
+                {loadingTranslations ? (
+                  <div className="py-20 flex flex-col items-center justify-center gap-3">
+                    <Loader2 className="w-8 h-8 animate-spin text-zinc-500" />
+                    <span className="text-xs text-zinc-500 font-semibold">데이터베이스 로딩 중...</span>
+                  </div>
+                ) : filteredTranslations.length === 0 ? (
+                  <div className="py-16 text-center">
+                    <Globe className="mx-auto w-12 h-12 text-zinc-700 mb-3" />
+                    <p className="text-xs font-semibold text-zinc-500">등록되었거나 검색 조건에 부합하는 데이터가 없습니다.</p>
+                    <p className="text-[11px] text-zinc-600 mt-1">상단 폼을 이용하여 첫 번역 주식을 등록해 보세요!</p>
+                  </div>
+                ) : (() => {
+                  // 페이징 계산식 실행
+                  const totalPages = Math.ceil(filteredTranslations.length / itemsPerPage);
+                  const indexOfLastItem = currentPage * itemsPerPage;
+                  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+                  const currentItems = filteredTranslations.slice(indexOfFirstItem, indexOfLastItem);
+                  
+                  return (
+                    <>
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-zinc-900/80 border-b border-zinc-800 text-zinc-400 font-bold uppercase tracking-wider">
+                            <th className="p-4">ID</th>
+                            <th className="p-4">Ticker (티커)</th>
+                            <th className="p-4">Korean Name (한글 이름)</th>
+                            <th className="p-4 text-right">Actions (작업)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {currentItems.map((item) => (
+                            <tr 
+                              key={item.id} 
+                              className={`border-b border-zinc-800/60 hover:bg-zinc-900/30 transition-colors
+                                ${editingId === item.id ? "bg-blue-950/10" : ""}`}
+                            >
+                              {/* 1. 번역 데이터 고유 ID */}
+                              <td className="p-4 font-mono text-zinc-500 font-bold">
+                                {item.id}
+                              </td>
+                              
+                              {/* 2. 티커 (영문 모노체 스타일링) */}
+                              <td className="p-4 font-mono font-bold text-slate-300 tracking-wider">
+                                {item.ticker}
+                              </td>
+                              
+                              {/* 3. 한국어 이름 셀 (인라인 에디터) */}
+                              <td className="p-4">
+                                {editingId === item.id ? (
+                                  <input
+                                    type="text"
+                                    value={editingName}
+                                    onChange={(e) => setEditingName(e.target.value)}
+                                    className="bg-[#05080f] border border-blue-500/50 rounded-lg px-3 py-1 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") handleUpdateTranslation(item.id);
+                                      if (e.key === "Escape") setEditingId(null);
+                                    }}
+                                    autoFocus
+                                  />
+                                ) : (
+                                  <span className="text-slate-100 font-medium">
+                                    {item.name_ko}
+                                  </span>
+                                )}
+                              </td>
+                              
+                              {/* 4. 작업 액션 버튼셋 */}
+                              <td className="p-4 text-right">
+                                <div className="flex items-center justify-end space-x-2">
+                                  {editingId === item.id ? (
+                                    <>
+                                      <button
+                                        onClick={() => handleUpdateTranslation(item.id)}
+                                        className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+                                        title="저장"
+                                      >
+                                        <Check className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={() => setEditingId(null)}
+                                        className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors cursor-pointer"
+                                        title="취소"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        onClick={() => startEditTranslation(item)}
+                                        className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors cursor-pointer"
+                                        title="수정"
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={() => handleDeleteTranslation(item.id, item.ticker)}
+                                        className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-colors cursor-pointer"
+                                        title="삭제"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+
+                      {/* Premium Dark-mode Pagination Controller */}
+                      {totalPages > 1 && (
+                        <div className="flex flex-col sm:flex-row items-center justify-between border-t border-zinc-800/80 pt-5 mt-4 gap-4">
+                          <span className="text-xs text-zinc-500 font-semibold">
+                            Showing <strong className="text-zinc-300">{indexOfFirstItem + 1}</strong> to <strong className="text-zinc-300">{Math.min(indexOfLastItem, filteredTranslations.length)}</strong> of <strong className="text-zinc-300">{filteredTranslations.length}</strong> items
+                          </span>
+                          
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                              disabled={currentPage === 1}
+                              className="px-3 py-2 rounded-xl text-[10px] font-bold border border-zinc-800 bg-[#0a0f1d] hover:bg-zinc-800/60 disabled:opacity-40 disabled:hover:bg-[#0a0f1d] text-zinc-400 hover:text-white transition-all cursor-pointer"
+                            >
+                              Previous
+                            </button>
+                            
+                            {Array.from({ length: totalPages }, (_, i) => i + 1)
+                              .filter(page => {
+                                return (
+                                  page === 1 ||
+                                  page === totalPages ||
+                                  Math.abs(page - currentPage) <= 1
+                                );
+                              })
+                              .map((page, idx, arr) => {
+                                const showEllipsisBefore = page > 1 && arr[idx - 1] !== page - 1;
+                                return (
+                                  <React.Fragment key={page}>
+                                    {showEllipsisBefore && (
+                                      <span className="text-zinc-600 px-1 text-xs">...</span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => setCurrentPage(page)}
+                                      className={`w-8 h-8 rounded-xl text-[10px] font-bold transition-all flex items-center justify-center cursor-pointer
+                                        ${currentPage === page
+                                          ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-teal-950/20 border border-teal-500/20"
+                                          : "border border-zinc-800 bg-[#0a0f1d] hover:bg-zinc-800/60 text-zinc-400 hover:text-white"
+                                        }`}
+                                    >
+                                      {page}
+                                    </button>
+                                  </React.Fragment>
+                                );
+                              })}
+                              
+                            <button
+                              type="button"
+                              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                              disabled={currentPage === totalPages}
+                              className="px-3 py-2 rounded-xl text-[10px] font-bold border border-zinc-800 bg-[#0a0f1d] hover:bg-zinc-800/60 disabled:opacity-40 disabled:hover:bg-[#0a0f1d] text-zinc-400 hover:text-white transition-all cursor-pointer"
+                            >
+                              Next
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+            
+            {/* 도움말 가이드 */}
+            <div className="bg-gradient-to-br from-blue-950/10 to-zinc-900/40 rounded-2xl border border-blue-900/20 p-5 space-y-2 shadow-md">
+              <div className="flex items-center gap-2 text-blue-400">
+                <HelpCircle className="w-4 h-4" />
+                <span className="text-[10px] font-bold uppercase tracking-wider">i18n 해외주식 한글 치환 원리</span>
+              </div>
+              <p className="text-[11px] text-zinc-400 leading-relaxed">
+                해외 주식 Ticker명(예: AAPL)을 한국어명(예: 애플)으로 변환해 주는 로컬 캐싱 시스템입니다.
+                사용자가 등록하거나 수정한 내용은 실시간으로 **백엔드 DB**에 반영되며, 백엔드 서버의 **RAM 캐시와 즉각 핫싱크(Hot-sync)**되어 0ms에 준하는 극도로 빠른 응답 속도를 자랑합니다.
+              </p>
+            </div>
           </div>
         )}
       </div>
