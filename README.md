@@ -54,8 +54,8 @@
    # 설정 파일 생성 (템플릿 복사)
    cp .env.local.example .env.local
 
-   # 서버 실행 (로컬 개발 모드 기본 구동)
-   python run.py local
+   # 서버 실행 (가상환경 수동 활성화 생략 가능! run.py가 자동 감지 및 자가 치환 실행)
+   python run.py local  # (또는 인자 생략 시 기본값: python run.py)
 
    # 서버 실행 (개발 모드)
    python run.py dev
@@ -63,6 +63,10 @@
    # 서버 실행 (운영 모드)
    python run.py prod
    ```
+
+   > [!TIP]
+   > **💡 가상환경 활성화 생략 가이드:** 
+   > `run.py` 런처는 자체적으로 로컬 가상환경(`venv`)을 감지하여 가상환경 파이썬 프로세스로 자동 전환(자가 치환, Self Re-execution)합니다. 따라서 패키지 설치(`pip install`) 이후에는 따로 `source venv/Scripts/activate`를 실행하지 않고 바로 `python run.py` 명령어로 서버를 간편하게 실행할 수 있습니다.
 
 3. **프론트엔드 설정**
 

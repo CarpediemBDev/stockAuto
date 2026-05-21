@@ -10,7 +10,6 @@ import { toast } from "sonner";
 const navItems = [
   { href: "/", label: "📈 Auto Trading" },
   { href: "/scanner", label: "🔭 Market Scanner" },
-  { href: "/admin/settings", label: "⚙️ System Admin" },
 ];
 
 export function NavBar() {
@@ -18,7 +17,10 @@ export function NavBar() {
   const router = useRouter();
   const [tradeMode, setTradeMode] = useState("VIRTUAL");
   const [isRealEnabled, setIsRealEnabled] = useState(false);
+  const [isBotRunning, setIsBotRunning] = useState(false);
+  const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [username, setUsername] = useState<string | null>(null);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
   // 현재 사용자명 읽기
   useEffect(() => {
@@ -36,6 +38,7 @@ export function NavBar() {
       const res = await botAPI.getStatus();
       setTradeMode(res.data.trade_mode);
       setIsRealEnabled(res.data.is_real_enabled);
+      setIsBotRunning(res.data.is_running);
     } catch (error) {
       // Silently fail in navbar background fetches
     }
@@ -50,6 +53,26 @@ export function NavBar() {
     const interval = setInterval(fetchStatus, 8000); // 8초 주기로 전역 상태 동기화
     return () => clearInterval(interval);
   }, [fetchStatus]);
+
+  const handleToggleBot = async () => {
+    setIsTogglingBot(true);
+    try {
+      if (isBotRunning) {
+        await botAPI.stop();
+        setIsBotRunning(false);
+        toast.success("자율 트레이딩 자동매매 루프를 정지했습니다.");
+      } else {
+        await botAPI.start();
+        setIsBotRunning(true);
+        toast.success("자율 트레이딩 자동매매 루프를 가동했습니다.");
+      }
+      await fetchStatus();
+    } catch (error: any) {
+      toast.error(error.message || "봇 제어에 실패했습니다.");
+    } finally {
+      setIsTogglingBot(false);
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem("stockauto_token");
@@ -120,19 +143,114 @@ export function NavBar() {
                 })}
               </div>
 
-              {/* 사용자 계정 & 로그아웃 버튼 */}
+              {/* 사용자 계정 & 마이크로 컨트롤 센터 팝오버 */}
               {username && (
-                <div className="flex items-center space-x-4 border-l border-zinc-800 pl-6">
-                  <div className="flex flex-col text-right">
-                    <span className="text-xs text-zinc-400">Welcome</span>
-                    <span className="text-sm font-semibold text-white">{username}님</span>
-                  </div>
+                <div className="relative border-l border-zinc-800 pl-6 flex items-center">
                   <button
-                    onClick={handleLogout}
-                    className="px-3.5 py-1.5 rounded-lg border border-zinc-800 hover:border-red-500/30 hover:bg-red-500/10 text-zinc-400 hover:text-red-400 text-xs font-semibold active:scale-[0.98] transition-all duration-200"
+                    onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                    className="flex items-center space-x-2.5 px-3.5 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 hover:bg-zinc-900/50 text-white font-semibold text-xs tracking-tight transition-all duration-200 active:scale-[0.98] cursor-pointer"
                   >
-                    로그아웃
+                    <span className={cn("w-1.5 h-1.5 rounded-full animate-pulse", isBotRunning ? "bg-emerald-500" : "bg-zinc-500")}></span>
+                    <span>{username}님</span>
+                    <svg
+                      className={cn("w-3.5 h-3.5 text-zinc-400 transition-transform duration-200", isUserMenuOpen && "rotate-180")}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+                    </svg>
                   </button>
+
+                  {/* 드롭다운 메뉴 팝오버 */}
+                  {isUserMenuOpen && (
+                    <>
+                      {/* 클릭 오프 감지 백드롭 */}
+                      <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)}></div>
+                      
+                      <div className="absolute right-0 top-10 mt-2 w-52 rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                        {/* 계정 정보 */}
+                        <div className="px-3 py-2 border-b border-zinc-800/60 mb-1.5">
+                          <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">User Account</p>
+                          <p className="text-xs text-white font-bold truncate mt-0.5">{username}</p>
+                        </div>
+                        
+                        {/* 실시간 상태 정보 */}
+                        <div className="px-3 py-1.5 space-y-1 text-[11px] text-zinc-400">
+                          <div className="flex justify-between items-center">
+                            <span>엔진 모드:</span>
+                            <span className="font-semibold text-zinc-200">
+                              {tradeMode === 'REAL' ? '🔥 REAL' : tradeMode === 'MOCK' ? '⚡ MOCK' : '📝 SIMULATED'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span>봇 상태:</span>
+                            <span className={cn("font-bold flex items-center gap-1", isBotRunning ? "text-emerald-400" : "text-zinc-500")}>
+                              <span className={cn("w-1.5 h-1.5 rounded-full", isBotRunning ? "bg-emerald-500 animate-pulse" : "bg-zinc-500")}></span>
+                              {isBotRunning ? "가동 중" : "정지됨"}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        {/* 원클릭 퀵 봇 제어 버튼 */}
+                        <div className="px-2 py-1.5">
+                          <button
+                            onClick={handleToggleBot}
+                            disabled={isTogglingBot}
+                            className={cn(
+                              "w-full py-2 rounded-xl font-bold text-[10px] transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98]",
+                              isBotRunning 
+                                ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20" 
+                                : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20"
+                            )}
+                          >
+                            {isTogglingBot ? (
+                              <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>
+                            ) : isBotRunning ? (
+                              <>
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
+                                <span>자동매매 즉시 정지</span>
+                              </>
+                            ) : (
+                              <>
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"/></svg>
+                                <span>자동매매 즉시 가동</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        
+                        <div className="border-t border-zinc-800/60 my-1"></div>
+
+                        {/* 개인 투자 설정 단축 링크 */}
+                        <Link
+                          href="/admin/settings"
+                          onClick={() => setIsUserMenuOpen(false)}
+                          className="flex items-center space-x-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-zinc-800/50 text-xs font-semibold transition-all duration-200 cursor-pointer"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          <span>⚙️ 개인 투자 설정</span>
+                        </Link>
+                        
+                        {/* 로그아웃 */}
+                        <button
+                          onClick={() => {
+                            setIsUserMenuOpen(false);
+                            handleLogout();
+                          }}
+                          className="w-full flex items-center space-x-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-red-400 hover:bg-red-500/10 text-xs font-semibold transition-all duration-200 cursor-pointer"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                          </svg>
+                          <span>로그아웃</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>

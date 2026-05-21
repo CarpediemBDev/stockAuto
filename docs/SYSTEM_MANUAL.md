@@ -226,7 +226,7 @@ graph TD
 
 ### 1. 백엔드 실행 (Backend Startup)
 
-백엔드는 OS 환경변수 주입 실수를 원천 방지하기 위해 **Spring Boot Style 통합 프로필 런처 (`run.py`)** 를 지원합니다. `/backend` 폴더에서 아래 명령어 중 하나를 실행하십시오.
+백엔드는 OS 환경변수 주입 실수와 가상환경 수동 활성화 번거로움을 원천 방지하기 위해 **Spring Boot Style 통합 프로필 런처 및 가상환경 자가 치환 시스템 (`run.py`)** 을 지원합니다. `/backend` 폴더에서 아래 명령어 중 하나를 실행하십시오.
 
 ```bash
 # 1. 로컬 개발 환경 (소스코드 자동 릴로드 ON, .env.local 로드)
@@ -239,8 +239,14 @@ python run.py dev
 python run.py prod
 ```
 
+> [!TIP]
+> **💡 가상환경(venv) 자동 감지 및 자가 치환 (DX 업그레이드)**
+> `run.py` 런처는 실행 시 자동으로 프로젝트 내부의 로컬 가상환경(`venv`) 존재 여부를 확인합니다.
+> 만약 가상환경이 존재하고 현재 실행 중인 파이썬 인터프리터가 가상환경 내부의 것이 아니라면, **`venv/Scripts/python.exe` (또는 `venv/bin/python`) 프로세스로 자신을 투명하게 대체(os.execv)**하여 다시 구동시킵니다.
+> 이 덕분에 번거롭게 `venv\Scripts\activate`를 먼저 입력해 가상환경을 활성화하지 않고도 **바로 `python run.py`만 터미널에 입력하여 안전하게 가상환경 상태로 구동할 수 있습니다.**
+
 > [!IMPORTANT]
-> 더 이상 터미널에서 복잡하게 `uvicorn app.main:app --reload` 명령어를 직접 타이핑하거나 OS별 환경변수를 억지로 세팅할 필요가 없습니다. `run.py` 런처가 프로필 파라미터를 읽어 완벽히 안전하게 구동해 줍니다.
+> 더 이상 터미널에서 복잡하게 `uvicorn app.main:app --reload` 명령어를 직접 타이핑하거나 OS별 환경변수를 억지로 세팅할 필요가 없습니다. `run.py` 런처가 프로필 파라미터를 읽고 가상환경을 자동으로 활성화하여 완벽히 안전하게 구동해 줍니다.
 
 ### 2. 프론트엔드 실행 (Frontend Startup)
 
