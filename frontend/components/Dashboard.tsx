@@ -6,6 +6,7 @@ import { TradeLogs, TradeLog } from "./TradeLogs";
 import { AccountBalance } from "./AccountBalance";
 import PortfolioView from "./PortfolioView";
 import LiveLogViewer from "./LiveLogViewer";
+import { AssetTrendChart } from "./AssetTrendChart";
 
 import { botAPI, tradeAPI, isCancel } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
@@ -139,6 +140,11 @@ export function Dashboard() {
         </div>
 
         <AccountBalance displayCurrency={displayCurrency} />
+        
+        {/* 자산 성장 추이 차트 PoC (Phase 14) */}
+        <div className="mb-10">
+          <AssetTrendChart displayCurrency={displayCurrency} logs={logs} />
+        </div>
         
         <div className="mb-10">
           <h2 className="text-xl font-bold text-slate-100 mb-4 flex items-center">

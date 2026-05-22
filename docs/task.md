@@ -130,3 +130,23 @@
 - [x] **[사용자별 데이터 격리]** Holding, TradeLog, WatchList 등 기존 테이블에 `user_id` FK 추가, 사용자별 데이터 완전 격리
 - [x] **[사용자별 봇 인스턴스]** 사용자마다 독립적인 봇 스케줄러/브로커 인스턴스 할당 (멀티테넌시)
 - [x] **[프로필 대시보드]** 로그인 후 개인 대시보드에서 본인의 모드 선택, 증권사 연동, 포트폴리오 확인 UI 구현
+
+## 🌟 [Phase 13] KIS API Key 실시간 통신 검증 및 안전 폴백 경고 시스템 — 완료 [x]
+
+> **핵심 목표:** 어드민 설정 페이지에서 트레이딩 모드를 MOCK/REAL로 전환 및 저장할 때, API Key 정보가 한국투자증권(KIS) 금융 서버와 실제로 정상 통신되는지 즉시 검증하고, 실패 시 강력한 Fallback UX를 노출합니다.
+
+- [x] **[백엔드 API 구현]** `backend/app/admin/router.py` 내 `@router.post("/verify-kis")` 엔드포인트 구현 (토큰 발급 및 잔고 조회 실질 유효성 검증)
+- [x] **[프론트엔드 UI 연동]** `frontend/app/admin/settings/page.tsx` 내 `handleSave` 실행 전 검증 API 호출 및 에러 시 토스트/경고 고지(Simulated 후퇴 고지) 구현
+- [x] **[통합 라이브 검증]** 정상 키 입력과 고의 실패 키 입력 상황에서의 흐름 검증
+- [x] **[Git 정리]** 작업 완료 후 unstaged 변경본 포함 일괄 커밋
+
+## 🌟 [Phase 14] 예수금 부족 실시간 텔레그램 경고 브릿지 및 자산 성장 차트 PoC 실장 — 완료 [x]
+
+> **핵심 목표:** 매수 시점 예수금 부족 감지 시 텔레그램 경고 알림 브릿지를 가동하고, 대시보드 메인 계좌 현황 밑에 자산 성장 추이를 시각화하는 세련된 SVG/Area 차트 PoC를 안착시킵니다.
+
+- [x] **[백엔드 텔레그램 연동]** `backend/app/bot/scheduler.py` 내 `run_user_trading_flow` 가용 예수금 부족 감지 시(`final_qty < 1`) 텔레그램 경고 메시지 비동기 발송 로직 이식 완료
+- [x] **[프론트엔드 차트 신설]** `frontend/components/AssetTrendChart.tsx` 프리미엄 그라데이션 자산 추이 SVG/Area 차트 컴포넌트 신규 개발 완료 (반응형 SVG & 호버 마이크로 인터랙션 완비)
+- [x] **[대시보드 레이아웃 조립]** `frontend/components/Dashboard.tsx` 내 `AccountBalance`와 `PortfolioView` 사이 공간에 차트 컴포넌트 조립 및 연동 완료
+- [x] **[시나리오 검증 및 마감]** 예수금 부족 시나리오의 텔레그램 메시지 조립 구조 완성 및 UI 렌더링 디테일 완료
+
+

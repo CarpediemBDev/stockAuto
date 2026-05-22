@@ -167,6 +167,20 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     if db.query(Holding).filter(Holding.user_id == user_id, Holding.ticker == ticker).first():
                         continue
 
+                    # ① 20분 쿨다운: 동일 종목 매도 후 20분간 재매수 금지 (Whipsaw 방지)
+                    cooldown_cutoff = datetime.now() - timedelta(minutes=20)
+                    recent_sell = db.query(TradeLog).filter(
+                        TradeLog.user_id == user_id,
+                        TradeLog.ticker == ticker,
+                        TradeLog.trade_type == "SELL",
+                        TradeLog.executed_at >= cooldown_cutoff
+                    ).first()
+                    if recent_sell:
+                        log_action(db, user_id,
+                            f"[BUY SKIP] {ticker} cooldown active — sold at {recent_sell.executed_at.strftime('%H:%M')} (20min cooldown).",
+                            "INFO")
+                        continue
+
                     # ② 매수 직전 실시간 현재가 재확인 (캐시 데이터 Staleness 방지)
                     realtime_price = await get_realtime_price(ticker)
                     if realtime_price is None:
@@ -233,6 +247,20 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                             f"SKIP PURCHASE: Insufficient available cash for {ticker}. "
                             f"Required price: ${current_price:.2f} > Max Budget: ${max_order_budget_usd:.2f}"
                         ), "WARNING")
+                        
+                        # 💡 텔레그램 예수금 부족 경고 알림 전송 (Phase 14)
+                        from app.core.telegram import send_message_async
+                        current_price_krw = current_price * exchange_rate
+                        send_message_async(
+                            user_id,
+                            f"⚠️ *[자동매수 실패 - 예수금 부족]*\n"
+                            f"종목: {ticker} ({s['name']})\n\n"
+                            f"• *실시간 현재가:* `${current_price:.2f}` (약 {current_price_krw:,.0f}원)\n"
+                            f"• *권장 투자금액:* `${proposed_value_usd:.2f}`\n"
+                            f"• *가용 예수금:* `${cash_balance_usd:.2f}`\n"
+                            f"• *최대 주문한도(95%):* `${max_order_budget_usd:.2f}`\n\n"
+                            f"안전을 위해 해당 종목 매수를 보류하고, 엔진은 Simulated(우회) 안전 동작을 유지합니다. 계좌 예수금을 점검해 주세요."
+                        )
                         continue
                     
                     # 격리 매수 호출
