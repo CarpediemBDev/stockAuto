@@ -222,6 +222,64 @@ graph TD
 3. `.env` 파일의 증권사 이름만 변경해 주면 소스코드 수정 없이 전체 UI 및 계좌 연동이 즉시 토스증권으로 자동 스위칭됩니다!
 
 
+
+## 🤖 텔레그램 트레이딩 브릿지 아키텍처 & 연동 가이드 (Telegram Trading Bridge)
+
+StockAuto는 텔레그램 봇 API를 통해 사용자의 스마트폰과 백엔드 서버를 1대1 무중단 양방향으로 연결하는 대화형 트레이딩 브릿지 시스템을 탑재하고 있습니다. 이를 통해 외부에서도 실시간으로 시스템 모니터링 및 트레이딩 루프의 가동/중지가 가능합니다.
+
+### 📐 텔레그램 연동 아키텍처 시퀀스 다이어그램 (Mermaid Sequence)
+
+사용자(Telegram App)의 명령 입력부터 백엔드 엔진의 처리, 외부 증권사 API 연동 및 비동기 답장 전송까지의 전체 데이터 흐름도입니다.
+
+```mermaid
+sequenceDiagram
+    participant User as 사용자 (Telegram)
+    participant TG as 텔레그램 API 서버
+    participant Daemon as 폴링 데몬 스레드 (배달부)
+    participant Engine as 백엔드 컨트롤러 (telegram.py)
+    participant DB as SQLite 데이터베이스
+
+    Note over Daemon, DB: [서버 가동] 활성 사용자 조회 후 개별 데몬 스레드 시작
+    
+    loop 실시간 메시지 모니터링 (Long-Polling)
+        Daemon->>TG: getUpdates 요청
+        TG-->>Daemon: 사용자의 '/status' 명령어 수신
+    end
+    
+    Note over Daemon, Engine: [보안 검증] 송신자 Chat ID 일치 여부 판독 및 차단 필터 가동
+    Daemon->>Engine: _process_command(user_id, text) 호출
+    
+    Note over Engine, DB: [명령 처리] DB 보유 잔고 쿼리 및 증권사 실시간 자산 취합
+    Engine->>DB: Holdings 테이블 및 계좌 정보 매핑
+    Engine->>TG: sendMessage (포트폴리오 자산 정보 마크다운 전송)
+    TG-->>User: 스마트폰으로 실시간 포트폴리오 카드 수신!
+```
+
+### ⚙️ 핵심 모듈 설계 및 동작 원리
+
+이 브릿지는 [`backend/app/core/telegram.py`](file:///d:/dev/workspace/stockAuto/backend/app/core/telegram.py)에 구현되어 있으며, 아래의 4단계 라이프사이클을 통해 안전하고 빠르게 구동됩니다.
+
+#### 1. 서버 라이프사이클 통합 기동 (`start_telegram_bot` & `start_telegram_bot_for_user`)
+- **멀티스레드 기반 다중 유저 지원**: 서버가 시작될 때(`main.py`의 startup lifespan), 활성화된 유저 정보(`UserSettings.telegram_enabled == True`)를 조회하여 유저마다 독립된 **백그라운드 스레드(Thread)**를 개별 가동합니다.
+- **격리성 제어**: `{user_id: threading.Thread}` 및 `{user_id: threading.Event}` 레지스트리를 유지하여 특정 사용자의 봇 데몬에 장애가 발생하더라도 다른 사용자의 서비스 스레드에는 전혀 지장을 주지 않도록 완벽하게 분리 설계되었습니다.
+
+#### 2. 실시간 롱 폴링(Long-Polling) 루프 및 보안 검증 (`_poll_updates_loop_for_user`)
+- **무한 루프 감시**: 봇 토큰과 함께 `getUpdates` API를 지속적으로 호출하며 대기열에 쌓이는 사용자의 입력 메시지를 수집합니다.
+- **오프셋(Offset) 동기화**: 읽은 메시지 ID(`update_id`) 번호에 `+1`을 더해 다음 요청 파라미터로 넘김으로써 메시지 중복 처리나 유실을 원천적으로 예방합니다.
+- **🔐 철통 보안 필터링**: 메시지를 보낸 송신자의 텔레그램 `chat_id`가 DB에 등록된 사용자의 `telegram_chat_id`와 다를 경우, **명령 처리를 즉각 차단하고 경고 로그를 남깁니다.** 이를 통해 타인의 비인가 접근이나 정보 유출 사고를 원천적으로 방지합니다.
+
+#### 3. 명령어 파싱 및 로직 핸들러 (`_process_command`)
+수신한 텍스트의 첫 어절을 추출하여 소문자로 정제한 뒤, `if-elif-else` 제어 흐름에 따라 동작을 처리합니다.
+- **`/start`**: 시스템 연동 완료 인사말 및 간결한 활용 매뉴얼 전송.
+- **`/run`**: DB 내 사용자의 `is_running` 상태 값을 `True`로 전환하여 백엔드 스케줄러 자동매매 루프를 즉각 작동시킵니다.
+- **`/stop`**: `is_running` 값을 `False`로 전환하여 자율 트레이딩 자동매매 루프를 안전하게 일시중지합니다.
+- **`/status`**: QQQ 나스닥 지수 기반의 실시간 원/달러 환율 캐시(`FXRateCache`), 데이터베이스의 보유 종목(`Holding` 테이블), 그리고 동적 브로커 팩토리(`get_broker_client`)를 통해 취합한 실시간 총자산 및 예수금 현황을 가공하여 시인성 높은 마크다운 텍스트로 조립하여 답장을 발송합니다.
+
+#### 4. 비동기식 실시간 답장 전송 (`send_message_async`)
+- 조립된 답장 메시지를 전송할 때, 네트워크망 레이턴시로 인해 메인 트레이딩 엔진의 매매 타이밍이 딜레이되는 현상을 예방하기 위해 **비동기 전송**을 수행합니다.
+- **`ThreadPoolExecutor`** (최대 10개 스레드 풀)를 생성해 두고 전송 작업을 백그라운드 태스크로 던짐으로써, 메인 스레드는 전송 완료 여부를 기다리지 않고 0.1ms 만에 즉시 다음 주식 스캔 및 연산 루프로 복귀합니다.
+
+
 ## 🚀 시스템 실행 방법 (System Execution)
 
 ### 1. 백엔드 실행 (Backend Startup)

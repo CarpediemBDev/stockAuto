@@ -18,7 +18,13 @@ interface BalanceData {
   fx_rate?: number;
 }
 
-export function AccountBalance({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | "USD" }) {
+export function AccountBalance({ 
+  displayCurrency = "KRW",
+  onTotalAssetClick
+}: { 
+  displayCurrency?: "KRW" | "USD";
+  onTotalAssetClick?: () => void;
+}) {
   const [balance, setBalance] = useState<BalanceData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,15 +76,25 @@ export function AccountBalance({ displayCurrency = "KRW" }: { displayCurrency?: 
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      {/* Total Asset */}
-      <div className="bg-gradient-to-br from-indigo-900/40 to-purple-900/40 backdrop-blur-md border border-indigo-500/20 rounded-2xl p-6 shadow-xl relative overflow-hidden transition-transform hover:scale-[1.02] duration-300">
+      {/* Total Asset (Click to view interactive chart) */}
+      <div 
+        onClick={onTotalAssetClick}
+        className="bg-gradient-to-br from-indigo-900/40 to-purple-900/40 backdrop-blur-md border border-indigo-500/30 hover:border-indigo-500/60 rounded-2xl p-6 shadow-xl relative overflow-hidden transition-all hover:scale-[1.03] cursor-pointer active:scale-[0.98] duration-300 group"
+      >
         <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-indigo-500/10 rounded-full blur-xl"></div>
         <div className="flex items-center justify-between mb-2 w-full">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-400">
-              <Wallet size={20} />
+            <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-400 group-hover:bg-indigo-500/30 transition-colors">
+              <Wallet size={20} className="group-hover:scale-110 transition-transform" />
             </div>
-            <h3 className="text-zinc-400 font-medium text-sm">Total Asset (총 자산)</h3>
+            <div>
+              <h3 className="text-zinc-400 font-medium text-sm flex items-center gap-1.5">
+                Total Asset (총 자산)
+                <span className="text-[10px] text-indigo-400 opacity-60 group-hover:opacity-100 transition-opacity font-bold">
+                  (차트 📊)
+                </span>
+              </h3>
+            </div>
           </div>
           <span className={cn(
             "text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wider uppercase",

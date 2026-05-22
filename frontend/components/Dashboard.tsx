@@ -19,6 +19,7 @@ export function Dashboard() {
   const [tradeMode, setTradeMode] = useState("VIRTUAL");
   const [isReal, setIsReal] = useState(false);
   const [logs, setLogs] = useState<TradeLog[]>([]);
+  const [isChartOpen, setIsChartOpen] = useState(false);
 
   const fetchStatus = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -139,12 +140,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <AccountBalance displayCurrency={displayCurrency} />
-        
-        {/* 자산 성장 추이 차트 PoC (Phase 14) */}
-        <div className="mb-10">
-          <AssetTrendChart displayCurrency={displayCurrency} logs={logs} />
-        </div>
+        <AccountBalance displayCurrency={displayCurrency} onTotalAssetClick={() => setIsChartOpen(true)} />
         
         <div className="mb-10">
           <h2 className="text-xl font-bold text-slate-100 mb-4 flex items-center">
@@ -174,6 +170,32 @@ export function Dashboard() {
 
         <TradeLogs logs={logs} />
       </div>
+
+      {/* 프리미엄 다크 글래스모피즘 모달 (자산 성장 차트) */}
+      {isChartOpen && (
+        <div 
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsChartOpen(false);
+          }}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300"
+        >
+          <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-4xl w-full p-6 relative shadow-2xl animate-in zoom-in-95 duration-300">
+            {/* 닫기 버튼 */}
+            <button 
+              onClick={() => setIsChartOpen(false)}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-white p-2 rounded-full hover:bg-zinc-900 active:scale-95 transition-all z-10 font-bold"
+              aria-label="닫기"
+            >
+              ✕
+            </button>
+
+            {/* 자산 차트 로드 */}
+            <div className="pt-2">
+              <AssetTrendChart displayCurrency={displayCurrency} logs={logs} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
