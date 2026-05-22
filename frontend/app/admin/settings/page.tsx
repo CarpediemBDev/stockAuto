@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, startTransition } from "react";
+
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { 
@@ -86,16 +87,19 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     const token = localStorage.getItem("stockauto_token");
     const storedUsername = localStorage.getItem("stockauto_username");
-    
+
     if (!token) {
       router.push("/login");
     } else {
-      setIsAuthenticated(true);
-      if (storedUsername === "admin") {
-        setIsAdmin(true);
-      }
+      startTransition(() => {
+        setIsAuthenticated(true);
+        if (storedUsername === "admin") {
+          setIsAdmin(true);
+        }
+      });
     }
   }, [router]);
+
 
   const fetchSettings = async () => {
     try {
@@ -182,8 +186,46 @@ export default function AdminSettingsPage() {
     setIsSaving(true);
     
     try {
+      // KIS API Key 실시간 통신 검증 트리거 (Phase 13)
+      let verifySuccess = true;
+      let verifyMessage = "";
+      
+      if (settings.trade_mode === "MOCK" || settings.trade_mode === "REAL") {
+        try {
+          const verifyRes = await api.post("/admin/verify-kis", settings);
+          verifySuccess = verifyRes.data.success;
+          verifyMessage = verifyRes.data.message;
+        } catch (verifyErr) {
+          const err = verifyErr as Error;
+          verifySuccess = false;
+          verifyMessage = err.message || "통신 검증 중 오류가 발생했습니다.";
+        }
+      }
+      
+      // 설정값은 검증 실패 여부와 무관하게 DB에 저장
       await api.post("/admin/", settings);
-      toast.success("설정이 정상적으로 저장되었습니다! 실시간 핫리로드 완료.");
+      
+      if (!verifySuccess) {
+        toast.warning(
+          <div>
+            <p className="font-bold text-amber-500">⚠️ KIS 연동 검증 실패</p>
+            <p className="text-xs text-zinc-300 mt-1">{verifyMessage}</p>
+            <p className="text-xs text-amber-400/90 font-semibold mt-1.5 leading-normal">
+              안전을 위해 백엔드 트레이딩 엔진이 SIMULATED(모의 투자) 브로커로 자동 후퇴(대체)하여 가동됩니다.
+            </p>
+          </div>,
+          {
+            duration: 8000,
+          }
+        );
+      } else {
+        toast.success(
+          settings.trade_mode === "SIMULATED"
+            ? "설정이 정상적으로 저장되었습니다! 실시간 핫리로드 완료."
+            : "설정이 저장되었으며 KIS API 연동이 정상 검증되었습니다!"
+        );
+      }
+      
       await fetchSettings();
     } catch (err) {
       const error = err as Error;

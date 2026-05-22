@@ -36,6 +36,64 @@ def get_user_settings(
         
     return db_settings
 
+@router.post("/verify-kis")
+def verify_kis_settings(
+    payload: SettingsUpdateSchema,
+    current_user: User = Depends(get_current_user)
+):
+    """제공된 KIS 설정의 실시간 통신 유효성을 검증합니다."""
+    if payload.trade_mode == "SIMULATED":
+        return {"success": True, "message": "SIMULATED 모드는 통신 검증이 필요하지 않습니다."}
+        
+    # KISClient를 위한 임시 settings 객체 래핑
+    class TempUserSettings:
+        def __init__(self, p, user_id):
+            self.user_id = user_id
+            self.kis_app_key = p.kis_app_key
+            self.kis_app_secret = p.kis_app_secret
+            self.kis_account_no = p.kis_account_no
+            self.trade_mode = p.trade_mode
+
+    temp_settings = TempUserSettings(payload, current_user.id)
+    
+    from app.bot.kis_api import KISClient
+    client = KISClient(user_settings=temp_settings)
+    
+    # 1단계: 토큰 발급 테스트
+    token = client.get_access_token()
+    if not token:
+        return {
+            "success": False,
+            "message": "KIS Access Token 발급에 실패했습니다. APP KEY 또는 APP SECRET을 확인하세요."
+        }
+        
+    # 2단계: 실제 해외주식 잔고조회 테스트
+    try:
+        balance = client.get_account_balance()
+        provider = balance.get("provider")
+        
+        if provider == "Simulated":
+            return {
+                "success": False,
+                "message": "유효한 API Key가 없어 Simulated(모의) 데이터로 우회 동작 중입니다. 연동 키 값을 다시 확인하세요."
+            }
+        elif provider in ["KIS Mock", "KIS Live"]:
+            return {
+                "success": True,
+                "message": f"KIS API 통신이 성공적으로 검증되었습니다. (서버 유형: {provider})"
+            }
+        else:
+            # 잔고조회 API 자체 실패로 기본 딕셔너리 리턴 시 (provider 없음)
+            return {
+                "success": False,
+                "message": "KIS 서버 통신은 되었으나 잔고 조회에 실패했습니다. 계좌번호를 확인하세요."
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"검증 중 알 수 없는 에러가 발생했습니다: {str(e)}"
+        }
+
 @router.post("/")
 def update_user_settings(
     payload: SettingsUpdateSchema,

@@ -385,10 +385,10 @@ async def scan_market_expert():
                     # 3) 변동성 (RVOL)
                     rvol = calculate_rvol(df)
                     
-                    # 4) 신고가 근처 (전일 고가 돌파 여부)
+                    # 4) 신고가 근처 (최근 5일)
                     recent_high = df['High'].iloc[:-1].max()
                     dist_to_high = (last_close / recent_high - 1) * 100
-                    
+
                     # 5) 지수 대비 강세 (Relative Strength)
                     stock_perf = (last_close / df['Close'].iloc[0] - 1)
                     relative_strength = stock_perf - qqq_perf
@@ -397,6 +397,36 @@ async def scan_market_expert():
                     ema9 = calculate_ema(df['Close'], 9)
                     ema20 = calculate_ema(df['Close'], 20)
                     is_aligned = bool(ema9.iloc[-1] > ema20.iloc[-1])
+
+                    # ⭐ 7) 52주 신고가 돌파 (저항 없는 초강세 구간)
+                    # 5d 15m 데이터의 최고가를 52주 고가 대리값으로 사용
+                    high_52w = float(df['High'].max())
+                    is_near_52w_high = last_close >= high_52w * 0.98  # 52주 고가의 98% 이상
+
+                    # ⭐ 8) 연속 상승 모멘텀 (3봉 연속 종가 상승 + 거래량 증가)
+                    momentum_candles = False
+                    if len(df) >= 4:
+                        c = df['Close']
+                        v = df['Volume']
+                        momentum_candles = bool(
+                            c.iloc[-1] > c.iloc[-2] > c.iloc[-3] and
+                            v.iloc[-1] > v.iloc[-2] > v.iloc[-3]
+                        )
+
+                    # ⭐ 9) Pre-market 갭 감지 (장 시작 전 강한 수급 신호)
+                    # 15분봉 데이터 기준: 오늘 첫 봉의 시가 vs 전전일 종가로 근사
+                    premarket_gap_pct = 0.0
+                    try:
+                        today_data = today_df
+                        if not today_data.empty and len(df) >= 20:
+                            first_open_today = float(today_data['Open'].iloc[0])
+                            # 전일 마지막 종가 (오늘 데이터 이전)
+                            prev_day_data = df[df.index < today_data.index[0]]
+                            if not prev_day_data.empty:
+                                prev_day_close = float(prev_day_data['Close'].iloc[-1])
+                                premarket_gap_pct = (first_open_today / prev_day_close - 1) * 100
+                    except Exception:
+                        premarket_gap_pct = 0.0
                     
                     # --- Stage 1 점수화 (가중치 적용) ---
                     s1_score = 0
@@ -406,9 +436,19 @@ async def scan_market_expert():
                     if rvol >= 2.0: s1_score += 30         # 상대 거래량 2배 이상
                     elif rvol >= 1.2: s1_score += 15
                     
-                    if dist_to_high > -1.5: s1_score += 20 # 신고가 근접
+                    if dist_to_high > -1.5: s1_score += 20 # 신고가 근접 (5일)
                     if relative_strength > 0: s1_score += 10 # 지수 대비 강세
                     if is_aligned: s1_score += 10          # 이평선 정배열
+
+                    # ⭐ v2.0 신규 지표 점수
+                    if is_near_52w_high: s1_score += 25    # 52주 신고가 근접/돌파
+                    if momentum_candles: s1_score += 15    # 3봉 연속 상승 모멘텀
+                    if premarket_gap_pct >= 5.0: s1_score += 20  # Pre-market 갭 5% 이상
+
+                    # ⭐ 세 지표 동시 충족 시 시너지 보너스
+                    if is_near_52w_high and momentum_candles and premarket_gap_pct >= 5.0:
+                        s1_score += 10
+                        print(f"[Stage 1] 🔥 SYNERGY BONUS: {ticker} — 52w high + momentum + premarket gap ALL confirmed!")
                     
                     # Stage 2 진입 기준: 점수 30점 이상 혹은 RVOL이 매우 높을 때
                     if s1_score >= 30 or rvol >= 3.0:
@@ -421,7 +461,10 @@ async def scan_market_expert():
                             "dist_to_high": round(dist_to_high, 2),
                             "rs": round(relative_strength * 100, 2),
                             "ema_aligned": is_aligned,
-                            "dollar_volume": round(today_dollar_volume, 2)
+                            "dollar_volume": round(today_dollar_volume, 2),
+                            "is_near_52w_high": is_near_52w_high,
+                            "momentum_candles": momentum_candles,
+                            "premarket_gap_pct": round(premarket_gap_pct, 2),
                         })
                 except: continue
             await asyncio.sleep(0.3) # API 속도 조절
@@ -506,7 +549,10 @@ async def scan_market_expert():
                         "rs": cand['rs'],
                         "ema_aligned": cand.get('ema_aligned', True),
                         "atr": round(latest_atr, 4),
-                        "dollar_volume": cand.get('dollar_volume', 0.0)
+                        "dollar_volume": cand.get('dollar_volume', 0.0),
+                        "is_near_52w_high": cand.get('is_near_52w_high', False),
+                        "momentum_candles": cand.get('momentum_candles', False),
+                        "premarket_gap_pct": cand.get('premarket_gap_pct', 0.0),
                     }
                 })
             except: continue
