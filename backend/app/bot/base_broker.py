@@ -9,7 +9,14 @@ class BaseBroker(ABC):
       - SimulatedBroker: 증권사 API 없이 DB + yfinance 기반 가상 체결
       - KISBroker (MOCK): KIS 모의투자 서버 연동
       - KISBroker (REAL): KIS 실전 서버 연동
+
+    생성자 규격:
+      모든 하위 브로커는 반드시 user_settings 객체를 받는 동일한 생성자 시그니처를 따라야 합니다.
+      팩토리(broker_factory.py)에서 broker_class(user_settings)로 통일 호출됩니다.
     """
+
+    def __init__(self, user_settings=None):
+        self.user_settings = user_settings
 
     @abstractmethod
     def get_account_balance(self) -> dict:

@@ -3,40 +3,30 @@ from app.bot.kis_broker import KISBroker
 from app.bot.simulated_broker import LocalSimulatedBroker
 from app.bot.base_broker import BaseBroker
 
+# 안전하게 연동을 허용할 증권사 클래스 레지스트리 (화이트리스트)
+BROKER_REGISTRY = {
+    "SIMULATED": LocalSimulatedBroker,    # 가상 모의투자 시뮬레이터
+    "MOCK": KISBroker,                    # 한국투자증권 모의투자
+    "REAL": KISBroker,                    # 한국투자증권 실전투자
+    # "TOSS_MOCK": TossBroker,            # 추후 토스증권 모의투자 연동 시
+    # "TOSS_REAL": TossBroker,            # 추후 토스증권 실전투자 연동 시
+}
+
 def get_broker_client(user_settings=None) -> BaseBroker:
     """
     3-Mode 트레이딩 체계에 따라 알맞은 브로커 객체를 반환하는 팩토리 함수 (멀티유저 대응).
     """
-    if user_settings:
-        mode = user_settings.trade_mode
-        kis_app_key = user_settings.kis_app_key
-        user_id = user_settings.user_id
-    else:
-        mode = settings.TRADE_MODE
-        kis_app_key = settings.KIS_APP_KEY
-        user_id = None
+    mode = user_settings.trade_mode if user_settings else settings.TRADE_MODE
+    kis_app_key = user_settings.kis_app_key if user_settings else settings.KIS_APP_KEY
 
-    if mode == "SIMULATED":
-        return LocalSimulatedBroker(user_id=user_id)
+    # KIS API Key 유효성 검사 — 키가 없으면 안전하게 SIMULATED로 폴백
+    if mode in ["MOCK", "REAL"] and not _has_valid_kis_keys(kis_app_key):
+        print(f"[BrokerFactory] ⚠️ {mode} mode but no valid KIS keys. Falling back to SIMULATED.")
+        mode = "SIMULATED"
 
-    # MOCK 또는 REAL → 증권사 API Key 유효성 검사
-    has_valid_keys = _has_valid_kis_keys(kis_app_key)
-
-    if mode == "MOCK":
-        if has_valid_keys:
-            return KISBroker(user_settings)
-        else:
-            print(f"[BrokerFactory] MOCK mode but no valid KIS keys for user {user_id}. Falling back to SimulatedBroker.")
-            return LocalSimulatedBroker(user_id=user_id)
-
-    if mode == "REAL":
-        if has_valid_keys:
-            return KISBroker(user_settings)
-        else:
-            print(f"[BrokerFactory] ⚠️  REAL mode but no valid KIS keys for user {user_id}! Falling back to SimulatedBroker for safety.")
-            return LocalSimulatedBroker(user_id=user_id)
-
-    return LocalSimulatedBroker(user_id=user_id)
+    # 검증된 레지스트리에서 브로커 클래스를 꺼내어 조립 (미등록 모드는 기본 시뮬레이터)
+    broker_class = BROKER_REGISTRY.get(mode, LocalSimulatedBroker)
+    return broker_class(user_settings)
 
 
 def _has_valid_kis_keys(kis_app_key: str) -> bool:
@@ -47,3 +37,4 @@ def _has_valid_kis_keys(kis_app_key: str) -> bool:
         None, ""
     }
     return kis_app_key not in placeholder_keys
+

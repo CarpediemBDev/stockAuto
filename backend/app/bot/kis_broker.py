@@ -11,7 +11,7 @@ class KISBroker(BaseBroker):
     REAL 모드: KIS 실전 서버(openapi)에 주문 전송
     """
     def __init__(self, user_settings=None):
-        self.user_settings = user_settings
+        super().__init__(user_settings)
         self.client = KISClient(user_settings)
 
     def get_account_balance(self) -> dict:
