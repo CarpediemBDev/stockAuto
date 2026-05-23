@@ -31,7 +31,7 @@ async def fetch_index_data(market_index: str = "QQQ") -> pd.DataFrame:
     """
     나스닥 지수(QQQ) 데이터를 가져옵니다.
     """
-    return await fetch_ohlcv(market_index, interval="15m", period="2d")
+    return await fetch_ohlcv(market_index, interval="15m", period="5d")
 
 async def fetch_bulk_ohlcv(tickers: list, interval: str, period: str, group_by: str = "ticker") -> pd.DataFrame:
     """
