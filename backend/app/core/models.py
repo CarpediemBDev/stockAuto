@@ -57,6 +57,8 @@ class TradeLog(Base):
     price = Column(Float)
     quantity = Column(Integer)
     order_no = Column(String, nullable=True)
+    regime_mode = Column(String, nullable=True)     # ⭐ v2.0 장세 레짐 (BULLISH, BEARISH, NEUTRAL)
+    signal_score = Column(Integer, nullable=True)   # ⭐ v2.0 매수 당시의 스캔 점수
     executed_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -73,6 +75,8 @@ class Holding(Base):
     avg_price = Column(Float)   # 평단가
     quantity = Column(Integer)  # 보유수량
     highest_price = Column(Float) # 구매 후 최고가 (트레일링 스탑 기준점)
+    regime_mode = Column(String, nullable=True)     # ⭐ v2.0 진입 당시 장세 레짐
+    buy_stage = Column(Integer, default=1)          # ⭐ v2.0 후지모토 시게루식 피라미딩 단계 (1, 2, 3단계)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships

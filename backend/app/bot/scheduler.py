@@ -7,7 +7,7 @@ import asyncio
 import yfinance as yf  # pyrefly: ignore [missing-import]
 
 
-from app.scanner.scanner import scan_overseas_market, analyze_single_ticker
+from app.scanner.scanner import scan_overseas_market, analyze_single_ticker, check_market_sentiment
 
 scheduler = BackgroundScheduler()
 
@@ -55,7 +55,7 @@ def log_action(db, user_id: int, message: str, level="INFO"):
 
 async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: list):
     """
-    개별 사용자별 독자적인 자동매매 시나리오 처리 함수 (멀티테넌시 격리)
+    개별 사용자별 독자적인 자동매매 시나리오 처리 함수 (멀티테넌시 격리) - ⭐ v2.0 레짐 스위칭 & 피라미딩 & 조기익절 탑재
     """
     db = SessionLocal()
     try:
@@ -64,19 +64,21 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         if not user_settings or not user_settings.is_running:
             return
 
-        log_action(db, user_id, f"Scan Cycle Started (Mode: {user_settings.trade_mode})")
+        # 💡 0. 시장 감정 분석 및 QQQ 레짐 모드 판정
+        sentiment = await check_market_sentiment()
+        log_action(db, user_id, f"Scan Cycle Started (Mode: {user_settings.trade_mode} | Market Regime: {sentiment})")
 
         # 1. 사용자 맞춤형 브로커 인스턴스 획득
         broker = get_broker_client(user_settings)
 
-        # 2. 보유 종목(Holdings) 모니터링 및 매도 판정
+        # 2. 보유 종목(Holdings) 모니터링 및 매도/탈출 판정 (조기 익절 & 트레일링 스탑)
         holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
         for h in holdings:
             try:
                 ticker = h.ticker
                 current_data = signal_map.get(ticker)
                 
-                # 스캐너 후보군에 없더라도 보유 종목은 정밀 단독 기술 분석 수행
+                # 스캐너 후보군에 없더라도 보유 종목은 백그라운드 정밀 단독 기술 분석 수행
                 if not current_data:
                     print(f"[Scheduler User {user_id}] Owned ticker {ticker} not in top scanned signals. Running dedicated technical analysis...")
                     current_data = await analyze_single_ticker(ticker)
@@ -88,6 +90,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                 current_price = current_data['price']
                 profit_rate = ((current_price - h.avg_price) / h.avg_price) * 100
                 current_score = current_data['signal_score']
+                is_smart_exit = current_data.get('details', {}).get('is_smart_exit', False)
 
                 # 최고가(Peak) 갱신
                 if current_price > h.highest_price:
@@ -108,22 +111,27 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                 # 매도 조건 체크
                 sell_reason = None
                 
-                # 지표 1. 동적 손절선 돌파
-                if profit_rate <= -stop_loss_pct:
+                # ⭐ 지표 1. 조기 스마트 익절 (RSI 하락 다이버전스 + MACD 데드크로스)
+                if profit_rate >= 1.0 and is_smart_exit:
+                    sell_reason = f"RSI-MACD Smart Exit (조기 익절 확정 | 수익률: {profit_rate:.2f}%)"
+                
+                # 지표 2. 동적 손절선 돌파
+                elif profit_rate <= -stop_loss_pct:
                     sell_reason = f"Dynamic Stop Loss ({profit_rate:.2f}% <= -{stop_loss_pct:.2f}%)"
                 
-                # 지표 2. 동적 트레일링 스탑 돌파
+                # 지표 3. 동적 트레일링 스탑 돌파 (평단가 밑으로 가더라도 최고가 대비 이탈하면 손절 성격 무조건 탈출)
                 elif current_price <= h.highest_price * (1 - trailing_stop_pct / 100) and h.highest_price > h.avg_price:
                     sell_reason = f"Dynamic Trailing Stop (-{trailing_stop_pct:.2f}% from peak ${h.highest_price})"
                 
-                # 지표 3. 기술적 강세 시그널 붕괴
-                elif current_score < 40:
+                # 지표 4. 기술적 강세 시그널 붕괴
+                # 상승장에서는 40점 미만, 하락/횡보장에서는 50점 미만 하락 시 강제 탈출
+                elif (sentiment == "BULLISH" and current_score < 40) or (sentiment != "BULLISH" and current_score < 50):
                     sell_reason = f"Signal Weakened ({current_score} pts - EMA/VWAP breakdown or Selling pressure)"
 
                 if sell_reason:
                     log_action(db, user_id, f"EXIT SIGNAL: {ticker} | Reason: {sell_reason}", "SIGNAL")
                     
-                    # 브로커를 통한 격리 매도 호출
+                    # 브로커를 통한 매도 주문 집행
                     res = broker.sell_order(ticker, h.quantity, price=current_price)
 
                     if res["success"]:
@@ -134,13 +142,15 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                             trade_type="SELL",
                             price=res["filled_price"],
                             quantity=res["filled_qty"],
-                            order_no=res["order_no"]
+                            order_no=res["order_no"],
+                            regime_mode=sentiment,
+                            signal_score=current_score
                         ))
                         db.delete(h)
                         db.commit()
                         log_action(db, user_id, f"SUCCESS: {ticker} sold via {sell_reason} | Order: {res['order_no']}", "INFO")
                         
-                        # 💡 텔레그램 매도 알림 전송 (Phase 11 멀티유저)
+                        # 텔레그램 매도 알림 전송
                         from app.core.telegram import send_message_async
                         send_message_async(
                             user_id,
@@ -155,17 +165,70 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
             except Exception as item_err:
                 log_action(db, user_id, f"Error processing holding {h.ticker}: {item_err}", "ERROR")
 
-        # 3. 신규 매수 기회 탐색
-        # ① 미국 장 운영 시간 외에는 매수 시도 자체를 스킵 (장외 오더 방지)
+        # 3. 신규 매수 기회 탐색 및 1:2:6 피라미딩 자금 관리
         if not is_us_market_open():
             log_action(db, user_id, "[BUY SKIP] US market is currently closed. No new buy orders placed.", "INFO")
         elif all_signals:
+            # 장세별 통과 커트라인 점수 분기 (상승장 80점, 하락/횡보장 90점)
+            cutoff_score = 80 if sentiment == "BULLISH" else 90
+            
             for s in all_signals:
-                if s['signal_score'] >= 80:
+                if s['signal_score'] >= cutoff_score:
                     ticker = s['ticker']
-                    # 동일 사용자가 이미 보유 중인지 격리 조회
-                    if db.query(Holding).filter(Holding.user_id == user_id, Holding.ticker == ticker).first():
-                        continue
+                    
+                    # 동일 사용자가 이미 보유 중인지 확인 (피라미딩 여부 판별)
+                    existing_holding = db.query(Holding).filter(
+                        Holding.user_id == user_id,
+                        Holding.ticker == ticker
+                    ).first()
+                    
+                    # 💡 v2.0 자금 관리 배분 팩터 및 피라미딩 단계 기본값 설정
+                    proposed_alloc_factor = 1.0 # 기본 전체 비중
+                    next_stage = 3             # 기본 최종 단계 (피라미딩 불허 시)
+                    
+                    if existing_holding:
+                        # 💡 기존 보유 종목인 경우: 상승장(BULLISH) 모드에서만 피라미딩(불타기) 추가 매수 허용
+                        if sentiment != "BULLISH":
+                            continue # 하락/횡보장에서는 추가 매수 전면 스킵
+                            
+                        buy_stage = existing_holding.buy_stage
+                        current_price = s['price']
+                        profit_rate = ((current_price - existing_holding.avg_price) / existing_holding.avg_price) * 100
+                        
+                        if buy_stage == 1:
+                            # 1단계 -> 2단계 피라미딩 조건: 평단 대비 +1.5% 이상 수익권 & 점수 80점 이상 유지
+                            if profit_rate >= 1.5:
+                                proposed_alloc_factor = 0.35 # 2차 추가 매수 비중: 35%
+                                next_stage = 2
+                                log_action(db, user_id, f"[Pyramiding] {ticker} meets 2nd Buy Condition (+{profit_rate:.2f}% profit). Placing 35% confirm order.", "SIGNAL")
+                            else:
+                                continue
+                        elif buy_stage == 2:
+                            # 2단계 -> 3단계 피라미딩 조건: 평단 대비 +3.0% 이상 수익권 & 점수 80점 이상 유지
+                            if profit_rate >= 3.0:
+                                proposed_alloc_factor = 0.50 # 3차 추가 매수 비중: 50%
+                                next_stage = 3
+                                log_action(db, user_id, f"[Pyramiding] {ticker} meets 3rd Buy Condition (+{profit_rate:.2f}% profit). Placing 50% ultimate order.", "SIGNAL")
+                            else:
+                                continue
+                        else:
+                            continue # 이미 3단계 풀배팅 완료 상태
+                    else:
+                        # 💡 신규 종목 첫 진입인 경우: 장세에 따른 피라미딩(상승장) / 1회성 단일 매수(약세장) 분기
+                        if sentiment == "BULLISH":
+                            # 상승장: 후지모토 시게루 1:2:6 기법에 따라 15% 비중의 정찰병 우선 진입
+                            proposed_alloc_factor = 0.15
+                            next_stage = 1
+                            log_action(db, user_id, f"[New Entry] {ticker} scanned in BULLISH market. Placing 15% scout order.", "INFO")
+                        else:
+                            # 하락/횡보장: 피라미딩 금지, 1회성 격리 단일 매수집행 및 비중 제한
+                            next_stage = 3 # 추가 불타기 불허
+                            if sentiment == "BEARISH":
+                                proposed_alloc_factor = 0.30 # 하락장: 비중 30% 제한
+                                log_action(db, user_id, f"[New Entry] {ticker} scanned in BEARISH market. Placing 30% single defensive order.", "INFO")
+                            else:
+                                proposed_alloc_factor = 0.50 # 횡보장: 비중 50% 제한
+                                log_action(db, user_id, f"[New Entry] {ticker} scanned in NEUTRAL market. Placing 50% single defensive order.", "INFO")
 
                     # ① 20분 쿨다운: 동일 종목 매도 후 20분간 재매수 금지 (Whipsaw 방지)
                     cooldown_cutoff = datetime.now() - timedelta(minutes=20)
@@ -223,10 +286,10 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     
                     # 시그널 스코어 가중치 배수
                     score = s['signal_score']
-                    score_factor = 1.0 + (score - 80) * 0.05
+                    score_factor = 1.0 + (score - cutoff_score) * 0.05
                     
-                    # 희망 달러 투자금 및 주수 계산
-                    proposed_value_usd = base_alloc_usd * vol_factor * score_factor
+                    # 💡 희망 달러 투자금 및 주수 계산 (Proposed 비중 팩터 곱해 분할 매수 금액 결정)
+                    proposed_value_usd = base_alloc_usd * vol_factor * score_factor * proposed_alloc_factor
                     proposed_qty = proposed_value_usd / current_price
                     
                     # 예수금 안전장치
@@ -237,9 +300,8 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     
                     log_action(db, user_id, (
                         f"ENTRY SIGNAL: {ticker} ({score} pts) | Price: ${current_price:.2f} | "
-                        f"ATR: {atr:.4f} ({atr_pct:.1f}%) -> VolFactor: {vol_factor:.2f} | "
-                        f"Proposed Qty: {proposed_qty:.1f} -> Final Safe Qty: {final_qty} shares "
-                        f"(Budget Max: ${max_order_budget_usd:.1f})"
+                        f"Alloc Factor: {proposed_alloc_factor:.2f} (Stage: {next_stage}) | "
+                        f"Proposed Qty: {proposed_qty:.1f} -> Final Safe Qty: {final_qty} shares"
                     ), "SIGNAL")
                     
                     if final_qty < 1:
@@ -248,7 +310,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                             f"Required price: ${current_price:.2f} > Max Budget: ${max_order_budget_usd:.2f}"
                         ), "WARNING")
                         
-                        # 💡 텔레그램 예수금 부족 경고 알림 전송 (Phase 14)
+                        # 텔레그램 예수금 부족 경고 알림 전송
                         from app.core.telegram import send_message_async
                         current_price_krw = current_price * exchange_rate
                         send_message_async(
@@ -256,10 +318,9 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                             f"⚠️ *[자동매수 실패 - 예수금 부족]*\n"
                             f"종목: {ticker} ({s['name']})\n\n"
                             f"• *실시간 현재가:* `${current_price:.2f}` (약 {current_price_krw:,.0f}원)\n"
-                            f"• *권장 투자금액:* `${proposed_value_usd:.2f}`\n"
-                            f"• *가용 예수금:* `${cash_balance_usd:.2f}`\n"
-                            f"• *최대 주문한도(95%):* `${max_order_budget_usd:.2f}`\n\n"
-                            f"안전을 위해 해당 종목 매수를 보류하고, 엔진은 Simulated(우회) 안전 동작을 유지합니다. 계좌 예수금을 점검해 주세요."
+                            f"• *분할 투자금액:* `${proposed_value_usd:.2f}`\n"
+                            f"• *가용 예수금:* `${cash_balance_usd:.2f}`\n\n"
+                            f"계좌 예수금을 점검해 주세요."
                         )
                         continue
                     
@@ -267,36 +328,37 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     res = broker.buy_order(ticker, final_qty, price=current_price)
 
                     if res["success"]:
-                        db.add(Holding(
-                            user_id=user_id,
-                            ticker=ticker,
-                            ticker_name=s['name'],
-                            avg_price=res["filled_price"],
-                            quantity=res["filled_qty"],
-                            highest_price=res["filled_price"]
-                        ))
-                        db.add(TradeLog(
-                            user_id=user_id,
-                            ticker=ticker,
-                            ticker_name=s['name'],
-                            trade_type="BUY",
-                            price=res["filled_price"],
-                            quantity=res["filled_qty"],
-                            order_no=res["order_no"]
-                        ))
-                        db.commit()
-                        log_action(db, user_id, f"SUCCESS: {ticker} purchased ({res['filled_qty']} shares) | Order: {res['order_no']}", "INFO")
+                        filled_price = res["filled_price"]
+                        filled_qty = res["filled_qty"]
                         
-                        # 💡 텔레그램 매수 알림 전송 (Phase 11 멀티유저)
-                        from app.core.telegram import send_message_async
-                        send_message_async(
-                            user_id,
-                            f"🟢 *[자동매수 체결]* {ticker} ({s['name']})\n"
-                            f"• *체결 단가:* `${res['filled_price']:,.2f}`\n"
-                            f"• *체결 수량:* `{res['filled_qty']}주`\n"
-                            f"• *시그널 스코어:* `{score}점`\n"
-                            f"• *주문 번호:* `{res['order_no']}`"
-                        )
+                        if existing_holding:
+                            # 💡 기존 보유에 피라미딩 추가 매수인 경우: 평단가 가중 평균 계산 및 수량 증가 업데이트
+                            old_qty = existing_holding.quantity
+                            old_avg = existing_holding.avg_price
+                            
+                            new_qty = old_qty + filled_qty
+                            new_avg = ((old_avg * old_qty) + (filled_price * filled_qty)) / new_qty
+                            
+                            existing_holding.avg_price = round(new_avg, 4)
+                            existing_holding.quantity = new_qty
+                            existing_holding.buy_stage = next_stage
+                            existing_holding.highest_price = max(existing_holding.highest_price, filled_price)
+                            db.commit()
+                            log_action(db, user_id, f"SUCCESS: {ticker} Pyramiding Stage {next_stage} Add-on. New Avg: ${new_avg:.2f}, Total Qty: {new_qty} shares", "INFO")
+                        else:
+                            # 💡 신규 진입인 경우: Holding 레코드 생성
+                            db.add(Holding(
+                                user_id=user_id,
+                                ticker=ticker,
+                                ticker_name=s['name'],
+                                avg_price=filled_price,
+                                quantity=filled_qty,
+                                highest_price=filled_price,
+                                regime_mode=sentiment,
+                                buy_stage=next_stage
+                            ))
+                            db.commit()
+                            log_action(db, user_id, f"SUCCESS: {ticker} purchased ({filled_qty} shares) | Order: {res['order_no']}", "INFO")
                     else:
                         log_action(db, user_id, f"BUY FAILED: {ticker} | {res['message']}", "ERROR")
 

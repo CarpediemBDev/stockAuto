@@ -149,4 +149,17 @@
 - [x] **[대시보드 레이아웃 조립]** `frontend/components/Dashboard.tsx` 내 `AccountBalance`와 `PortfolioView` 사이 공간에 차트 컴포넌트 조립 및 연동 완료
 - [x] **[시나리오 검증 및 마감]** 예수금 부족 시나리오의 텔레그램 메시지 조립 구조 완성 및 UI 렌더링 디테일 완료
 
+## 🌟 [Phase 15] StockAuto v2.0 천하통일 전략 실전 이식 및 레짐 스위칭 연동 — 완료 [x]
+
+> **핵심 목표:** 11대 투자 대가 기법을 QQQ 지수 MA20/MA50 연동 3-Mode 동적 레짐 스위칭과 1:2:6 피라미딩 자금 관리, RSI-MACD 조기 스마트 익절 모듈과 결합하여 실전 백엔드 코어에 완벽히 구축하고 무결성 빌드 검증을 완료한다.
+
+- [x] **[데이터베이스 확장]** `models.py` 내 `TradeLog` 및 `Holding` 테이블에 v2.0 장세 레짐(`regime_mode`), 채점점수(`signal_score`), 피라미딩단계(`buy_stage`) 컬럼 설계 완료
+- [x] **[자가 마이그레이션]** `main.py` 내에 기존 DB와 호환되는 경량 SQLite 자동 ALTER TABLE 마이그레이션 탑재 완료
+- [x] **[스캐너 엔진 업그레이드]** `scanner.py` 내에 세력 매집 OBV 다이버전스 판독, RSI 자체 볼밴 계산 및 극점 반등 포착, 장초반 5분봉 ORB 돌파, 흑자 우량주 필터, RSI-MACD 조기 익절 시그널(detect_smart_exit_signal) 등 핵심 퀀트 지표 연산기 이식 완료
+- [x] **[다이내믹 채점판 구현]** `scanner.py` 및 `analyze_single_ticker` 내에 QQQ 레짐별 다이내믹 가점/감점 배점표(BULLISH 80점 컷오프, BEARISH/NEUTRAL 90점 컷오프) 공식 구현 완료
+- [x] **[매매 루프 고도화]** `scheduler.py` 내에 3-Mode 레짐 감시 연동 및 후지모토 시게루식 1:2:6 피라미딩(정찰병 15% ➡️ 확인 35% ➡️ 승부 50% 분할 매수 및 평단가 가중평균 갱신) 실전 결합 완료
+- [x] **[스마트 탈출 이식]** `scheduler.py` 보유 종목 모니터링 시 RSI 하락 다이버전스 + MACD 데드크로스 감지 즉시 머리 꼭대기 조기 익절 탈출문 이식 완료
+- [x] **[무결성 빌드 검증]** `python -m py_compile` 컴파일 성공 및 로컬 venv 구동(`python run.py local`) Uvicorn 서버 무결성 바인딩(http://0.0.0.0:8000) 테스트 완벽 완료
+
+
 
