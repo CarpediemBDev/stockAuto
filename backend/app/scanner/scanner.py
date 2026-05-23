@@ -202,7 +202,7 @@ async def scan_market_expert() -> list:
             return await fetch_bulk_ohlcv(candidate_tickers, period="2d", interval="1m")
             
         async def fetch_daily_data():
-            return await fetch_bulk_ohlcv(candidate_tickers, period="60d", interval="1d")
+            return await fetch_bulk_ohlcv(candidate_tickers, period="200d", interval="1d")
 
         async def fetch_news_parallel(ticker: str) -> bool:
             try:
@@ -358,7 +358,7 @@ async def analyze_single_ticker(ticker: str) -> dict:
         df_15m, df_1m, df_daily = await asyncio.gather(
             fetch_ohlcv(ticker, interval="15m", period="5d"),
             fetch_ohlcv(ticker, interval="1m", period="2d"),
-            fetch_ohlcv(ticker, interval="1d", period="60d")
+            fetch_ohlcv(ticker, interval="1d", period="200d")
         )
         
         if df_15m.empty or df_1m.empty or len(df_15m) < 5:
