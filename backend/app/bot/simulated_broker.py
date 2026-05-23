@@ -1,5 +1,5 @@
-import yfinance as yf
 import pandas as pd
+from app.scanner.data_provider import fetch_bulk_ohlcv_sync, fetch_ohlcv_sync
 from datetime import datetime
 from app.bot.base_broker import BaseBroker
 from app.core.database import SessionLocal
@@ -38,7 +38,7 @@ class LocalSimulatedBroker(BaseBroker):
         if holdings:
             tickers = [h.ticker for h in holdings]
             try:
-                data = yf.download(tickers, period="1d", interval="1m", group_by="ticker", progress=False)
+                data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
                 for h in holdings:
                     current_price = h.avg_price  # 기본 폴백값
                     try:
@@ -103,7 +103,7 @@ class LocalSimulatedBroker(BaseBroker):
 
         tickers = [h.ticker for h in holdings]
         try:
-            data = yf.download(tickers, period="1d", interval="1m", group_by="ticker", progress=False)
+            data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
             result = []
             for h in holdings:
                 current_price = h.avg_price  # 기본 폴백값
@@ -158,7 +158,7 @@ class LocalSimulatedBroker(BaseBroker):
     def _get_live_price(self, ticker: str) -> float | None:
         """yfinance에서 단일 종목의 최신 가격을 조회합니다."""
         try:
-            data = yf.download(ticker, period="1d", interval="1m", progress=False)
+            data = fetch_ohlcv_sync(ticker, period="1d", interval="1m")
             if not data.empty:
                 if isinstance(data.columns, pd.MultiIndex):
                     data.columns = data.columns.get_level_values(0)

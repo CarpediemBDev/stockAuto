@@ -1,7 +1,7 @@
 from fastapi import APIRouter
-import yfinance as yf
-import pandas as pd
 import asyncio
+import pandas as pd
+from app.scanner.data_provider import fetch_ohlcv
 from app.scanner.scanner import check_market_sentiment
 from app.core.response import success_response
 
@@ -10,14 +10,9 @@ router = APIRouter(tags=["Market"])
 async def get_ticker_summary(ticker_symbol: str):
     """특정 티커의 현재가와 전일 대비 등락 정보를 가져옵니다."""
     try:
-        ticker = yf.Ticker(ticker_symbol)
-        # 최근 2일치 데이터를 가져와 등락 계산
-        df = await asyncio.to_thread(yf.download, ticker_symbol, period="2d", interval="1d", progress=False)
+        # 데이터 프로바이더 연동 (yf.download 결합 해제 및 MultiIndex 파싱 가드 통합)
+        df = await fetch_ohlcv(ticker_symbol, interval="1d", period="2d")
         if df.empty: return None
-        
-        # MultiIndex 처리
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
 
         current = float(df['Close'].iloc[-1])
         prev = float(df['Close'].iloc[-2])

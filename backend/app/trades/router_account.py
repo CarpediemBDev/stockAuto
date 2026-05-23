@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-import yfinance as yf
+from app.scanner.data_provider import fetch_ohlcv
 
 from app.core.database import get_db
 from app.bot.broker_factory import get_broker_client
@@ -58,7 +58,7 @@ def reset_balance(
         raise HTTPException(status_code=500, detail=f"계좌 초기화 중 오류가 발생했습니다: {str(e)}")
 
 @router.post("/force-liquidate")
-def force_liquidate(
+async def force_liquidate(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -75,12 +75,11 @@ def force_liquidate(
     
     try:
         for h in holdings:
-            # 실시간 청산 가격 조회 (yfinance 활용)
+            # 실시간 청산 가격 조회 (데이터 프로바이더 연동으로 결합도 해제)
             try:
-                ticker_data = yf.Ticker(h.ticker)
-                history = ticker_data.history(period="1d")
-                if not history.empty:
-                    price = float(history["Close"].iloc[-1])
+                df = await fetch_ohlcv(h.ticker, interval="1m", period="1d")
+                if not df.empty:
+                    price = float(df["Close"].iloc[-1])
                 else:
                     price = h.highest_price or h.avg_price
             except Exception:

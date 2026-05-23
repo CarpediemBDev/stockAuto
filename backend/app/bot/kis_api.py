@@ -1,7 +1,9 @@
 import requests
 import json
+import pandas as pd
 from datetime import datetime, timedelta
 from app.core.config import settings
+from app.scanner.data_provider import fetch_bulk_ohlcv_sync, fetch_ticker_fast_info
 
 # 티커 → 거래소 코드 메모리 캐시 (서버 수명 동안 유지)
 _exchange_cache: dict[str, str] = {}
@@ -103,8 +105,6 @@ class KISClient:
         if not token or not self.app_key or self.app_key in ["YOUR_APP_KEY_HERE", "your_virtual_app_key_here"]:
             # API 키가 없거나 토큰 발급 실패 시 가상 모의 투자(Paper Trading) 데이터를 동적 계산하여 반환합니다.
             print(f"[KIS API] Generating dynamic virtual balance (Mode: {self.trade_mode})")
-            import yfinance as yf
-            import pandas as pd
             from app.core.database import SessionLocal
             from app.core.models import Holding
 
@@ -126,7 +126,7 @@ class KISClient:
             if holdings:
                 tickers = [h.ticker for h in holdings]
                 try:
-                    data = yf.download(tickers, period="1d", interval="1m", group_by="ticker", progress=False)
+                    data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
                     for h in holdings:
                         current_price = h.avg_price  # 기본 폴백값
                         try:
@@ -252,8 +252,7 @@ class KISClient:
         }
 
         try:
-            import yfinance as yf
-            info = yf.Ticker(ticker).fast_info
+            info = fetch_ticker_fast_info(ticker)
             raw_exchange = getattr(info, 'exchange', '') or ''
             kis_code = EXCHANGE_MAP.get(raw_exchange, "NASD")
             _exchange_cache[ticker] = kis_code

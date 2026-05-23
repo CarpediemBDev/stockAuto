@@ -3,10 +3,10 @@ import pandas as pd
 import sys
 import os
 
-# 부모 디렉토리를 path에 추가하여 engine 모듈을 불러올 수 있게 합니다.
+# 부모 디렉토리를 path에 추가하여 app 모듈을 불러올 수 있게 합니다.
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from engine.scanner import scan_market_expert, get_ticker_name
+from app.scanner.scanner import scan_market_expert, get_ticker_name
 # pyrefly: ignore [missing-import]
 import yfinance as yf
 
@@ -32,7 +32,8 @@ async def live_scan_11():
     data_15m = await asyncio.to_thread(yf.download, tickers, period="5d", interval="15m", group_by="ticker", progress=False)
     data_1m = await asyncio.to_thread(yf.download, tickers, period="2d", interval="1m", group_by="ticker", progress=False)
 
-    from engine.scanner import calculate_vwap, detect_fakeout_risk, calculate_rvol, calculate_ema
+    from app.scanner.indicators import calculate_vwap, calculate_rvol, calculate_ema
+    from app.scanner.filters import detect_fakeout_risk
 
     for ticker in tickers:
         try:

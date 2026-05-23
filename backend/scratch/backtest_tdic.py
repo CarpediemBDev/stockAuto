@@ -5,10 +5,11 @@ import yfinance as yf
 import sys
 import os
 
-# 부모 디렉토리를 path에 추가하여 engine 모듈을 불러올 수 있게 합니다.
+# 부모 디렉토리를 path에 추가하여 app 모듈을 불러올 수 있게 합니다.
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from engine.scanner import calculate_vwap, calculate_wick_ratio, detect_fakeout_risk, calculate_rvol
+from app.scanner.indicators import calculate_vwap, calculate_wick_ratio, calculate_rvol
+from app.scanner.filters import detect_fakeout_risk
 
 async def backtest_tdic():
     ticker = "TDIC" # Dreamland (Example ticker from SIGNAL.md)

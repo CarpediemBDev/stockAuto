@@ -26,12 +26,13 @@ Base.metadata.create_all(bind=engine)
 
 # 💡 SQLite 자동 스키마 마이그레이션 (v2.0 신규 컬럼 강제 추가)
 def migrate_db_columns():
+    from sqlalchemy import text
     db = SessionLocal()
     try:
         # trade_logs 테이블에 regime_mode, signal_score 추가
         for col_name, col_type in [("regime_mode", "VARCHAR"), ("signal_score", "INTEGER")]:
             try:
-                db.execute(f"ALTER TABLE trade_logs ADD COLUMN {col_name} {col_type}")
+                db.execute(text(f"ALTER TABLE trade_logs ADD COLUMN {col_name} {col_type}"))
                 db.commit()
                 print(f"[Migration] Column {col_name} successfully added to trade_logs table.")
             except Exception:
@@ -40,7 +41,7 @@ def migrate_db_columns():
         # holdings 테이블에 regime_mode, buy_stage 추가
         for col_name, col_type in [("regime_mode", "VARCHAR"), ("buy_stage", "INTEGER DEFAULT 1")]:
             try:
-                db.execute(f"ALTER TABLE holdings ADD COLUMN {col_name} {col_type}")
+                db.execute(text(f"ALTER TABLE holdings ADD COLUMN {col_name} {col_type}"))
                 db.commit()
                 print(f"[Migration] Column {col_name} successfully added to holdings table.")
             except Exception:

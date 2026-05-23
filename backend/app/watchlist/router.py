@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core import models
 from pydantic import BaseModel
-import yfinance as yf
+from app.scanner.data_provider import fetch_ohlcv
 import re
 
 from app.translations.translator import Translator
@@ -34,7 +34,7 @@ def get_watchlist(
     return success_response(data=items)
 
 @router.post("/")
-def add_to_watchlist(
+async def add_to_watchlist(
     item: WatchListCreate,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -62,9 +62,9 @@ def add_to_watchlist(
         ticker_name = resolved_name
     else:
         try:
-            ticker_obj = yf.Ticker(ticker_upper)
-            hist = ticker_obj.history(period="1d")
-            if hist.empty:
+            # 데이터 프로바이더 연동으로 강결합 해제 및 비동기 검증 완료
+            df = await fetch_ohlcv(ticker_upper, interval="1d", period="1d")
+            if df.empty:
                 raise StockAutoException(code="TICKER_NOT_FOUND", message=f"나스닥 시장에 존재하지 않는 티커입니다: {ticker_upper}")
         except StockAutoException:
             raise

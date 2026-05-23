@@ -2,6 +2,7 @@ import logging
 from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.core import models
+from app.scanner.data_provider import fetch_ticker_info_sync
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +63,7 @@ class Translator:
                 return db_trans.name_ko
                 
             # 3. 3단계: 로컬에 아예 존재하지 않는 신규 종목의 경우 -> AI 실시간 번역 및 자가학습 가동!
-            import yfinance as yf
-            ticker_obj = yf.Ticker(ticker_clean)
-            info = ticker_obj.info
+            info = fetch_ticker_info_sync(ticker_clean)
             
             # 실제 나스닥 상장 주식이 아닌 가짜 티커인 경우 Fallback
             if not info or "symbol" not in info or not info.get("symbol"):

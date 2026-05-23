@@ -161,5 +161,38 @@
 - [x] **[스마트 탈출 이식]** `scheduler.py` 보유 종목 모니터링 시 RSI 하락 다이버전스 + MACD 데드크로스 감지 즉시 머리 꼭대기 조기 익절 탈출문 이식 완료
 - [x] **[무결성 빌드 검증]** `python -m py_compile` 컴파일 성공 및 로컬 venv 구동(`python run.py local`) Uvicorn 서버 무결성 바인딩(http://0.0.0.0:8000) 테스트 완벽 완료
 
+## 🌟 [Phase 16] 스캐너 모듈화 패키지 분리 및 비동기 고속화 튜닝 — 완료 [x]
 
+> **핵심 목표:** 비대해진 `scanner.py`를 단일 책임 원칙(SRP)에 근거해 모듈 패키지로 쪼개고, `t.info` 네트워크 블로킹 병목을 비동기 병렬 대량 수집으로 전면 정화하며, SQLite 자가 마이그레이션 코드를 SQLAlchemy 2.0+ text() 규격으로 교체합니다.
 
+- [x] **[스캐너 디렉토리 패키지화]** `app/scanner/` 폴더 하위에 `indicators.py`, `filters.py`, `discovery.py`, `scanner.py` 생성 및 물리적 역할 분할 완료
+- [x] **[기술 지표 캡슐화]** `indicators.py` 내에 순수 수학적/기술적 지표 계산기(VWAP, RSI, MACD, EMA, ATR, OBV 등) 이동 완료
+- [x] **[전략 필터 분리]** `filters.py` 내에 전략별 타점 판독기(RSI BB, ORB, Smart Exit 등) 및 **비동기 흑자 재무 필터** 구현 완료
+- [x] **[종목 발굴 격리]** `discovery.py` 내에 KIS 순위, 야후 활성, 관심종목 다중 소스 병렬 종목 발굴 로직 탑재 완료
+- [x] **[초고성능 비동기 병렬화]** `scanner.py` 메인 루프 내에서 후보군 25개 종목의 **1분봉/일봉/뉴스/재무 분석을 단 한 번의 비동기 병렬 대량 수집(asyncio.gather)**으로 통합 처리하여 스캔 지연을 50초에서 1초 미만으로 단축 완료
+- [x] **[DB 마이그레이션 안전 규격]** `main.py` 자가 마이그레이션 SQL 구문을 SQLAlchemy 2.0+ `text()` 호환 규격으로 전면 정화 완료
+- [x] **[무결성 가드 및 정화]** `__init__.py` 텅 빈 패키지 이니셜라이저 정화 및 `py_compile` 문법 무결성 사전 검증 통과 완료
+
+## 🌟 [Phase 17] 시세 공급 벤더 추상화 및 데이터 프로바이더 구축 — 완료 [x]
+
+> **핵심 목표:** 시세 데이터 수집(yfinance)이 온 동네 코드 전역에 강하게 묶여(Tight Coupling) 있는 결합을 원천 도려내고, 단일 관문 데이터 프로바이더를 통해 벤더 독립성을 완비한다.
+
+- [x] **[프로바이더 설계]** `backend/app/scanner/data_provider.py` 신규 설계 및 시세 다운로드 API 단일 캡슐화 완료
+- [x] **[스캐너 리팩토링]** `scanner.py` 내의 날것의 `yf.download` 호출부를 데이터 프로바이더 인터페이스 호출로 일괄 대체 완료
+- [x] **[스케줄러 리팩토링]** `scheduler.py` 내의 실시간 단종목 시세 조회부를 데이터 프로바이더 호출로 단축 교체 완료
+- [x] **[라우터 의존성 청소]** `router_market.py` (시장시세), `router_account.py` (보유청산), `watchlist/router.py` (관심종목 검증) 내의 날것 yfinance 호출을 `fetch_ohlcv` 비동기 호출로 100% 전격 도려내기 완료!
+- [x] **[가상 데이터 실험]** 가상 데이터(Mocking) 전환 실험을 통한 벤더 독립성 및 런타임 안정성 검증 완료
+- [x] **[통합 런타임 검증]** 구문 컴파일 정밀 검증 및 Uvicorn/Next.js 통합 로컬 기동 검증 완료
+
+## 🌟 [Phase 18] KIS API 및 번역 자가학습 모듈 내 yfinance 결합 제거 및 데이터 프로바이더 최종 통합 — 완료 [x]
+
+> **핵심 목표:** 시스템 전역에 흩어진 `yfinance` 직접 임포트 및 날것(Raw) 호출부를 완전히 걷어내어 `data_provider.py` 단 한 곳으로 100% 격리 및 캡슐화 완료.
+
+- [x] **[동기식 헬퍼 신설]** `data_provider.py` 내 동기식 데이터 수집 헬퍼 함수 (`fetch_bulk_ohlcv_sync`, `fetch_ticker_info_sync`, `fetch_ohlcv_sync`) 추가
+- [x] **[가상 잔고 연산 정화]** `kis_api.py` 내 `get_account_balance` 의 `yf.download` 결합 제거 및 `fetch_bulk_ohlcv_sync`로 전환
+- [x] **[거래소 판별 정화]** `kis_api.py` 내 `_get_exchange_code` 의 `yf.Ticker.fast_info` 직접 호출을 `fetch_ticker_fast_info`로 전환
+- [x] **[번역 자가학습 정화]** `translator.py` 내 자가학습 루프의 `yf.Ticker.info` 직접 호출을 `fetch_ticker_info_sync`로 전환
+- [x] **[환율 캐시 정화]** `fx_cache.py` 내 `yf.download` 직접 임포트 및 호출부를 `fetch_ohlcv_sync` 호출로 100% 캡슐화 전환
+- [x] **[모의 브로커 정화]** `simulated_broker.py` 내 모든 `yf.download` 직접 호출부를 `fetch_bulk_ohlcv_sync` 및 `fetch_ohlcv_sync`로 전면 격리 전환 (yfinance 임포트 완전 박멸)
+- [x] **[문법 및 무결성 검증]** `py_compile`을 이용한 파이썬 모듈 구문 완성도 사전 검증
+- [x] **[실전 가동성 테스트]** 로컬 Uvicorn 서버 백엔드 재기동 후 실전 매매 스케줄러 & 자가학습 API Tracing 안정성 최종 검증

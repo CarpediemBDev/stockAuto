@@ -1,6 +1,6 @@
 import time
-import yfinance as yf
 import pandas as pd
+from app.scanner.data_provider import fetch_ohlcv_sync
 
 class FXRateCache:
     """
@@ -17,7 +17,7 @@ class FXRateCache:
         if now - cls._last_fetched > cls._cache_duration:
             try:
                 # 10분 이상 지났을 때만 실제 Yahoo Finance에서 환율 조회
-                df_fx = yf.download("USDKRW=X", period="1d", progress=False)
+                df_fx = fetch_ohlcv_sync("USDKRW=X", period="1d")
                 if not df_fx.empty:
                     if isinstance(df_fx.columns, pd.MultiIndex):
                         df_fx.columns = df_fx.columns.get_level_values(0)

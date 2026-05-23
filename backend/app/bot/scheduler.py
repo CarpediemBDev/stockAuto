@@ -4,7 +4,7 @@ from app.core.database import SessionLocal
 from app.core.models import TradeLog, Holding, ActionLog, UserSettings
 from datetime import datetime, timezone, timedelta
 import asyncio
-import yfinance as yf  # pyrefly: ignore [missing-import]
+from app.scanner.data_provider import fetch_ohlcv
 
 
 from app.scanner.scanner import scan_overseas_market, analyze_single_ticker, check_market_sentiment
@@ -33,14 +33,12 @@ def is_us_market_open() -> bool:
 async def get_realtime_price(ticker: str) -> float | None:
     """
     매수 직전 해당 종목의 실시간 현재가를 새롭게 조회합니다.
-    yfinance 1분봉 최신 1개봉 활용 (Period: 1d, Interval: 1m)
+    데이터 프로바이더 1분봉 활용 (Period: 1d, Interval: 1m)
     """
     try:
-        df = await asyncio.to_thread(yf.download, ticker, period="1d", interval="1m", progress=False)
+        df = await fetch_ohlcv(ticker, interval="1m", period="1d")
         if df.empty:
             return None
-        if hasattr(df.columns, 'get_level_values'):
-            df.columns = df.columns.get_level_values(0)
         return float(df['Close'].iloc[-1])
     except Exception as e:
         print(f"[RealTimePrice] Failed to fetch {ticker}: {e}")
