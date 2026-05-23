@@ -11,7 +11,7 @@ async def get_ticker_summary(ticker_symbol: str):
     """특정 티커의 현재가와 전일 대비 등락 정보를 가져옵니다."""
     try:
         # 데이터 프로바이더 연동 (yf.download 결합 해제 및 MultiIndex 파싱 가드 통합)
-        df = await fetch_ohlcv(ticker_symbol, interval="1d", period="5d")
+        df = await fetch_ohlcv(ticker_symbol, interval="1d", period="10d")
         if df.empty: return None
 
         current = float(df['Close'].iloc[-1])
