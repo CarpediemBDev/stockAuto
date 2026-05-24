@@ -204,4 +204,14 @@
 - [x] **[백엔드 텔레그램 코어 리팩토링]** `app/core/telegram.py` 내의 다중 스레드 구문을 단일 글로벌 `TelegramGlobalPollThread`로 리팩토링 및 딥링크(/start username) 자동 Chat ID 저장 연동 구현
 - [x] **[백엔드 라우터 연동 정화]** `app/admin/router.py` 내 사용자 설정 저장 및 삭제 시 불필요한 유저 개별 스레드 핫리부팅 제거
 - [x] **[프론트엔드 UI 대개편]** `settings/page.tsx` 내의 BOT TOKEN 인풋 필드 제거 및 공식 봇 이동 딥링크 연동 버튼 + 수동 CHAT ID 안내 연동 UI 실장
-- [x] **[종합 가동 및 무결성 검증]** `로컬 Uvicorn 백엔드 및 Next.js 프론트엔드 구동 검증, 신규 가입자 딥링크 연동 시나리오 및 `/status` 명령어 실전 수발신 완벽성 통과 검증`
+- [x] **[종합 가동 및 무결성 검증]** 로컬 Uvicorn 백엔드 및 Next.js 프론트엔드 구동 검증, 신규 가입자 딥링크 연동 시나리오 및 `/status` 명령어 실전 수발신 완벽성 통과 검증
+
+## 🌟 [Phase 20] Google Cloud Run 올-클라우드 통합 배포 파이프라인 구축 및 문서화 — 완료 [x]
+
+> **핵심 목표:** 프론트엔드(Next.js)와 백엔드(FastAPI) 전체 시스템을 Docker 컨테이너 기반으로 패키징하고, Google Cloud Run을 통해 완전 자동화된 공인 HTTPS 도메인 배포 환경을 완성하며, 이와 관련된 모든 실전 가이드 문서를 구축한다.
+
+- [x] **[컨테이너 인프라]** 백엔드 Dockerfile (`/backend/Dockerfile`) 및 프론트엔드 Dockerfile (`/frontend/Dockerfile`) 설계 및 경량 빌드 아키텍처 수립 완료
+- [x] **[CORS 동적 대응]** 백엔드 `main.py` 내 `ALLOWED_ORIGINS` 환경변수를 통한 동적 CORS 대응 구현 완료 (클라우드 환경의 유연한 도메인 매핑 보장)
+- [x] **[시스템 매뉴얼 동기화]** `docs/SYSTEM_MANUAL.md` 파일에 Google Cloud Run 올-클라우드 배포 매뉴얼 및 도메인 바인딩 가이드 기재 완료
+- [x] **[데이터베이스 영속화 설계]** `docs/SCHEMA.md` 파일에 Cloud Run 서버리스 무상태 특성을 극복하기 위한 SQLite 데이터 영속화 가이드(GCS FUSE 볼륨 마운트 및 Cloud SQL 전환) 명세화 완료
+- [x] **[작업 현황 최종 동기화]** `docs/task.md` 작업 현황판에 클라우드 배포 파이프라인 구축 및 영속성 설계 작업을 Phase 20 태스크로 완벽 반영 완료
