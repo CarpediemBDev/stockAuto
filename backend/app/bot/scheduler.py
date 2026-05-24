@@ -15,7 +15,21 @@ scheduler = BackgroundScheduler()
 is_processing = False # 중복 실행 방지용 플래그
 latest_scanned_signals = [] # 글로벌 실시간 마켓 스캔 시그널 캐시용
 
+# 💡 KIS API 동시성 제어 세마포어 (초당 최대 15회 호출로 자동 제한 - 429 차단 철벽 방어)
+kis_semaphore = asyncio.Semaphore(15)
+
+async def safe_broker_call(func, *args, **kwargs):
+    """
+    KIS API의 초당 호출 제한(Rate Limit)을 철저히 준수하기 위해 동시성 세마포어 가드 하에
+    동기식 브로커 함수를 비동기 스레드 풀(asyncio.to_thread)에서 안전하게 지연 호출합니다.
+    """
+    async with kis_semaphore:
+        # 호출 사이에 아주 미세한 지연(40ms)을 주어 고르게 배분
+        await asyncio.sleep(0.04)
+        return await asyncio.to_thread(func, *args, **kwargs)
+
 ET = timezone(timedelta(hours=-5)) # 미국 동부 표준시(ET)는 UTC-5 (DST 시 UTC-4, 추후 자동화 가능)
+
 
 def is_us_market_open() -> bool:
     """
@@ -129,8 +143,8 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                 if sell_reason:
                     log_action(db, user_id, f"EXIT SIGNAL: {ticker} | Reason: {sell_reason}", "SIGNAL")
                     
-                    # 브로커를 통한 매도 주문 집행
-                    res = broker.sell_order(ticker, h.quantity, price=current_price)
+                    # 브로커를 통한 매도 주문 집행 (💡 safe_broker_call 세마포어 격리 가드 탑재)
+                    res = await safe_broker_call(broker.sell_order, ticker, h.quantity, price=current_price)
 
                     if res["success"]:
                         db.add(TradeLog(
@@ -169,6 +183,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         elif all_signals:
             # 장세별 통과 커트라인 점수 분기 (상승장 80점, 하락/횡보장 90점)
             cutoff_score = 80 if sentiment == "BULLISH" else 90
+            cached_balance_data = None # 💡 사용자별 1분 루프 내 KIS 잔고 임시 캐싱 (DDoS급 중복 조회 제거)
             
             for s in all_signals:
                 if s['signal_score'] >= cutoff_score:
@@ -259,8 +274,13 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
 
                     current_price = realtime_price  # 실시간 가격으로 교체
 
-                    # ④ 잔고 조회 및 달러 환산
-                    balance_data = broker.get_account_balance()
+                    # ④ 잔고 조회 및 달러 환산 (💡 safe_broker_call 세마포어 및 사용자별 로컬 캐시 적용)
+                    if cached_balance_data is None:
+                        balance_data = await safe_broker_call(broker.get_account_balance)
+                        cached_balance_data = balance_data
+                    else:
+                        balance_data = cached_balance_data
+                        
                     total_asset_krw = balance_data.get("total_asset", 10000000.0)
                     cash_balance_krw = balance_data.get("cash_balance", 10000000.0)
 
@@ -322,10 +342,12 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         )
                         continue
                     
-                    # 격리 매수 호출
-                    res = broker.buy_order(ticker, final_qty, price=current_price)
+                    # 격리 매수 호출 (💡 safe_broker_call 세마포어 격리 가드 탑재)
+                    res = await safe_broker_call(broker.buy_order, ticker, final_qty, price=current_price)
 
                     if res["success"]:
+                        # 💡 주문 성공 시 잔고 상태가 변경되었으므로 다음 루프 시 새로 잔고를 조회하도록 임시 캐시 초기화
+                        cached_balance_data = None
                         filled_price = res["filled_price"]
                         filled_qty = res["filled_qty"]
                         

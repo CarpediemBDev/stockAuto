@@ -1,11 +1,25 @@
 import yfinance as yf
 import pandas as pd
 import asyncio
+import time
+
+# 💡 전역 마이크로 캐시 장치 (10초 유효 - 1,000명 트래픽 병목 방패막이)
+_ohlcv_cache = {}
 
 async def fetch_ohlcv(ticker: str, interval: str = "1h", period: str = "5d") -> pd.DataFrame:
     """
     지정한 단일 종목의 OHLCV 데이터를 비동기로 안전하게 가져오고 MultiIndex 컬럼을 단일화합니다.
+    (💡 10초 전역 캐싱 적용 - 중복 요출 원천 차단)
     """
+    cache_key = (ticker, interval, period)
+    now = time.time()
+    
+    # 1. 10초 미만의 최신 캐시가 존재하면 즉시 반환 (DDoS 및 API 차단 완벽 방어)
+    if cache_key in _ohlcv_cache:
+        cached_time, cached_df = _ohlcv_cache[cache_key]
+        if now - cached_time < 10.0:
+            return cached_df.copy()
+            
     try:
         data = await asyncio.to_thread(yf.download, ticker, period=period, interval=interval, progress=False)
         if data.empty:
@@ -14,10 +28,13 @@ async def fetch_ohlcv(ticker: str, interval: str = "1h", period: str = "5d") -> 
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
             
+        # 2. 새로운 데이터를 캐시에 탑재
+        _ohlcv_cache[cache_key] = (now, data)
         return data
     except Exception as e:
         print(f"[DataProvider] Error fetching {ticker} ({interval}): {e}")
         return pd.DataFrame()
+
 
 async def get_multi_timeframe_data(ticker: str) -> tuple:
     """
@@ -120,10 +137,22 @@ def fetch_ticker_info_sync(ticker: str) -> dict:
         print(f"[DataProvider] Error fetching sync info for {ticker}: {e}")
         return {}
 
+# 💡 전역 동기 마이크로 캐시 장치 (10초 유효)
+_ohlcv_sync_cache = {}
+
 def fetch_ohlcv_sync(ticker: str, interval: str = "1h", period: str = "5d") -> pd.DataFrame:
     """
     단일 종목의 OHLCV 데이터를 동기식으로 안전하게 가져오고 MultiIndex 컬럼을 단일화합니다. (동기 API/메서드용)
+    (💡 10초 전역 동기 캐싱 적용 - 중복 요출 원천 차단)
     """
+    cache_key = (ticker, interval, period)
+    now = time.time()
+    
+    if cache_key in _ohlcv_sync_cache:
+        cached_time, cached_df = _ohlcv_sync_cache[cache_key]
+        if now - cached_time < 10.0:
+            return cached_df.copy()
+            
     try:
         data = yf.download(ticker, period=period, interval=interval, progress=False)
         if data.empty:
@@ -132,6 +161,8 @@ def fetch_ohlcv_sync(ticker: str, interval: str = "1h", period: str = "5d") -> p
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
             
+        # 캐싱 처리
+        _ohlcv_sync_cache[cache_key] = (now, data)
         return data
     except Exception as e:
         print(f"[DataProvider] Error sync fetching {ticker} ({interval}): {e}")
