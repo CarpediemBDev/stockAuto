@@ -1,87 +1,98 @@
-# 🛠️ StockAuto v2.0 시세 벤더 독립성 100% 최종 완성 계획서 (Phase 18)
+# 🛠️ 텔레그램 1인 봇 통합 아키텍처 및 딥링크 연동 계획서 (Phase 19)
 
-본 계획서는 최근 `scanner.py`, `scheduler.py`, `router_market.py` 등 주요 모듈에서 `yfinance` 결합을 전면 해제한 것에 이어, 아직 시스템 변두리에 남아있던 `kis_api.py`와 `translator.py` 내부의 날것(Raw) `yfinance` 임포트 및 호출부를 완전히 도려내어 **`data_provider.py` 단 한 곳으로 시세 공급원을 100% 캡슐화**하기 위한 최종 정밀 설계도입니다.
-
----
-
-## 1. 🚨 잔존하는 yfinance 강결합 진단
-
-시스템 내에서 `yfinance` 또는 `yf.Ticker`를 직접 명시하여 호출하는 잔재 파일들을 전수 조사한 결과, 다음 2개 핵심 파일에 총 3군데의 직접 의존성이 남아 있음을 식별했습니다.
-
-### ① `backend/app/bot/kis_api.py` (2군데)
-1. **Line 106 (`get_account_balance`)**: 가상 모의투자(Simulated/Paper Trading) 평가 자산 연산을 위해 holdings 종목의 현재가를 조회할 때 `yf.download(tickers, ...)`를 직접 동기식으로 호출 중.
-2. **Line 256 (`_get_exchange_code`)**: 티커의 실제 해외 거래소(NASD/NYSE/AMEX)를 동적으로 판별하기 위해 `yf.Ticker(ticker).fast_info`를 다이렉트로 호출 중.
-
-### ② `backend/app/translations/translator.py` (1군데)
-1. **Line 66 (`translate`)**: 로컬 DB에 아직 매핑 정보가 등록되지 않은 신규 미국 주식의 영문 사명을 알아내기 위해 `yf.Ticker(ticker_clean).info`를 직접 호출 후 구글 번역 OpenAPI와 연동(자가학습) 중.
+본 계획서는 기존의 사용자별로 독립된 봇 토큰을 등록하고 스레드를 개별 가동하던 **"다중 봇 개별 폴링(Multi-Thread Polling)"** 방식에서, **"단 하나의 공식 봇 토큰(Single Bot Token)과 백그라운드 단일 스레드"** 기반의 **"멀티유저 통합 텔레그램 브릿지"** 아키텍처로 대전환하기 위한 정밀 설계도입니다.
 
 ---
 
-## 2. 🛠️ 캡슐화 및 추상화 고도화 설계 (Proposed Changes)
+## 1. 🚨 기존 아키텍처 결함 및 전환 필요성
 
-이러한 강결합을 해제하기 위해, 모든 `yfinance` 연동을 `data_provider.py`가 관리하는 단일 추상 장벽 안으로 가두고 외부 파일은 오직 이 프로바이더 인터페이스만 호출하도록 설계합니다. 
+1. **서버 리소스 고갈 위험 (100인 기준):**
+   * 기존 방식은 사용자마다 독립된 백그라운드 스레드를 생성해 롱폴링을 수행합니다. 사용자가 100명이면 100개의 스레드가 텔레그램 API 서버와 계속 통신을 시도하게 되어 가벼운 서버의 경우 CPU/메모리가 쉽게 고갈됩니다.
+2. **복잡한 사용자 UX:**
+   * 가입하는 사용자마다 본인의 텔레그램 봇을 생성(`BotFather` 사용)하고 봇 토큰을 구해 웹 설정창에 복사/붙여넣기해야 하므로 서비스 진입 장벽이 매우 높습니다.
+3. **해결책:**
+   * 개발자가 만든 **단 1개의 공식 봇(Bot Token)**만 백그라운드 스레드 1개에서 전체 수신을 처리하고, 각 사용자는 본인의 `chat_id`만 입력하거나 봇 대화방에서 `/start`를 눌러 즉시 연동되는 **프로덕션 급 멀티유저 아키텍처**로 대전환합니다.
 
-특히, `kis_api.py`와 `translator.py` 내의 해당 지점들은 **동기(Synchronous) 함수 흐름** 속에서 호출되므로, 비동기 이벤트 루프 밖에서도 충돌 없이 안전하게 호출될 수 있는 **동기식 헬퍼 인터페이스**를 `data_provider.py`에 추가 공급합니다.
+---
 
-### ⚙️ [MODIFY] [data_provider.py](file:///d:/dev/workspace/stockAuto/backend/app/scanner/data_provider.py)
-*   **[신규] `fetch_bulk_ohlcv_sync` 추가**: 동기 호출 부서(`get_account_balance`)용 동기식 벌크 다운로드 API 공급.
-*   **[신규] `fetch_ticker_info_sync` 추가**: 동기 자가학습 부서(`translator.py`)용 동기식 종목 기본정보(info) API 공급.
-*   **`fetch_ticker_fast_info` 유지**: 동기 거래소 판별 부서(`_get_exchange_code`)를 위해 기존 동기 API 호환성 엄격 보장.
+## 2. 🛠️ 아키텍처 설계 및 변경 제안 (Proposed Changes)
 
-```python
-def fetch_bulk_ohlcv_sync(tickers: list, interval: str, period: str, group_by: str = "ticker") -> pd.DataFrame:
-    """
-    여러 종목의 OHLCV 데이터를 동기식으로 다운로드합니다. (동기 API/메서드용)
-    """
-    if not tickers:
-        return pd.DataFrame()
-    try:
-        data = yf.download(
-            tickers, 
-            period=period, 
-            interval=interval, 
-            group_by=group_by, 
-            progress=False
-        )
-        return data
-    except Exception as e:
-        print(f"[DataProvider] Error in sync bulk download for {len(tickers)} tickers ({interval}): {e}")
-        return pd.DataFrame()
-
-def fetch_ticker_info_sync(ticker: str) -> dict:
-    """
-    종목의 실시간 재무/기본정보(info)를 동기식으로 안전하게 수집합니다. (동기 API용)
-    """
-    try:
-        ticker_obj = yf.Ticker(ticker)
-        return ticker_obj.info if ticker_obj.info else {}
-    except Exception as e:
-        print(f"[DataProvider] Error fetching sync info for {ticker}: {e}")
-        return {}
+```mermaid
+sequenceDiagram
+    participant User as 사용자 웹 / 앱
+    participant FE as 프론트엔드 (Next.js)
+    participant BE as 백엔드 (FastAPI)
+    participant TG as 텔레그램 서버 (API)
+    
+    Note over User, TG: 🔗 딥링크를 통한 텔레그램 간편 연동 흐름
+    User->>FE: 텔레그램 연동 탭 진입
+    FE->>User: [텔레그램 연동 시작] 버튼 제공 (t.me/Bot?start=username)
+    User->>TG: 버튼 클릭하여 공식 봇 이동 및 [시작(Start)] 클릭
+    TG->>BE: /start <username> 메시지 & 사용자 chat_id 전송 (getUpdates 감지)
+    BE->>BE: DB에서 username 검색 ➔ 해당 사용자의 chat_id 업데이트
+    BE->>TG: "연동이 완료되었습니다!" 봇 메시지 전송
+    BE->>FE: 실시간 상태 반영 (연동 완료)
 ```
 
 ---
 
-### ⚙️ [MODIFY] [kis_api.py](file:///d:/dev/workspace/stockAuto/backend/app/bot/kis_api.py)
-*   파일 상단의 `import yfinance as yf` 및 인라인 임포트부를 **완전 박멸**.
-*   `from app.scanner.data_provider import fetch_bulk_ohlcv_sync, fetch_ticker_fast_info` 임포트.
-*   `yf.download` 호출부를 `fetch_bulk_ohlcv_sync` 호출로 교체.
-*   `yf.Ticker(ticker).fast_info` 호출부를 `fetch_ticker_fast_info(ticker)` 호출로 교체.
+### [Component 1] 백엔드 설정 및 데이터 모델
+
+#### ⚙️ [MODIFY] [config.py](file:///d:/dev/workspace/stockAuto/backend/app/core/config.py)
+* `.env`에 정의된 글로벌 `TELEGRAM_BOT_TOKEN`을 시스템 전역 설정 변수로 활성화합니다. (이미 `self.TELEGRAM_BOT_TOKEN`이 정상적으로 설정되어 있어 호환됩니다.)
+
+#### ⚙️ [MODIFY] [models.py](file:///d:/dev/workspace/stockAuto/backend/app/core/models.py)
+* `UserSettings`의 `telegram_bot_token` 컬럼은 하위 호환성을 위해 스키마에 유지하되, 비즈니스 로직에서는 더 이상 의존하지 않도록 관리합니다 (Deprecated 선언).
 
 ---
 
-### ⚙️ [MODIFY] [translator.py](file:///d:/dev/workspace/stockAuto/backend/app/translations/translator.py)
-*   파일 내의 인라인 `import yfinance as yf` 완전 제거.
-*   `from app.scanner.data_provider import fetch_ticker_info_sync` 임포트.
-*   `yf.Ticker(ticker_clean).info` 호출부를 `fetch_ticker_info_sync(ticker_clean)` 호출로 교체.
+### [Component 2] 백엔드 텔레그램 코어 리팩토링
+
+#### ⚙️ [MODIFY] [telegram.py](file:///d:/dev/workspace/stockAuto/backend/app/core/telegram.py)
+* **[구조 대수선]** 사용자별 개별 스레드 롱폴링 방식(`_poll_updates_loop_for_user`, `start_telegram_bot_for_user`)을 **완전 제거**하거나 빈 동작(Pass)으로 처리합니다.
+* **[신규] 단일 글로벌 폴링 스레드 구축 (`start_telegram_bot`, `stop_telegram_bot`)**:
+  * 단 하나의 글로벌 폴링 스레드(`TelegramGlobalPollThread`)를 띄워, 공통 `settings.TELEGRAM_BOT_TOKEN`으로 업데이트를 조회합니다.
+* **[신규] 간편 딥링크 / 명령어 매핑 로직 (`_process_global_message`)**:
+  * `/start` 명령어와 뒤이어 들어오는 사용자 식별자(예: `/start username`)를 추출하여 해당 사용자의 `telegram_chat_id`를 자동으로 DB에 연결합니다.
+  * 이미 연동된 사용자의 `/status`, `/run`, `/stop` 원격 명령어는 기존 기능과 100% 동일하게 동작하도록 매핑합니다.
+* **[수정] `send_message_sync`**:
+  * DB의 사용자별 봇 토큰 대신 전역 설정의 `settings.TELEGRAM_BOT_TOKEN`을 일괄 사용하여 `telegram_chat_id`로 메시지를 전송합니다.
+
+---
+
+### [Component 3] 백엔드 관리자 라우터 연동 정화
+
+#### ⚙️ [MODIFY] [router.py](file:///d:/dev/workspace/stockAuto/backend/app/admin/router.py)
+* 사용자의 설정을 업데이트할 때 더 이상 개별 유저별 스레드를 중단/재부팅(`stop_telegram_bot_for_user`, `start_telegram_bot_for_user`)하지 않습니다.
+* 전역 폴링 데몬이 이미 켜져 있으므로, DB의 `telegram_chat_id` 및 `telegram_enabled` 업데이트만 수행하면 즉시 발송/수신에 적용됩니다.
+
+---
+
+### [Component 4] 프론트엔드 설정 페이지 레이아웃 개선
+
+#### ⚙️ [MODIFY] [page.tsx](file:///d:/dev/workspace/stockAuto/frontend/app/admin/settings/page.tsx)
+* 텔레그램 설정 폼(`subTab === "telegram"`)에서 더 이상 개별 `BOT TOKEN` 입력을 요구하지 않습니다.
+* 대신 **두 가지 편리한 연동 방식**을 직관적이고 고급스러운 UI로 노출합니다.
+  1. **[간편 연동]** 사용자의 username을 기반으로 한 텔레그램 딥링크 버튼 제공: 
+     `https://t.me/<YourBotUsername>?start=<CurrentUsername>`
+     (사용자는 버튼 클릭 후 [시작]만 누르면 복잡한 CHAT ID 입력 없이 1초 만에 즉시 연동 완료)
+  2. **[수동 연동]** 기존 CHAT ID 입력란 유지 및 사용법 가이드 고지:
+     "본인의 CHAT ID를 알고 있다면 직접 입력하여 연동할 수도 있습니다."
 
 ---
 
 ## 3. 🧪 검증 계획 (Verification Plan)
 
-### A. 정밀 구문 컴파일 검증
-*   `py_compile`을 사용하여 정화된 `data_provider.py`, `kis_api.py`, `translator.py`의 구문 완성도를 100% 검증하여 빌드 완성도 사전 확보.
+### A. 정밀 구문 컴파일 및 타입 검증
+* 백엔드: `python -m py_compile backend/app/core/telegram.py backend/app/admin/router.py` 실행하여 무결성 확인.
+* 프론트엔드: `npm run lint` 및 `npx tsc --noEmit`을 통한 타입 안정성 사전 통과 확인.
 
-### B. 가상 및 실전 런타임 안정성 검사
-1. **백엔드 기동 테스트**: Uvicorn 백엔드를 로컬로 기동하고, 초기 가상 잔고 계산 및 번역 사전 데이터 로드 시 터지는 에러가 없는지 콘솔 로그 추적.
-2. **동적 벤더 격리 증명**: `data_provider.py` 내의 `yfinance` 호출부만 Mock 데이터를 반환하도록 조작했을 때, `kis_api.py`와 `translator.py`를 단 한 글자도 건드리지 않고 시스템이 모킹 데이터로 정상 구동되는지 테스트하여 결합 해제 완성도 증명.
+### B. 시나리오 기반 실전 테스트
+1. **단일 봇 기동성 테스트:**
+   * 서버 시작 시 백엔드 단 하나의 `TelegramGlobalPollThread`만 안전하게 가동되는지 확인.
+2. **간편 딥링크(Deep Link) 연동 테스트:**
+   * 웹 화면에서 [텔레그램 연동하기] 버튼을 누르고 텔레그램에서 `/start` 전송 시, 데이터베이스 `UserSettings.telegram_chat_id`에 내 고유 챗 ID가 완벽히 저장되는지 확인.
+3. **양방향 명령어 실시간 전달:**
+   * 텔레그램 방에서 `/status` 명령어 전송 시, 봇이 내 계좌의 자산과 보유 포트폴리오를 정확히 읽어와 리턴하는지 확인.
+4. **개별 사용자 알림 격리:**
+   * 서로 다른 2개 이상의 계정에 대해 각각 알림을 보냈을 때, 상대방 방에는 스필오버(Spillover) 없이 오직 자신에게 할당된 알림만 완벽히 개별 수신되는지 확인.

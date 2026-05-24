@@ -196,3 +196,12 @@
 - [x] **[모의 브로커 정화]** `simulated_broker.py` 내 모든 `yf.download` 직접 호출부를 `fetch_bulk_ohlcv_sync` 및 `fetch_ohlcv_sync`로 전면 격리 전환 (yfinance 임포트 완전 박멸)
 - [x] **[문법 및 무결성 검증]** `py_compile`을 이용한 파이썬 모듈 구문 완성도 사전 검증
 - [x] **[실전 가동성 테스트]** 로컬 Uvicorn 서버 백엔드 재기동 후 실전 매매 스케줄러 & 자가학습 API Tracing 안정성 최종 검증
+
+## 🌟 [Phase 19] 텔레그램 1인 봇 통합 아키텍처 및 딥링크 연동
+
+> **핵심 목표:** 기존의 사용자별 봇 토큰 등록 및 스레드 가동 방식에서, **"단 하나의 공식 봇 토큰과 단일 백그라운드 스레드"** 기반의 고성능 멀티유저 텔레그램 브릿지 구조로 대전환하고 딥링크 연동 및 UI를 전면 개편한다.
+
+- [x] **[백엔드 텔레그램 코어 리팩토링]** `app/core/telegram.py` 내의 다중 스레드 구문을 단일 글로벌 `TelegramGlobalPollThread`로 리팩토링 및 딥링크(/start username) 자동 Chat ID 저장 연동 구현
+- [x] **[백엔드 라우터 연동 정화]** `app/admin/router.py` 내 사용자 설정 저장 및 삭제 시 불필요한 유저 개별 스레드 핫리부팅 제거
+- [x] **[프론트엔드 UI 대개편]** `settings/page.tsx` 내의 BOT TOKEN 인풋 필드 제거 및 공식 봇 이동 딥링크 연동 버튼 + 수동 CHAT ID 안내 연동 UI 실장
+- [x] **[종합 가동 및 무결성 검증]** `로컬 Uvicorn 백엔드 및 Next.js 프론트엔드 구동 검증, 신규 가입자 딥링크 연동 시나리오 및 `/status` 명령어 실전 수발신 완벽성 통과 검증`

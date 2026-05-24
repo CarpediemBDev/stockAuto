@@ -17,7 +17,6 @@ class SettingsUpdateSchema(BaseModel):
     kis_account_no: Optional[str] = None
     
     # Telegram Bot Settings (Phase 11)
-    telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
     telegram_enabled: Optional[bool] = False
 
@@ -34,7 +33,21 @@ def get_user_settings(
         db.commit()
         db.refresh(db_settings)
         
-    return db_settings
+    import os
+    return {
+        "id": db_settings.id,
+        "user_id": db_settings.user_id,
+        "trade_mode": db_settings.trade_mode,
+        "broker_provider": db_settings.broker_provider,
+        "kis_app_key": db_settings.kis_app_key,
+        "kis_app_secret": db_settings.kis_app_secret,
+        "kis_account_no": db_settings.kis_account_no,
+        "telegram_chat_id": db_settings.telegram_chat_id,
+        "telegram_enabled": db_settings.telegram_enabled,
+        "is_running": db_settings.is_running,
+        "is_real_enabled": db_settings.is_real_enabled,
+        "global_bot_username": os.getenv("TELEGRAM_BOT_USERNAME", "stockauto_official_bot")
+    }
 
 @router.post("/verify-kis")
 def verify_kis_settings(
@@ -113,19 +126,14 @@ def update_user_settings(
     db_settings.kis_account_no = payload.kis_account_no
     
     # Telegram settings
-    db_settings.telegram_bot_token = payload.telegram_bot_token
     db_settings.telegram_chat_id = payload.telegram_chat_id
     db_settings.telegram_enabled = payload.telegram_enabled
     
     db.commit()
     db.refresh(db_settings)
     
-    # 💡 텔레그램 봇 데몬 실시간 재부팅 (현재 유저 개별 데몬 스레드 리로드)
-    from app.core.telegram import stop_telegram_bot_for_user, start_telegram_bot_for_user
-    print(f"[*] Hot reloading Telegram Polling thread for User ID: {current_user.id}...")
-    stop_telegram_bot_for_user(current_user.id)
-    if db_settings.telegram_enabled:
-        start_telegram_bot_for_user(current_user.id, db_settings.telegram_bot_token, db_settings.telegram_chat_id)
+    # 💡 글로벌 단일 봇 아키텍처에서는 별도의 유저 스레드 재기동 없이 DB 반영만으로 실시간 처리됩니다.
+    print(f"[*] Telegram settings updated dynamically for User ID: {current_user.id} (Global Bot Architecture)")
     
     return db_settings
 
@@ -189,9 +197,7 @@ def delete_user(
     if not target_user:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
         
-    # 텔레그램 봇 스레드 즉각 정리
-    from app.core.telegram import stop_telegram_bot_for_user
-    stop_telegram_bot_for_user(user_id)
+    # 💡 글로벌 단일 봇 아키텍처에서는 계정 삭제 시 관련 설정도 캐스케이드(Cascade) 삭제되어 자동으로 연동 해제됩니다.
     
     db.delete(target_user)
     db.commit()

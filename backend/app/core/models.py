@@ -33,7 +33,6 @@ class UserSettings(Base):
     kis_account_no = Column(String, nullable=True)
     
     # 텔레그램 설정
-    telegram_bot_token = Column(String, nullable=True)
     telegram_chat_id = Column(String, nullable=True)
     telegram_enabled = Column(Boolean, default=False)
     

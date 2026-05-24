@@ -11,20 +11,24 @@ from app.bot.fx_cache import FXRateCache
 # 비동기 전송을 위한 백그라운드 스레드풀
 executor = ThreadPoolExecutor(max_workers=10)
 
-# 사용자별 텔레그램 봇 스레드 레지스트리
-_poll_threads = {}  # {user_id: threading.Thread}
-_stop_events = {}   # {user_id: threading.Event}
+# 사용자별 텔레그램 봇 스레드 레지스트리 (하위 호환용)
+_poll_threads = {}  # [Deprecated]
+_stop_events = {}   # [Deprecated]
+
+# 글로벌 텔레그램 봇 단일 스레드 제어 변수
+_global_poll_thread = None
+_global_stop_event = None
 
 def send_message_sync(user_id: int, text: str) -> bool:
     """
-    특정 사용자의 텔레그램으로 메시지 동기 전송
+    특정 사용자의 텔레그램으로 메시지 동기 전송 (글로벌 봇 토큰 활용)
     """
     db = SessionLocal()
     try:
         user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
         if not user_settings or not user_settings.telegram_enabled:
             return False
-        token = user_settings.telegram_bot_token
+        token = settings.TELEGRAM_BOT_TOKEN
         chat_id = user_settings.telegram_chat_id
     finally:
         db.close()
@@ -53,15 +57,35 @@ def send_message_async(user_id: int, text: str):
     """
     executor.submit(send_message_sync, user_id, text)
 
-def _poll_updates_loop_for_user(user_id: int, token: str, chat_id: str):
+def _send_direct_message(chat_id: str, text: str) -> bool:
     """
-    개별 사용자별 메시지 수신을 위한 백그라운드 롱폴링(Long-Polling) 데몬.
+    유저 매핑 전 /start 안내 등 챗 ID만 알 때 다이렉트로 메시지를 전송하는 헬퍼
     """
-    print(f"[TelegramBot User {user_id}] Polling daemon started.")
+    token = settings.TELEGRAM_BOT_TOKEN
+    if not token:
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown"
+    }
+    try:
+        res = requests.post(url, json=payload, timeout=5)
+        return res.status_code == 200
+    except Exception as e:
+        print(f"[TelegramBot] Direct send exception to {chat_id}: {e}")
+        return False
+
+def _poll_global_updates_loop():
+    """
+    전역 단일 공식 봇 토큰을 이용한 롱폴링(Long-Polling) 데몬.
+    """
+    print("[TelegramBot] Global polling daemon started.")
+    token = settings.TELEGRAM_BOT_TOKEN
     offset = 0
-    stop_event = _stop_events.get(user_id)
     
-    while stop_event and not stop_event.is_set():
+    while _global_stop_event and not _global_stop_event.is_set():
         url = f"https://api.telegram.org/bot{token}/getUpdates"
         try:
             params = {"offset": offset, "timeout": 5}
@@ -77,28 +101,89 @@ def _poll_updates_loop_for_user(user_id: int, token: str, chat_id: str):
                         message = update.get("message", {})
                         text = message.get("text", "").strip()
                         chat = message.get("chat", {})
-                        msg_chat_id = chat.get("id")
+                        msg_chat_id = str(chat.get("id"))
                         
                         if not text:
                             continue
                             
-                        # 🔐 보안 검증: 해당 사용자로 설정된 Chat ID와 일치할 때만 명령 접수
-                        if str(msg_chat_id) != str(chat_id):
-                            print(f"[TelegramBot User {user_id}] Blocked unauthorized chat message from {msg_chat_id}: {text}")
-                            continue
-                            
-                        _process_command(user_id, text)
-            elif res.status_code == 404:
-                print(f"[TelegramBot User {user_id}] 404 Error detected. Token might be invalid. Sleeping 10s...")
-                stop_event.wait(10)
+                        _process_global_message(msg_chat_id, text)
+            elif res.status_code == 401 or res.status_code == 404:
+                print(f"[TelegramBot] Token invalid or unauthorized ({res.status_code}). Polling thread sleeping 30s...")
+                _global_stop_event.wait(30)
             else:
-                stop_event.wait(5)
+                _global_stop_event.wait(5)
         except Exception as e:
-            print(f"[TelegramBot User {user_id}] Polling loop error: {e}")
-            if stop_event:
-                stop_event.wait(5)
+            print(f"[TelegramBot] Polling loop error: {e}")
+            if _global_stop_event:
+                _global_stop_event.wait(5)
+                
+    print("[TelegramBot] Global polling daemon stopped.")
+
+def _process_global_message(msg_chat_id: str, text: str):
+    """
+    글로벌 봇으로 들어온 메시지를 분석하여 알맞은 유저의 명령으로 분기하거나 자동 연동을 수행합니다.
+    """
+    parts = text.split()
+    if not parts:
+        return
+    cmd = parts[0].lower()
+    
+    db = SessionLocal()
+    try:
+        # 1. 이미 이 챗 ID를 사용하는 유저가 있는지 조회
+        user_settings = db.query(UserSettings).filter(UserSettings.telegram_chat_id == msg_chat_id).first()
+        
+        if not user_settings:
+            # 미연동 유저의 딥링크 가입 시도 (/start username)
+            if cmd == "/start" and len(parts) > 1:
+                auth_username = parts[1].strip()
+                from app.core.models import User
+                user = db.query(User).filter(User.username == auth_username).first()
+                if user:
+                    u_settings = db.query(UserSettings).filter(UserSettings.user_id == user.id).first()
+                    if not u_settings:
+                        u_settings = UserSettings(user_id=user.id)
+                        db.add(u_settings)
+                    
+                    u_settings.telegram_chat_id = msg_chat_id
+                    u_settings.telegram_enabled = True
+                    db.commit()
+                    
+                    msg = (
+                        f"🎉 *연동 성공!*\n\n"
+                        f"`{user.username}`님 계정과 텔레그램 연동이 정상 완료되었습니다.\n"
+                        f"이제 시스템 자동매매 매수/매도 알림이 실시간으로 발송됩니다.\n\n"
+                        f"🤖 *사용 가능 원격 명령어:*\n"
+                        f"• `/status` - 현재 시스템 동작 모드 및 포트폴리오 조회\n"
+                        f"• `/run` - 자율 트레이딩 자동매매 루프 가동\n"
+                        f"• `/stop` - 자율 트레이딩 자동매매 루프 정지"
+                    )
+                    _send_direct_message(msg_chat_id, msg)
+                    print(f"[TelegramBot] Successfully linked Chat ID {msg_chat_id} to User: {user.username}")
+                else:
+                    _send_direct_message(msg_chat_id, "⚠️ 존재하지 않는 사용자명입니다. 웹의 연동 시작 링크를 통해 다시 접속해 주세요.")
+            else:
+                # 일반적인 /start 호출 등 가입되지 않은 경우 안내
+                msg = (
+                    "👋 *안녕하세요! StockAuto 트레이딩 브릿지입니다.*\n\n"
+                    "아직 본 계정의 텔레그램 연동이 완료되지 않았습니다.\n"
+                    "우리 주식 자동매매 웹 페이지의 **개인 투자 설정 ➔ Telegram Bridge** 탭에서 제공하는 "
+                    "**[🔗 텔레그램 연동 시작]** 버튼을 클릭하여 간편하게 연동을 마무리해 주세요!"
+                )
+                _send_direct_message(msg_chat_id, msg)
+            return
             
-    print(f"[TelegramBot User {user_id}] Polling daemon stopped.")
+        # 2. 이미 연동된 유저의 경우 활성화 여부(telegram_enabled) 검증
+        if not user_settings.telegram_enabled:
+            _send_direct_message(msg_chat_id, "⚠️ 텔레그램 알림 연동이 비활성화 상태입니다. 웹 페이지의 개인 투자 설정에서 활성화해 주세요.")
+            return
+            
+        _process_command(user_settings.user_id, text)
+        
+    except Exception as e:
+        print(f"[TelegramBot] Global message processing error: {e}")
+    finally:
+        db.close()
 
 def _process_command(user_id: int, text: str):
     """
@@ -196,64 +281,46 @@ def _process_command(user_id: int, text: str):
 
 def start_telegram_bot_for_user(user_id: int, token: str, chat_id: str):
     """
-    특정 사용자의 텔레그램 봇 데몬 시동
+    [Deprecated] 이전 다중 봇 기반의 개별 시동 함수 (하위 호환성 유지용)
     """
-    global _poll_threads, _stop_events
-    
-    if not token or not chat_id:
-        return
-        
-    if user_id in _poll_threads and _poll_threads[user_id].is_alive():
-        return
-        
-    stop_event = threading.Event()
-    _stop_events[user_id] = stop_event
-    
-    thread = threading.Thread(
-        target=_poll_updates_loop_for_user,
-        args=(user_id, token, chat_id),
-        name=f"TelegramPollThread-{user_id}",
-        daemon=True
-    )
-    _poll_threads[user_id] = thread
-    thread.start()
-    print(f"[TelegramBot User {user_id}] Polling thread started successfully.")
+    pass
 
 def stop_telegram_bot_for_user(user_id: int):
     """
-    특정 사용자의 텔레그램 봇 데몬 중지
+    [Deprecated] 이전 다중 봇 기반의 개별 중지 함수 (하위 호환성 유지용)
     """
-    global _poll_threads, _stop_events
-    stop_event = _stop_events.get(user_id)
-    thread = _poll_threads.get(user_id)
-    
-    if stop_event:
-        stop_event.set()
-    if thread and thread.is_alive():
-        thread.join(timeout=3)
-        print(f"[TelegramBot User {user_id}] Polling thread stopped successfully.")
-        
-    _poll_events_pop_result = _stop_events.pop(user_id, None)
-    _poll_threads_pop_result = _poll_threads.pop(user_id, None)
+    pass
 
 def start_telegram_bot():
     """
-    서버 구동 시 모든 활성 유저의 텔레그램 봇을 기동합니다.
+    서버 구동 시 단일 글로벌 텔레그램 봇 폴링 스레드를 기동합니다.
     """
-    db = SessionLocal()
-    try:
-        active_settings = db.query(UserSettings).filter(UserSettings.telegram_enabled == True).all()
-        for s in active_settings:
-            if s.telegram_bot_token and s.telegram_chat_id:
-                start_telegram_bot_for_user(s.user_id, s.telegram_bot_token, s.telegram_chat_id)
-    except Exception as e:
-        print(f"[TelegramBot Registry] Startup failed: {e}")
-    finally:
-        db.close()
+    global _global_poll_thread, _global_stop_event
+    
+    token = settings.TELEGRAM_BOT_TOKEN
+    if not token or token == "your_telegram_bot_token_here":
+        print("[TelegramBot] Global TELEGRAM_BOT_TOKEN is not configured or is default. Polling skipped.")
+        return
+        
+    if _global_poll_thread and _global_poll_thread.is_alive():
+        return
+        
+    _global_stop_event = threading.Event()
+    _global_poll_thread = threading.Thread(
+        target=_poll_global_updates_loop,
+        name="TelegramGlobalPollThread",
+        daemon=True
+    )
+    _global_poll_thread.start()
+    print("[TelegramBot] Global Polling thread started successfully.")
 
 def stop_telegram_bot():
     """
-    서버 종료 시 모든 가동 중인 텔레그램 스레드를 정지시킵니다.
+    서버 종료 시 가동 중인 글로벌 텔레그램 스레드를 정지시킵니다.
     """
-    for user_id in list(_poll_threads.keys()):
-        stop_telegram_bot_for_user(user_id)
+    global _global_poll_thread, _global_stop_event
+    if _global_stop_event:
+        _global_stop_event.set()
+    if _global_poll_thread and _global_poll_thread.is_alive():
+        _global_poll_thread.join(timeout=3)
+        print("[TelegramBot] Global Polling thread stopped successfully.")
