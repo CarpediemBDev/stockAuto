@@ -3,7 +3,9 @@ from app.bot.broker_factory import get_broker_client
 from app.core.database import SessionLocal
 from app.core.models import TradeLog, Holding, ActionLog, UserSettings
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 import asyncio
+from app.core.logging import logger
 from app.scanner.data_provider import fetch_ohlcv
 
 
@@ -28,7 +30,7 @@ async def safe_broker_call(func, *args, **kwargs):
         await asyncio.sleep(0.04)
         return await asyncio.to_thread(func, *args, **kwargs)
 
-ET = timezone(timedelta(hours=-5)) # 미국 동부 표준시(ET)는 UTC-5 (DST 시 UTC-4, 추후 자동화 가능)
+ET = ZoneInfo("America/New_York") # 미국 동부 표준시(ET)는 DST를 자동으로 반영합니다
 
 
 def is_us_market_open() -> bool:
@@ -55,7 +57,7 @@ async def get_realtime_price(ticker: str) -> float | None:
             return None
         return float(df['Close'].iloc[-1])
     except Exception as e:
-        print(f"[RealTimePrice] Failed to fetch {ticker}: {e}")
+        logger.exception(f"[RealTimePrice] Failed to fetch {ticker}")
         return None
 
 
@@ -63,7 +65,7 @@ def log_action(db, user_id: int, message: str, level="INFO"):
     """활동 로그를 특정 사용자의 ID로 DB에 기록합니다."""
     db.add(ActionLog(user_id=user_id, message=message, level=level))
     db.commit()
-    print(f"[{level}] [User {user_id}] {message}")
+    logger.info(f"[{level}] [User {user_id}] {message}")
 
 async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: list):
     """
@@ -92,7 +94,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                 
                 # 스캐너 후보군에 없더라도 보유 종목은 백그라운드 정밀 단독 기술 분석 수행
                 if not current_data:
-                    print(f"[Scheduler User {user_id}] Owned ticker {ticker} not in top scanned signals. Running dedicated technical analysis...")
+                    logger.info(f"[Scheduler User {user_id}] Owned ticker {ticker} not in top scanned signals. Running dedicated technical analysis...")
                     current_data = await analyze_single_ticker(ticker)
                 
                 if not current_data:
@@ -383,7 +385,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         log_action(db, user_id, f"BUY FAILED: {ticker} | {res['message']}", "ERROR")
 
     except Exception as e:
-        print(f"[run_user_trading_flow] Error for user {user_id}: {e}")
+        logger.exception(f"[run_user_trading_flow] Error for user {user_id}")
     finally:
         db.close()
 
@@ -393,13 +395,13 @@ async def refresh_scanner_cache():
     자동매매 루프와 완전히 분리되어 Rate Limit 위험 없이 안전하게 동작합니다.
     """
     global latest_scanned_signals
-    print("[Scanner Cache] Starting 10-min market scan refresh cycle...")
+    logger.info("[Scanner Cache] Starting 10-min market scan refresh cycle...")
     try:
         signals = await scan_overseas_market()
         latest_scanned_signals = signals
-        print(f"[Scanner Cache] Refresh complete. Cached {len(signals)} signals.")
+        logger.info(f"[Scanner Cache] Refresh complete. Cached {len(signals)} signals.")
     except Exception as e:
-        print(f"[Scanner Cache] ERROR during market scan: {e}")
+        logger.exception("[Scanner Cache] ERROR during market scan")
 
 def scanner_cache_wrapper():
     """스캐너 캐시 갱신용 동기 래퍼 (APScheduler 호출용)"""
@@ -421,7 +423,7 @@ async def async_trading_loop():
     """
     global is_processing
     if is_processing:
-        print("[Scheduler] Previous loop still running. Skipping this cycle.")
+        logger.info("[Scheduler] Previous loop still running. Skipping this cycle.")
         return
 
     is_processing = True
@@ -442,7 +444,7 @@ async def async_trading_loop():
         await asyncio.gather(*tasks)
 
     except Exception as e:
-        print(f"[Scheduler] CRITICAL ERROR in trading loop: {e}")
+        logger.exception("[Scheduler] CRITICAL ERROR in trading loop")
     finally:
         is_processing = False
         db.close()
@@ -466,6 +468,6 @@ def start_scheduler():
         # ② 스캐너 캐시 갱신: 10분 주기 (yfinance 대규모 API 호출 - Rate Limit 안전)
         scheduler.add_job(scanner_cache_wrapper, 'interval', minutes=10, id='scanner_cache_job', next_run_time=datetime.now())
         scheduler.start()
-        print("Background scheduler started (Multi-tenant 3-Mode Unified Engine).")
-        print("  - main_trade_job  : every 1 min  (trading logic, uses cached signals)")
-        print("  - scanner_cache_job: every 10 min (market scan + cache refresh)")
+        logger.info("Background scheduler started (Multi-tenant 3-Mode Unified Engine).")
+        logger.info("  - main_trade_job  : every 1 min  (trading logic, uses cached signals)")
+        logger.info("  - scanner_cache_job: every 10 min (market scan + cache refresh)")

@@ -9,6 +9,7 @@ from app.translations.translator import Translator
 from app.bot.scheduler import start_scheduler
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.logging import logger
 
 # 💡 모듈형 아키텍처 라우터 전격 임포트
 from app.auth.router import router as auth_router
@@ -34,7 +35,7 @@ def migrate_db_columns():
             try:
                 db.execute(text(f"ALTER TABLE trade_logs ADD COLUMN {col_name} {col_type}"))
                 db.commit()
-                print(f"[Migration] Column {col_name} successfully added to trade_logs table.")
+                logger.info(f"[Migration] Column {col_name} successfully added to trade_logs table.")
             except Exception:
                 db.rollback()
                 
@@ -43,7 +44,7 @@ def migrate_db_columns():
             try:
                 db.execute(text(f"ALTER TABLE holdings ADD COLUMN {col_name} {col_type}"))
                 db.commit()
-                print(f"[Migration] Column {col_name} successfully added to holdings table.")
+                logger.info(f"[Migration] Column {col_name} successfully added to holdings table.")
             except Exception:
                 db.rollback()
     finally:
@@ -54,21 +55,21 @@ migrate_db_columns()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup Caching & Seeding Stock Translations
-    print("Backend Lifespan Starting: Initializing Stock Translator Cache...")
+    logger.info("Backend Lifespan Starting: Initializing Stock Translator Cache...")
     Translator.load_cache()
     
     # Start the background trading loop scheduler
-    print("Backend Lifespan: Initializing Scheduler...")
+    logger.info("Backend Lifespan: Initializing Scheduler...")
     start_scheduler()
     
     # 💡 Telegram Polling Daemon Startup (Phase 11)
     from app.core.telegram import start_telegram_bot, stop_telegram_bot
-    print("Backend Lifespan: Starting Telegram Bot...")
+    logger.info("Backend Lifespan: Starting Telegram Bot...")
     start_telegram_bot()
     
     yield
     
-    print("Backend Lifespan Ending: Stopping Telegram Bot...")
+    logger.info("Backend Lifespan Ending: Stopping Telegram Bot...")
     stop_telegram_bot()
 
 app = FastAPI(title="StockAuto API", description="주식 자동매매 API 서버", lifespan=lifespan)

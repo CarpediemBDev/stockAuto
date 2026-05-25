@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from app.core.logging import logger
 
 # Determine which environment to load (Default to local)
 APP_ENV = os.getenv("APP_ENV", "local").lower()
@@ -15,9 +16,9 @@ full_env_path = os.path.join(backend_dir, env_file)
 if os.path.exists(full_env_path):
     # 12-Factor App 원칙: 실제 클라우드 OS 환경변수가 우선이어야 하므로 override=False (기본값) 사용
     load_dotenv(full_env_path, override=False)
-    print(f"[*] Environment loaded from: {full_env_path} (APP_ENV: {APP_ENV.upper()})")
+    logger.info(f"[*] Environment loaded from: {full_env_path} (APP_ENV: {APP_ENV.upper()})")
 else:
-    print(f"[⚠️ WARNING] Environment file not found: {full_env_path}")
+    logger.warning(f"[⚠️ WARNING] Environment file not found: {full_env_path}")
 
 # 유효한 트레이딩 모드 목록
 VALID_TRADE_MODES = ("SIMULATED", "MOCK", "REAL")
@@ -102,4 +103,4 @@ class Settings:
     VERSION = "2.0.0" # 3-Mode Architecture
 
 settings = Settings()
-print(f"[*] Active Profile: {settings.PROFILE.upper()} | Trade Mode: {settings.TRADE_MODE} | Real-Trading Ready: {settings.IS_REAL}")
+logger.info(f"[*] Active Profile: {settings.PROFILE.upper()} | Trade Mode: {settings.TRADE_MODE} | Real-Trading Ready: {settings.IS_REAL}")

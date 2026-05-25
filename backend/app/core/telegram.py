@@ -7,6 +7,7 @@ from app.bot.broker_factory import get_broker_client
 from app.core.database import SessionLocal
 from app.core.models import UserSettings, Holding
 from app.bot.fx_cache import FXRateCache
+from app.core.logging import logger
 
 # 비동기 전송을 위한 백그라운드 스레드풀
 executor = ThreadPoolExecutor(max_workers=10)
@@ -45,10 +46,10 @@ def send_message_sync(user_id: int, text: str) -> bool:
     try:
         res = requests.post(url, json=payload, timeout=5)
         if res.status_code != 200:
-            print(f"[Telegram User {user_id}] Failed to send message. Code: {res.status_code}, Res: {res.text}")
+            logger.warning(f"[Telegram User {user_id}] Failed to send message. Code: {res.status_code}, Res: {res.text}")
         return res.status_code == 200
     except Exception as e:
-        print(f"[Telegram User {user_id}] Send exception: {e}")
+        logger.exception(f"[Telegram User {user_id}] Send exception")
         return False
 
 def send_message_async(user_id: int, text: str):
@@ -74,14 +75,14 @@ def _send_direct_message(chat_id: str, text: str) -> bool:
         res = requests.post(url, json=payload, timeout=5)
         return res.status_code == 200
     except Exception as e:
-        print(f"[TelegramBot] Direct send exception to {chat_id}: {e}")
+        logger.exception(f"[TelegramBot] Direct send exception to {chat_id}")
         return False
 
 def _poll_global_updates_loop():
     """
     전역 단일 공식 봇 토큰을 이용한 롱폴링(Long-Polling) 데몬.
     """
-    print("[TelegramBot] Global polling daemon started.")
+    logger.info("[TelegramBot] Global polling daemon started.")
     token = settings.TELEGRAM_BOT_TOKEN
     offset = 0
     
@@ -108,16 +109,16 @@ def _poll_global_updates_loop():
                             
                         _process_global_message(msg_chat_id, text)
             elif res.status_code == 401 or res.status_code == 404:
-                print(f"[TelegramBot] Token invalid or unauthorized ({res.status_code}). Polling thread sleeping 30s...")
+                logger.warning(f"[TelegramBot] Token invalid or unauthorized ({res.status_code}). Polling thread sleeping 30s...")
                 _global_stop_event.wait(30)
             else:
                 _global_stop_event.wait(5)
         except Exception as e:
-            print(f"[TelegramBot] Polling loop error: {e}")
+            logger.exception("[TelegramBot] Polling loop error")
             if _global_stop_event:
                 _global_stop_event.wait(5)
                 
-    print("[TelegramBot] Global polling daemon stopped.")
+    logger.info("[TelegramBot] Global polling daemon stopped.")
 
 def _process_global_message(msg_chat_id: str, text: str):
     """
@@ -159,7 +160,7 @@ def _process_global_message(msg_chat_id: str, text: str):
                         f"• `/stop` - 자율 트레이딩 자동매매 루프 정지"
                     )
                     _send_direct_message(msg_chat_id, msg)
-                    print(f"[TelegramBot] Successfully linked Chat ID {msg_chat_id} to User: {user.username}")
+                    logger.info(f"[TelegramBot] Successfully linked Chat ID {msg_chat_id} to User: {user.username}")
                 else:
                     _send_direct_message(msg_chat_id, "⚠️ 존재하지 않는 사용자명입니다. 웹의 연동 시작 링크를 통해 다시 접속해 주세요.")
             else:
@@ -181,7 +182,7 @@ def _process_global_message(msg_chat_id: str, text: str):
         _process_command(user_settings.user_id, text)
         
     except Exception as e:
-        print(f"[TelegramBot] Global message processing error: {e}")
+        logger.exception("[TelegramBot] Global message processing error")
     finally:
         db.close()
 
@@ -240,7 +241,7 @@ def _process_command(user_id: int, text: str):
                 profit_rate = balance.get("profit_rate", 0.0)
             except Exception as e:
                 total_asset, cash_balance, stock_balance, profit_rate = 0, 0, 0, 0.0
-                print(f"[TelegramBot User {user_id}] Account balance fetch failed: {e}")
+                logger.exception(f"[TelegramBot User {user_id}] Account balance fetch failed")
                 
             fx_rate = FXRateCache.get_rate()
             holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
@@ -274,7 +275,7 @@ def _process_command(user_id: int, text: str):
             send_message_sync(user_id, "❓ *알 수 없는 명령어입니다.*\n사용 가능한 명령어: `/status`, `/run`, `/stop`")
             
     except Exception as e:
-        print(f"[TelegramBot User {user_id}] Command execution error: {e}")
+        logger.exception(f"[TelegramBot User {user_id}] Command execution error")
         send_message_sync(user_id, f"⚠️ *명령어 실행 중 오류 발생:* {str(e)}")
     finally:
         db.close()
@@ -299,7 +300,7 @@ def start_telegram_bot():
     
     token = settings.TELEGRAM_BOT_TOKEN
     if not token or token == "your_telegram_bot_token_here":
-        print("[TelegramBot] Global TELEGRAM_BOT_TOKEN is not configured or is default. Polling skipped.")
+        logger.warning("[TelegramBot] Global TELEGRAM_BOT_TOKEN is not configured or is default. Polling skipped.")
         return
         
     if _global_poll_thread and _global_poll_thread.is_alive():
@@ -312,7 +313,7 @@ def start_telegram_bot():
         daemon=True
     )
     _global_poll_thread.start()
-    print("[TelegramBot] Global Polling thread started successfully.")
+    logger.info("[TelegramBot] Global Polling thread started successfully.")
 
 def stop_telegram_bot():
     """
@@ -323,4 +324,4 @@ def stop_telegram_bot():
         _global_stop_event.set()
     if _global_poll_thread and _global_poll_thread.is_alive():
         _global_poll_thread.join(timeout=3)
-        print("[TelegramBot] Global Polling thread stopped successfully.")
+        logger.info("[TelegramBot] Global Polling thread stopped successfully.")
