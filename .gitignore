@@ -11,6 +11,9 @@ backend/.env*
 *.sqlite3
 stockauto.db
 
+#logs
+/logs/
+
 # Node
 frontend/node_modules/
 frontend/.next/
