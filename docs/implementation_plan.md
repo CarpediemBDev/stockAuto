@@ -1,59 +1,69 @@
-# [Implementation Plan] Phase 24: System Resilience & High-Performance Optimization
+# [Implementation Plan] Phase 25: Premium UI/UX Makeover & Alert Hotfixes
 
-This plan details the implementation of the remaining three core pillars of **Phase 24 (System Resilience & High-Performance Optimization)**. We will transform the Telegram communication bridge into a purely non-blocking async architecture, implement a self-healing auto-recovery mechanism inside the background trading scheduler, and build an intelligent rate-limiter defense in the data provider.
+This plan details the implementation of a comprehensive visual makeover and UX separation for the **OverseasScanner** technical details and **AI Sentiment analysis**, along with a hotfix for the **Telegram purchase failure notifications**.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> **No Thread Blockages:**
-> By changing the Telegram sender to a purely non-blocking `asyncio` task architecture, we eliminate all `ThreadPoolExecutor` context switches.
->
-> **Self-Healing Scheduler:**
-> If a network outage occurs or the KIS servers go down for maintenance, the scheduler will not crash. It will log a warning, pause trading operations for that specific user, and automatically resume once the connection is restored.
->
-> **Rate Limit Shields:**
-> The `DataProvider` will introduce cache windows (10-second hot cache) for single stock requests, preventing duplicate `yf.download` network triggers.
+> **Smart UX Separation (Quant Score Accordion vs AI News Modal):**
+> Instead of cramming both *Score Breakdown* and *AI Sentiment & Signals* into a single giant horizontal accordion row, we are separating their actions and entry points to match industry-standard trading applications (like Toss Securities):
+> 
+> 1. **Quant Score Breakdown (Inline Accordion):**
+>    - **Action:** Clicking anywhere on the table row unfolds a beautiful, compact **Quant Score Card** inline.
+>    - **Visuals:** Features the pulsing neon progress bar and a clean 2-column grid of technical factor chips (`grid-cols-2`). No longer shares space with news, making it tight, centered, and super readable.
+> 
+> 2. **AI News Sentiment & Signals (Premium Modal Popup):**
+>    - **Action:** Clicking on the **"AI 호재 🔥" / "AI 악재 📉" / "뉴스 📰"** badges inside the ticker column opens an immersive **Holographic AI News Sentiment Modal**.
+>    - **Visuals:** High-fidelity popup modal featuring:
+>      - Dynamic border gradient representing the sentiment (Emerald green glow for POSITIVE, Rose red for NEGATIVE).
+>      - Sleek news temperature spectrum with a pulsing white-hot LED glowing pointer (`shadow-[0_0_12px_rgba(255,255,255,0.9)] animate-pulse`).
+>      - Immersive glassmorphism card for the 3-line AI summary with a stylized Quote icon and a prominent "Read Original Article ↗" action.
+> 
+> **Telegram Alert Hotfix:**
+> Distinguish between actual **[예수금 부족] (Insufficient Cash)** and **[최소 수량 미달/단가 초과] (Minimum Lot/Price Constraint)** to prevent confusing alert messages, and apply a 1-hour `WARNING_COOLDOWN` memory cache to avoid spamming the user.
 
 ---
 
 ## Proposed Changes
 
-### [Component 1] Telegram Async Refactoring
+### [Component 1] Frontend UI/UX Separation & Makeover
 
-#### ⚙️ [MODIFY] [telegram.py](file:///d:/dev/workspace/stockAuto/backend/app/core/telegram.py)
-* **Deprecate Sync Sender:** Convert `send_message_sync` to a purely asynchronous `send_message_async` using `httpx.AsyncClient` instead of the blocking `requests` library.
-* **Remove ThreadPoolExecutor:** Replace the old `ThreadPoolExecutor` and background thread workers with standard, lightweight `asyncio.create_task()` executions.
+#### ⚙️ [MODIFY] [OverseasScanner.tsx](file:///d:/dev/workspace/stockAuto/frontend/components/OverseasScanner.tsx)
+* **Table Badge Event Listeners:**
+  - Bind a `onClick={(e) => { e.stopPropagation(); openNewsModal(item); }}` handler on the AI Sentiment/News badges so they act as a separate, highly focused entry point.
+* **Inline Accordion (Quant Score Card):**
+  - Adjust the accordion to span only the **Score Breakdown** module across a clean, elegant layout.
+  - Implement a **2-column grid** (`grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1 no-scrollbar`) for the factor checklist.
+  - Apply the premium dark-mode styled cards, neon-glowing rating slider (`from-indigo-500 via-purple-500 to-pink-500`), and pulsating LED bullets.
+* **AI Sentiment & Summary Modal:**
+  - Create a state variable `const [selectedNewsItem, setSelectedNewsItem] = useState<ScanResult | null>(null);` to manage the modal state.
+  - Render an immersive, centered modal dialog when an item is selected:
+    - Backdrop blur overlay (`bg-black/60 backdrop-blur-sm`).
+    - Holographic glass card with micro-shadowing (`bg-zinc-900/90 border border-zinc-800/80 shadow-[0_20px_50px_rgba(0,0,0,0.5)]`).
+    - Active dynamic top-border glows and pulsing LED pointer on the temperature spectrum bar.
+    - Large stylized quote styling for the AI 한글 summary, clean typography, and a prominent call-to-action button to open the original URL.
 
 ---
 
-### [Component 2] Scheduler Auto-Recovery & Resilience
+### [Component 2] Telegram Notification Hotfix
 
 #### ⚙️ [MODIFY] [scheduler.py](file:///d:/dev/workspace/stockAuto/backend/app/bot/scheduler.py)
-* **Wrap User Loops:** Wrap each user's trading execution loop in a strict `try-except` block.
-* **Auto-Recovery:** If a network-related API error (e.g., KIS API timeout or DNS name resolution failure) is caught:
-  1. Log a warning with the user context.
-  2. Send a Telegram warning alert to the user notifying them of the connection disruption.
-  3. Keep the scheduler running smoothly, bypass the current cycle, and try again in the next 1-minute cycle.
-* **State Coherence:** Ensure that database sessions are always properly rolled back and closed in a `finally` block during any scheduler crash, preventing connection pool leaks.
-
----
-
-### [Component 3] Data Provider Caching & Rate-Limit Shield
-
-#### ⚙️ [MODIFY] [data_provider.py](file:///d:/dev/workspace/stockAuto/backend/app/scanner/data_provider.py)
-* **Hot Cache:** Introduce a dictionary-based `HotCache` for recent stock data requests.
-* **Rate-Limit Guard:** If a ticker's OHLCV data was successfully fetched within the last 10 seconds, return the cached result instead of hitting the `yfinance` network server. This reduces duplicate calls during rapid page reloads or simultaneous scheduler/watchlist checks.
+* **Distinguish Order Failures:**
+  - Detect if the purchase fail is due to the stock's single share price exceeding the user's allocated slice budget (e.g., price $491 vs budget $308, resulting in quantity < 1 but with cash still remaining).
+  - If budget is the issue: format message as `⚠️ [자동매수 실패 - 단가 초과 / 최소 수량 미달]` with helpful explanatory text.
+  - If actual cash is the issue: format message as `⚠️ [자동매수 실패 - 예수금 부족]` only when total available account cash is genuinely insufficient.
+* **Cooldown Guard:**
+  - Implement a 1-hour cache guard for warnings per ticker to prevent spamming duplicate failure alerts on every scheduler loop cycle.
 
 ---
 
 ## Verification Plan
 
 ### Automated Verification
-1. **Compilation Check:** Run `python -m py_compile backend/app/core/telegram.py backend/app/bot/scheduler.py backend/app/scanner/data_provider.py` to verify syntax.
-2. **Resilience Emulation Test:**
-   * Run the server locally.
-   * Disconnect or block outbound internet connections (or point the API URL to a dummy domain).
-   * Verify that the scheduler outputs a descriptive connection warning and stays running, rather than crashing the background daemon.
+1. **Frontend Type Check:** Run `npx tsc --noEmit` and `npm run lint` inside the `frontend` folder to guarantee zero compilation and type errors.
+2. **Backend Syntax Check:** Run `python -m py_compile backend/app/bot/scheduler.py` to ensure zero syntax issues.
 
 ### Manual Verification
-* Start the Next.js UI, navigate around the dashboard, trigger a manual watchlist check, and verify that the logs show no duplicate `yfinance` network downloads for the same stock ticker within a 10-second window.
+1. Start the local server (`python run.py local`) and the development Next.js client (`npm run dev`).
+2. Verify row expansion: It should *only* expand the compact Score Breakdown card inline.
+3. Click the "AI 호재 🔥" badge: It should trigger the gorgeous, focused AI News Sentiment Modal. Confirm background blur, gradient borders, and responsive modal closure.

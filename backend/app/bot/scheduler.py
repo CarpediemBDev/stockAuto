@@ -16,6 +16,10 @@ from app.bot.fx_cache import FXRateCache
 # 💡 네트워크 일시 장애에 따른 텔레그램 경고 도배 방지용 시간 기록 저장소
 _user_network_alert_sent = {}
 
+import time
+# 매수 실패(단가 초과, 예수금 부족) 알림 도배 방지용 쿨타임 캐시 (1시간)
+WARNING_COOLDOWN_CACHE = {}
+
 
 from app.scanner.scanner import scan_overseas_market, analyze_single_ticker, check_market_sentiment
 
@@ -331,22 +335,43 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     ), "SIGNAL")
                     
                     if final_qty < 1:
+                        # 💡 스킵 원인 정밀 판별 (단가 초과 vs 진짜 예수금 부족)
+                        is_budget_exceeded = proposed_qty < 1.0
+                        
+                        if is_budget_exceeded:
+                            reason_title = "단가 초과 - 최소 수량 미달"
+                            reason_desc = (
+                                f"💡 해당 종목의 1주 단가가 이번 분할 투자 비중 예산보다 높습니다.\n"
+                                f"1주 미만(소수점 매매 미지원)으로 산출되어 매수가 안전하게 스킵되었습니다.\n"
+                                f"포트폴리오 비중을 늘리거나 정찰병 비중을 넓혀보세요."
+                            )
+                        else:
+                            reason_title = "예수금 부족"
+                            reason_desc = "💡 계좌의 가용 예수금이 한 주를 매수하기에 부족합니다. 계좌 예수금을 충전해 주세요."
+
                         log_action(db, user_id, (
-                            f"SKIP PURCHASE: Insufficient available cash for {ticker}. "
-                            f"Required price: ${current_price:.2f} > Max Budget: ${max_order_budget_usd:.2f}"
+                            f"SKIP PURCHASE ({reason_title}): {ticker}. "
+                            f"Required Price: ${current_price:.2f} > Safe Budget Limit: ${max_order_budget_usd:.2f} | "
+                            f"Proposed Qty: {proposed_qty:.2f}"
                         ), "WARNING")
                         
-                        # 텔레그램 예수금 부족 경고 알림 전송
-                        current_price_krw = current_price * exchange_rate
-                        send_message_async(
-                            user_id,
-                            f"⚠️ *[자동매수 실패 - 예수금 부족]*\n"
-                            f"종목: {ticker} ({s['name']})\n\n"
-                            f"• *실시간 현재가:* `${current_price:.2f}` (약 {current_price_krw:,.0f}원)\n"
-                            f"• *분할 투자금액:* `${proposed_value_usd:.2f}`\n"
-                            f"• *가용 예수금:* `${cash_balance_usd:.2f}`\n\n"
-                            f"계좌 예수금을 점검해 주세요."
-                        )
+                        # 💡 1시간 동안 동일 종목 중복 실패 경고 스팸 발송 차단 가드 적용
+                        cache_key = (user_id, ticker, reason_title)
+                        now = time.time()
+                        last_sent = WARNING_COOLDOWN_CACHE.get(cache_key, 0.0)
+                        
+                        if now - last_sent >= 3600.0:  # 1시간 쿨타임
+                            current_price_krw = current_price * exchange_rate
+                            send_message_async(
+                                user_id,
+                                f"⚠️ *[자동매수 실패 - {reason_title}]*\n"
+                                f"종목: {ticker} ({s['name']})\n\n"
+                                f"• *실시간 현재가:* `${current_price:.2f}` (약 {current_price_krw:,.0f}원)\n"
+                                f"• *분할 투자금액:* `${proposed_value_usd:.2f}`\n"
+                                f"• *가용 예수금:* `${cash_balance_usd:.2f}`\n\n"
+                                f"{reason_desc}"
+                            )
+                            WARNING_COOLDOWN_CACHE[cache_key] = now
                         continue
                     
                     # 격리 매수 호출 (💡 safe_broker_call 세마포어 격리 가드 탑재)

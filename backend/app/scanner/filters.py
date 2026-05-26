@@ -121,13 +121,24 @@ def detect_orb_high(df_1m: pd.DataFrame) -> tuple:
     
     # 장초반 최초 5분봉 데이터 슬라이싱 (1분봉 5개)
     first_5m = today_df.iloc[:5]
-    orb_high = float(first_5m['High'].max())
-    orb_volume = float(first_5m['Volume'].mean()) # 장초반 평균 거래량
     
-    last_close = float(today_df['Close'].iloc[-2]) if len(today_df) >= 2 else float(today_df['Close'].iloc[-1])
-    last_volume = float(today_df['Volume'].iloc[-2]) if len(today_df) >= 2 else float(today_df['Volume'].iloc[-1])
+    high_series = first_5m['High'].squeeze()
+    vol_series_5m = first_5m['Volume'].squeeze()
+    close_series_today = today_df['Close'].squeeze()
+    vol_series_today = today_df['Volume'].squeeze()
     
-    is_breakout = (last_close > orb_high) and (last_volume >= orb_volume * 1.2)
+    if isinstance(high_series, pd.DataFrame): high_series = high_series.iloc[:, 0]
+    if isinstance(vol_series_5m, pd.DataFrame): vol_series_5m = vol_series_5m.iloc[:, 0]
+    if isinstance(close_series_today, pd.DataFrame): close_series_today = close_series_today.iloc[:, 0]
+    if isinstance(vol_series_today, pd.DataFrame): vol_series_today = vol_series_today.iloc[:, 0]
+    
+    orb_high = float(high_series.max())
+    orb_volume = float(vol_series_5m.mean()) # 장초반 평균 거래량
+    
+    last_close = float(close_series_today.iloc[-2]) if len(today_df) >= 2 else float(close_series_today.iloc[-1])
+    last_volume = float(vol_series_today.iloc[-2]) if len(today_df) >= 2 else float(vol_series_today.iloc[-1])
+    
+    is_breakout = bool((last_close > orb_high) and (last_volume >= orb_volume * 1.2))
     return orb_high, orb_volume, is_breakout
 
 def detect_smart_exit_signal(df_1m: pd.DataFrame) -> bool:
@@ -140,28 +151,41 @@ def detect_smart_exit_signal(df_1m: pd.DataFrame) -> bool:
     if isinstance(temp_df.columns, pd.MultiIndex):
         temp_df.columns = temp_df.columns.get_level_values(0)
         
-    close = temp_df['Close']
-    rsi = calculate_rsi(close, period=14)
+    close = temp_df['Close'].squeeze()
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+        
+    rsi = calculate_rsi(close, period=14).squeeze()
     macd_line, signal_line, _ = calculate_macd(close)
+    macd_line = macd_line.squeeze()
+    signal_line = signal_line.squeeze()
+    
+    if isinstance(rsi, pd.DataFrame): rsi = rsi.iloc[:, 0]
+    if isinstance(macd_line, pd.DataFrame): macd_line = macd_line.iloc[:, 0]
+    if isinstance(signal_line, pd.DataFrame): signal_line = signal_line.iloc[:, 0]
     
     if rsi.empty or macd_line.empty or signal_line.empty or len(rsi) < 5:
         return False
         
     # 최근 5개 봉 기준 분석
-    price_rising = float(close.iloc[-1]) > float(close.iloc[-5])
-    rsi_falling = float(rsi.iloc[-1]) < float(rsi.iloc[-5])
-    overbought = float(rsi.iloc[-1]) >= 55.0
-    
-    macd_death_cross = False
-    for i in [-1, -2]:
-        was_above = macd_line.iloc[i-1] > signal_line.iloc[i-1]
-        is_below = macd_line.iloc[i] < signal_line.iloc[i]
-        if was_above and is_below:
-            macd_death_cross = True
-            break
-            
-    if price_rising and rsi_falling and overbought and macd_death_cross:
-        return True
+    try:
+        price_rising = float(close.iloc[-1]) > float(close.iloc[-5])
+        rsi_falling = float(rsi.iloc[-1]) < float(rsi.iloc[-5])
+        overbought = float(rsi.iloc[-1]) >= 55.0
+        
+        macd_death_cross = False
+        for i in [-1, -2]:
+            was_above = float(macd_line.iloc[i-1]) > float(signal_line.iloc[i-1])
+            is_below = float(macd_line.iloc[i]) < float(signal_line.iloc[i])
+            if was_above and is_below:
+                macd_death_cross = True
+                break
+                
+        if price_rising and rsi_falling and overbought and macd_death_cross:
+            return True
+    except:
+        pass
+        
     return False
 
 def detect_fakeout_risk(df_1m: pd.DataFrame) -> tuple:
@@ -172,8 +196,15 @@ def detect_fakeout_risk(df_1m: pd.DataFrame) -> tuple:
     if df_1m.empty or len(df_1m) < 2: return "LOW", 0.0
     
     from app.scanner.indicators import calculate_wick_ratio
-    wick_ratios = calculate_wick_ratio(df_1m)
-    target_wick = float(wick_ratios.iloc[-2])
+    wick_ratios = calculate_wick_ratio(df_1m).squeeze()
+    
+    if isinstance(wick_ratios, pd.DataFrame):
+        wick_ratios = wick_ratios.iloc[:, 0]
+        
+    try:
+        target_wick = float(wick_ratios.iloc[-2])
+    except:
+        target_wick = 0.0
     
     if target_wick >= 0.5: # 윗꼬리 50% 이상
         risk = "HIGH"

@@ -7,7 +7,9 @@ from app.scanner.indicators import (
     calculate_vwap,
     calculate_rvol,
     calculate_ema,
-    calculate_atr
+    calculate_atr,
+    detect_vcp_pattern,
+    detect_cup_and_handle
 )
 from app.scanner.filters import (
     detect_obv_divergence,
@@ -25,6 +27,7 @@ from app.scanner.data_provider import (
     fetch_bulk_ohlcv,
     fetch_ticker_news
 )
+from app.scanner.news_analyzer import analyze_news_sentiment
 
 # 지수 비교용 (Relative Strength)
 MARKET_INDEX = "QQQ" 
@@ -203,19 +206,15 @@ async def scan_market_expert() -> list:
             
         async def fetch_daily_data():
             return await fetch_bulk_ohlcv(candidate_tickers, period="200d", interval="1d")
-
-        async def fetch_news_parallel(ticker: str) -> bool:
+            
+        async def fetch_news_data(ticker: str) -> list:
             try:
                 # yfinance Ticker 날것 호출을 데이터 프로바이더로 전면 격리
-                news = await fetch_ticker_news(ticker)
-                for n in (news[:5] if news else []):
-                    title = n.get("title", "").lower()
-                    if any(kw in title for kw in CATALYST_KEYWORDS):
-                        return True
-            except: pass
-            return False
+                return await fetch_ticker_news(ticker)
+            except:
+                return []
 
-        news_tasks = [fetch_news_parallel(t) for t in candidate_tickers]
+        news_tasks = [fetch_news_data(t) for t in candidate_tickers]
         fundamental_tasks = [check_fundamental_health(t) for t in candidate_tickers]
         
         data_1m, data_daily, news_results, fundamental_results = await asyncio.gather(
@@ -239,7 +238,7 @@ async def scan_market_expert() -> list:
                     df_1m = data_1m.dropna()
                 if df_1m.empty or len(df_1m) < 10: continue
                 
-                # 2. 일봉 데이터 추출 (OBV 연산용)
+                # 2. 일봉 데이터 추출 (OBV, VCP, Cup & Handle 연산용)
                 if isinstance(data_daily.columns, pd.MultiIndex):
                     if ticker not in data_daily.columns.get_level_values(0): continue
                     df_daily = data_daily[ticker].dropna()
@@ -247,60 +246,148 @@ async def scan_market_expert() -> list:
                     df_daily = data_daily.dropna()
                 
                 last_close = float(df_1m['Close'].iloc[-1])
-                has_news = news_map.get(ticker, False)
+                news_list = news_map.get(ticker, [])
                 is_fundamental_healthy = fundamental_map.get(ticker, True)
                 
                 if not is_fundamental_healthy:
                     print(f"[Scanner Filter] {ticker} discarded - Negative earnings (not healthy).")
                     continue
                 
+                # AI 기반 뉴스 감성 판독 호출 (Gemini API + 로컬 룰 백업 하이브리드 엔진)
+                news_analysis = await analyze_news_sentiment(ticker, news_list)
+                news_sentiment = news_analysis["sentiment"]
+                news_sentiment_score = news_analysis["sentiment_score"]
+                news_summary = news_analysis["summary"]
+                news_url = news_analysis["url"]
+                
+                # 기술적 지표 및 퀀트 차트 패턴 감지
                 _, _, is_orb_breakout = detect_orb_high(df_1m)
                 is_rsi_bb_extreme = detect_rsi_bb_extreme(df_1m)
                 is_obv_accumulation = detect_obv_divergence(df_daily) if not df_daily.empty else False
                 
+                # VCP / Cup & Handle 패턴 인식 적용
+                is_vcp = detect_vcp_pattern(df_daily) if not df_daily.empty else False
+                is_cup = detect_cup_and_handle(df_daily) if not df_daily.empty else False
+                
                 vwap = calculate_vwap(df_1m)
                 risk_level, wick_ratio = detect_fakeout_risk(df_1m)
                 
+                # ----------------- 다이내믹 세부 채점표 (score_card) 구축 -----------------
+                score_card = []
                 final_score = 0
                 
+                # 1단계 점수(S1 Score) 세부 쪼개기 반영
+                if cand['gap_pct'] >= 3.0:
+                    score_card.append({"factor": f"당일 시가 갭상승 폭발 (+{cand['gap_pct']}%)", "score": 30, "passed": True})
+                elif cand['gap_pct'] >= 1.5:
+                    score_card.append({"factor": f"당일 시가 갭상승 강세 (+{cand['gap_pct']}%)", "score": 15, "passed": True})
+                
+                if cand['rvol'] >= 2.0:
+                    score_card.append({"factor": f"상대 거래량(RVOL) 급증 (+{cand['rvol']}배)", "score": 30, "passed": True})
+                elif cand['rvol'] >= 1.2:
+                    score_card.append({"factor": f"상대 거래량(RVOL) 완만 상승 (+{cand['rvol']}배)", "score": 15, "passed": True})
+                    
+                if cand['dist_to_high'] > -1.5:
+                    score_card.append({"factor": "직전 전고점 저항선 돌파 가중치", "score": 20, "passed": True})
+                if cand['rs'] > 0:
+                    score_card.append({"factor": f"QQQ 지수 대비 초과 수익률 달성 (RS +{cand['rs']})", "score": 10, "passed": True})
+                if cand['ema_aligned']:
+                    score_card.append({"factor": "EMA 9/20 정배열 상승 흐름 정방향", "score": 10, "passed": True})
+                if cand.get('is_near_52w_high'):
+                    score_card.append({"factor": "52주 최고가 역사적 신고가 영역 인접", "score": 25, "passed": True})
+                if cand.get('momentum_candles'):
+                    score_card.append({"factor": "3연속 거래량 실린 강세 양봉 출현", "score": 15, "passed": True})
+                if cand.get('premarket_gap_pct', 0.0) >= 5.0:
+                    score_card.append({"factor": f"프리마켓 거래 갭 급증 (+{cand['premarket_gap_pct']}%)", "score": 20, "passed": True})
+                
+                # 2단계(Stage 2) 장세별 점수 분기 채점
                 if sentiment == "BULLISH":
-                    final_score = cand['s1_score']
+                    score_card.append({"factor": "나스닥 QQQ 상승장 레짐 보너스", "score": 5, "passed": True})
+                    final_score = cand['s1_score'] + 5
                     
-                    if not vwap.empty and last_close > vwap.iloc[-1]: final_score += 10
-                    else: final_score -= 15
-                    
-                    if has_news: final_score += 10
-                    
-                    if risk_level == "LOW": final_score += 10
-                    elif risk_level == "HIGH": final_score -= 20
-                    
-                    if is_orb_breakout: final_score += 20
-                    final_score += 5
-                    
+                    is_vwap_above = not vwap.empty and last_close > vwap.iloc[-1]
+                    if is_vwap_above:
+                        score_card.append({"factor": "1분봉 VWAP 거래량 가중 평균선 상방 돌파", "score": 10, "passed": True})
+                        final_score += 10
+                    else:
+                        score_card.append({"factor": "1분봉 VWAP 지지선 붕괴 (하방 저항 발생)", "score": -15, "passed": False})
+                        final_score -= 15
+                        
+                    if news_sentiment == "POSITIVE":
+                        score_card.append({"factor": f"AI 뉴스 심리 진단 (호재 포착: {news_sentiment_score}점)", "score": 20, "passed": True})
+                        final_score += 20
+                    elif news_sentiment == "NEGATIVE":
+                        score_card.append({"factor": f"AI 뉴스 심리 진단 (경보 악재 감지: {news_sentiment_score}점)", "score": -30, "passed": False})
+                        final_score -= 30
+                        
+                    if risk_level == "LOW":
+                        score_card.append({"factor": "캔들 윗꼬리 차트 매물대 저항 없음 (안전)", "score": 10, "passed": True})
+                        final_score += 10
+                    elif risk_level == "HIGH":
+                        score_card.append({"factor": "캔들 윗꼬리 차트 악성 매물 저항 (물림 위험)", "score": -20, "passed": False})
+                        final_score -= 20
+                        
+                    if is_orb_breakout:
+                        score_card.append({"factor": "장초반 5분봉 고가 상방 대량 돌파 (ORB)", "score": 20, "passed": True})
+                        final_score += 20
                 else:
+                    final_score = 0
                     if is_obv_accumulation:
+                        score_card.append({"factor": "세력 OBV 매집 다이버전스 골든크로스", "score": 30, "passed": True})
                         final_score += 30
                     else:
+                        score_card.append({"factor": "세력 OBV 이탈 및 거래 매집 강도 음수", "score": -20, "passed": False})
                         final_score -= 20
-                    
+                        
                     if not df_daily.empty and len(df_daily) >= 120:
                         daily_close = df_daily['Close']
                         ema120_daily = calculate_ema(daily_close, 120)
                         if daily_close.iloc[-1] > ema120_daily.iloc[-1]:
+                            score_card.append({"factor": "일봉 장기 120일 이동평균선 상방 안착", "score": 30, "passed": True})
                             final_score += 30
                             
                     if is_rsi_bb_extreme:
+                        score_card.append({"factor": "RSI 볼린저밴드 하단 극점 터치 후 강력 반동 포착", "score": 30, "passed": True})
                         final_score += 30
                         
                     if sentiment == "BEARISH":
+                        score_card.append({"factor": "나스닥 QQQ 약세장 감점 페널티 적용", "score": -30, "passed": False})
                         final_score -= 30
                         
-                    if not vwap.empty and last_close > vwap.iloc[-1]: final_score += 10
-                    else: final_score -= 15
+                    is_vwap_above = not vwap.empty and last_close > vwap.iloc[-1]
+                    if is_vwap_above:
+                        score_card.append({"factor": "1분봉 VWAP 거래량 가중 평균선 상방 돌파", "score": 10, "passed": True})
+                        final_score += 10
+                    else:
+                        score_card.append({"factor": "1분봉 VWAP 지지선 붕괴 (하방 저항 발생)", "score": -15, "passed": False})
+                        final_score -= 15
+                        
+                    if news_sentiment == "POSITIVE":
+                        score_card.append({"factor": f"AI 뉴스 심리 진단 (호재 포착: {news_sentiment_score}점)", "score": 20, "passed": True})
+                        final_score += 20
+                    elif news_sentiment == "NEGATIVE":
+                        score_card.append({"factor": f"AI 뉴스 심리 진단 (경보 악재 감지: {news_sentiment_score}점)", "score": -30, "passed": False})
+                        final_score -= 30
+                        
+                    if risk_level == "LOW":
+                        score_card.append({"factor": "캔들 윗꼬리 차트 매물대 저항 없음 (안전)", "score": 10, "passed": True})
+                        final_score += 10
+                    elif risk_level == "HIGH":
+                        score_card.append({"factor": "캔들 윗꼬리 차트 악성 매물 저항 (물림 위험)", "score": -20, "passed": False})
+                        final_score -= 20
+                
+                # 3단계: 신규 퀀트 차트 패턴 매칭 점수
+                patterns_list = []
+                if is_vcp:
+                    score_card.append({"factor": "마크 미너비니 VCP 변동성 축소 수렴 돌파 완성", "score": 15, "passed": True})
+                    final_score += 15
+                    patterns_list.append("VCP")
+                if is_cup:
+                    score_card.append({"factor": "윌리엄 오닐 컵 앤 핸들 상승 패턴 돌파 완성", "score": 15, "passed": True})
+                    final_score += 15
+                    patterns_list.append("CUP_AND_HANDLE")
                     
-                    if risk_level == "LOW": final_score += 10
-                    elif risk_level == "HIGH": final_score -= 20
-
+                # 최종 범위 보장 및 등급 판독
                 final_score = max(0, min(final_score, 100))
                 
                 if sentiment == "BULLISH":
@@ -310,18 +397,24 @@ async def scan_market_expert() -> list:
                 
                 atr_series = calculate_atr(df_1m, period=14)
                 latest_atr = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
-
+                
                 final_results.append({
                     "ticker": ticker,
                     "name": get_ticker_name(ticker),
                     "price": last_close,
                     "signal_score": final_score,
                     "signal_type": sig_type,
+                    "news_sentiment": news_sentiment,
+                    "news_sentiment_score": news_sentiment_score,
+                    "news_summary": news_summary,
+                    "news_url": news_url,
+                    "patterns": patterns_list,
+                    "score_card": score_card,
                     "details": {
                         "gap": cand['gap_pct'],
                         "rvol": cand['rvol'],
                         "wick": round(wick_ratio, 2),
-                        "has_news": has_news,
+                        "has_news": len(news_list) > 0,
                         "risk": risk_level,
                         "rs": cand['rs'],
                         "ema_aligned": cand.get('ema_aligned', True),
@@ -333,10 +426,14 @@ async def scan_market_expert() -> list:
                         "is_orb_breakout": is_orb_breakout,
                         "is_rsi_bb_extreme": is_rsi_bb_extreme,
                         "is_obv_accumulation": is_obv_accumulation,
+                        "is_vcp": is_vcp,
+                        "is_cup": is_cup,
                         "regime_mode": sentiment
                     }
                 })
-            except: continue
+            except Exception as item_err:
+                print(f"[Stage 2] Error processing candidate {ticker}: {item_err}")
+                continue
     except Exception as e:
         print(f"[Stage 2] Error: {e}")
         
@@ -364,6 +461,20 @@ async def analyze_single_ticker(ticker: str) -> dict:
         if df_15m.empty or df_1m.empty or len(df_15m) < 5:
             return None
 
+        # [핵심 가드] yfinance MultiIndex 데이터 유출 방지 및 중복 컬럼 완전 제거 정화
+        cleaned_dfs = []
+        for dataframe in (df_15m, df_1m, df_daily):
+            if dataframe.empty:
+                cleaned_dfs.append(dataframe)
+                continue
+            temp = dataframe.copy()
+            if isinstance(temp.columns, pd.MultiIndex):
+                temp.columns = temp.columns.get_level_values(0)
+            temp = temp.loc[:, ~temp.columns.duplicated()]
+            cleaned_dfs.append(temp)
+            
+        df_15m, df_1m, df_daily = cleaned_dfs
+
         last_close = float(df_1m['Close'].iloc[-1])
         rvol = calculate_rvol(df_15m)
         
@@ -373,8 +484,8 @@ async def analyze_single_ticker(ticker: str) -> dict:
         if not ema9.empty and not ema20.empty:
             ema_aligned = bool(ema9.iloc[-1] > ema20.iloc[-1])
 
-        stock_perf = (df_15m['Close'].iloc[-1] / df_15m['Close'].iloc[0] - 1)
-        rs = stock_perf - qqq_perf
+        stock_perf = float(df_15m['Close'].iloc[-1] / df_15m['Close'].iloc[0] - 1)
+        rs = float(stock_perf - qqq_perf)
 
         _, _, is_orb_breakout = detect_orb_high(df_1m)
         is_rsi_bb_extreme = detect_rsi_bb_extreme(df_1m)

@@ -65,6 +65,9 @@ class Settings:
         # Telegram Bot Settings (Phase 11)
         self.TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
+        # Gemini API Key for AI Sentiment (Phase 21)
+        self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
         # 1. 초기 생성 시 무조건 안전한 SIMULATED 모드로 하드코딩 셋업
         # (이후 main.py에서 사용자가 화면(어드민)을 통해 저장한 DB 값을 읽어와 덮어씌웁니다)
         self.apply_trade_mode("SIMULATED")

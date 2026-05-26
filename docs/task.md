@@ -267,3 +267,9 @@
 - [x] 미국시장 DST 기반 시장시간 계산 개선
 
 > 위 항목들은 문서 중간에 잘못 삽입되어 있던 개선 작업을 문서 말미의 새 Phase로 이관한 것입니다.
+
+## 🌟 [Phase 25] Premium UI/UX Makeover & Alert Hotfixes — 완료 [x]
+
+- [x] **[마켓 스캐너 UI 리뉴얼]** `OverseasScanner.tsx` 상세 아코디언 컴포넌트를 Toss/TradingView 프리미엄 다크 테마로 전면 개편
+- [x] **[텔레그램 알림 핫픽스]** `scheduler.py` 매수 실패 시 단가 초과/수량 미달 vs 예수금 부족 명확히 분기 및 1시간 중복 알림 방지 Cooldown 가드 적용
+
