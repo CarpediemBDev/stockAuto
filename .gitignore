@@ -12,7 +12,7 @@ backend/.env*
 stockauto.db
 
 #logs
-/logs/
+logs
 
 # Node
 frontend/node_modules/

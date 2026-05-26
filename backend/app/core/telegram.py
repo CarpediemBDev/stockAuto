@@ -1,20 +1,12 @@
+import asyncio
 import threading
-import time
-import requests
-from concurrent.futures import ThreadPoolExecutor
+import httpx
 from app.core.config import settings
 from app.bot.broker_factory import get_broker_client
 from app.core.database import SessionLocal
 from app.core.models import UserSettings, Holding
 from app.bot.fx_cache import FXRateCache
 from app.core.logging import logger
-
-# 비동기 전송을 위한 백그라운드 스레드풀
-executor = ThreadPoolExecutor(max_workers=10)
-
-# 사용자별 텔레그램 봇 스레드 레지스트리 (하위 호환용)
-_poll_threads = {}  # [Deprecated]
-_stop_events = {}   # [Deprecated]
 
 # 글로벌 텔레그램 봇 단일 스레드 제어 변수
 _global_poll_thread = None
@@ -44,19 +36,58 @@ def send_message_sync(user_id: int, text: str) -> bool:
         "parse_mode": "Markdown"
     }
     try:
-        res = requests.post(url, json=payload, timeout=5)
-        if res.status_code != 200:
-            logger.warning(f"[Telegram User {user_id}] Failed to send message. Code: {res.status_code}, Res: {res.text}")
-        return res.status_code == 200
+        with httpx.Client() as client:
+            res = client.post(url, json=payload, timeout=5.0)
+            if res.status_code != 200:
+                logger.warning(f"[Telegram User {user_id}] Failed to send message. Code: {res.status_code}, Res: {res.text}")
+            return res.status_code == 200
     except Exception as e:
         logger.exception(f"[Telegram User {user_id}] Send exception")
         return False
 
+async def _send_message_async_coro(user_id: int, text: str) -> bool:
+    """
+    비동기식 텔레그램 메시지 전송 코루틴 (httpx.AsyncClient 활용)
+    """
+    db = SessionLocal()
+    try:
+        user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        if not user_settings or not user_settings.telegram_enabled:
+            return False
+        token = settings.TELEGRAM_BOT_TOKEN
+        chat_id = user_settings.telegram_chat_id
+    finally:
+        db.close()
+
+    if not token or not chat_id:
+        return False
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown"
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.post(url, json=payload, timeout=5)
+            if res.status_code != 200:
+                logger.warning(f"[Telegram User {user_id}] Failed to send async message. Code: {res.status_code}, Res: {res.text}")
+            return res.status_code == 200
+    except Exception as e:
+        logger.exception(f"[Telegram User {user_id}] Async send exception")
+        return False
+
 def send_message_async(user_id: int, text: str):
     """
-    비동기식 텔레그램 메시지 전송.
+    비동기식 텔레그램 메시지 전송 (Non-blocking asyncio Task 스케줄링)
     """
-    executor.submit(send_message_sync, user_id, text)
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_send_message_async_coro(user_id, text))
+    except RuntimeError:
+        # 이벤트 루프가 없는 동기식 백그라운드 스레드인 경우 안전하게 동기식 발송으로 대체
+        send_message_sync(user_id, text)
 
 def _send_direct_message(chat_id: str, text: str) -> bool:
     """
@@ -72,8 +103,9 @@ def _send_direct_message(chat_id: str, text: str) -> bool:
         "parse_mode": "Markdown"
     }
     try:
-        res = requests.post(url, json=payload, timeout=5)
-        return res.status_code == 200
+        with httpx.Client() as client:
+            res = client.post(url, json=payload, timeout=5.0)
+            return res.status_code == 200
     except Exception as e:
         logger.exception(f"[TelegramBot] Direct send exception to {chat_id}")
         return False
@@ -81,42 +113,44 @@ def _send_direct_message(chat_id: str, text: str) -> bool:
 def _poll_global_updates_loop():
     """
     전역 단일 공식 봇 토큰을 이용한 롱폴링(Long-Polling) 데몬.
+    (💡 httpx.Client 커넥션 풀을 루프 전체에서 공유하여 Keep-Alive 및 성능 대폭 상승)
     """
     logger.info("[TelegramBot] Global polling daemon started.")
     token = settings.TELEGRAM_BOT_TOKEN
     offset = 0
     
-    while _global_stop_event and not _global_stop_event.is_set():
-        url = f"https://api.telegram.org/bot{token}/getUpdates"
-        try:
-            params = {"offset": offset, "timeout": 5}
-            res = requests.get(url, params=params, timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                if data.get("ok"):
-                    results = data.get("result", [])
-                    for update in results:
-                        update_id = update.get("update_id")
-                        offset = update_id + 1
-                        
-                        message = update.get("message", {})
-                        text = message.get("text", "").strip()
-                        chat = message.get("chat", {})
-                        msg_chat_id = str(chat.get("id"))
-                        
-                        if not text:
-                            continue
+    with httpx.Client() as client:
+        while _global_stop_event and not _global_stop_event.is_set():
+            url = f"https://api.telegram.org/bot{token}/getUpdates"
+            try:
+                params = {"offset": offset, "timeout": 5}
+                res = client.get(url, params=params, timeout=10.0)
+                if res.status_code == 200:
+                    data = res.json()
+                    if data.get("ok"):
+                        results = data.get("result", [])
+                        for update in results:
+                            update_id = update.get("update_id")
+                            offset = update_id + 1
                             
-                        _process_global_message(msg_chat_id, text)
-            elif res.status_code == 401 or res.status_code == 404:
-                logger.warning(f"[TelegramBot] Token invalid or unauthorized ({res.status_code}). Polling thread sleeping 30s...")
-                _global_stop_event.wait(30)
-            else:
-                _global_stop_event.wait(5)
-        except Exception as e:
-            logger.exception("[TelegramBot] Polling loop error")
-            if _global_stop_event:
-                _global_stop_event.wait(5)
+                            message = update.get("message", {})
+                            text = message.get("text", "").strip()
+                            chat = message.get("chat", {})
+                            msg_chat_id = str(chat.get("id"))
+                            
+                            if not text:
+                                continue
+                                
+                            _process_global_message(msg_chat_id, text)
+                elif res.status_code == 401 or res.status_code == 404:
+                    logger.warning(f"[TelegramBot] Token invalid or unauthorized ({res.status_code}). Polling thread sleeping 30s...")
+                    _global_stop_event.wait(30)
+                else:
+                    _global_stop_event.wait(5)
+            except Exception as e:
+                logger.exception("[TelegramBot] Polling loop error")
+                if _global_stop_event:
+                    _global_stop_event.wait(5)
                 
     logger.info("[TelegramBot] Global polling daemon stopped.")
 
@@ -279,18 +313,6 @@ def _process_command(user_id: int, text: str):
         send_message_sync(user_id, f"⚠️ *명령어 실행 중 오류 발생:* {str(e)}")
     finally:
         db.close()
-
-def start_telegram_bot_for_user(user_id: int, token: str, chat_id: str):
-    """
-    [Deprecated] 이전 다중 봇 기반의 개별 시동 함수 (하위 호환성 유지용)
-    """
-    pass
-
-def stop_telegram_bot_for_user(user_id: int):
-    """
-    [Deprecated] 이전 다중 봇 기반의 개별 중지 함수 (하위 호환성 유지용)
-    """
-    pass
 
 def start_telegram_bot():
     """

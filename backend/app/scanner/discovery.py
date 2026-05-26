@@ -1,4 +1,4 @@
-import requests
+import httpx
 import asyncio
 from app.bot.kis_api import KISClient
 from app.core.database import SessionLocal
@@ -43,14 +43,14 @@ async def fetch_yahoo_most_active() -> list:
     try:
         url = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=false&scrIds=most_actives&count=100"
         headers = {"User-Agent": "Mozilla/5.0"}
-        # HTTP 요청을 비동기 스레드에서 실행하여 블로킹 방지
-        res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=5)
-        if res.status_code == 200:
-            data = res.json()
-            quotes = data.get("finance", {}).get("result", [{}])[0].get("quotes", [])
-            tickers = [q.get("symbol") for q in quotes if q.get("symbol")]
-            if tickers: print(f"[Discovery] Found {len(tickers)} tickers via Yahoo Finance.")
-            return tickers
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, headers=headers, timeout=5.0)
+            if res.status_code == 200:
+                data = res.json()
+                quotes = data.get("finance", {}).get("result", [{}])[0].get("quotes", [])
+                tickers = [q.get("symbol") for q in quotes if q.get("symbol")]
+                if tickers: print(f"[Discovery] Found {len(tickers)} tickers via Yahoo Finance.")
+                return tickers
     except Exception as e:
         print(f"[Discovery] Yahoo Screener failed: {e}")
     return []

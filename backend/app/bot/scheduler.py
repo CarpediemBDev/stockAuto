@@ -5,8 +5,16 @@ from app.core.models import TradeLog, Holding, ActionLog, UserSettings
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import asyncio
+import socket
+import httpx
+from requests.exceptions import RequestException as RequestsRequestException
 from app.core.logging import logger
 from app.scanner.data_provider import fetch_ohlcv
+from app.core.telegram import send_message_async
+from app.bot.fx_cache import FXRateCache
+
+# 💡 네트워크 일시 장애에 따른 텔레그램 경고 도배 방지용 시간 기록 저장소
+_user_network_alert_sent = {}
 
 
 from app.scanner.scanner import scan_overseas_market, analyze_single_ticker, check_market_sentiment
@@ -165,7 +173,6 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         log_action(db, user_id, f"SUCCESS: {ticker} sold via {sell_reason} | Order: {res['order_no']}", "INFO")
                         
                         # 텔레그램 매도 알림 전송
-                        from app.core.telegram import send_message_async
                         send_message_async(
                             user_id,
                             f"🔴 *[자동매도 체결]* {ticker} ({h.ticker_name})\n"
@@ -286,7 +293,6 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     total_asset_krw = balance_data.get("total_asset", 10000000.0)
                     cash_balance_krw = balance_data.get("cash_balance", 10000000.0)
 
-                    from app.bot.fx_cache import FXRateCache
                     exchange_rate = FXRateCache.get_rate()
 
                     total_asset_usd = total_asset_krw / exchange_rate
@@ -331,7 +337,6 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         ), "WARNING")
                         
                         # 텔레그램 예수금 부족 경고 알림 전송
-                        from app.core.telegram import send_message_async
                         current_price_krw = current_price * exchange_rate
                         send_message_async(
                             user_id,
@@ -384,7 +389,25 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     else:
                         log_action(db, user_id, f"BUY FAILED: {ticker} | {res['message']}", "ERROR")
 
+        # 성공적으로 자동매매 루프가 수행되었으므로 장애 알림 기록 초기화 (자가 복구 완료)
+        _user_network_alert_sent.pop(user_id, None)
+
+    except (RequestsRequestException, httpx.RequestError, ConnectionError, socket.gaierror, socket.timeout, TimeoutError, OSError) as ne:
+        db.rollback()
+        logger.warning(f"[Scheduler Auto-Recovery] Network disruption detected for User {user_id}. DB rolled back. Error: {ne}")
+        
+        now = datetime.now()
+        last_sent = _user_network_alert_sent.get(user_id)
+        if not last_sent or (now - last_sent) > timedelta(minutes=30):
+            _user_network_alert_sent[user_id] = now
+            send_message_async(
+                user_id,
+                "⚠️ *[시스템 접속 장애 알림]*\n\n"
+                "증권사(KIS) 또는 외부 네트워크 통신에 일시적인 장애가 감지되었습니다.\n"
+                "시스템은 자동으로 자가 복구를 시도하며, 연결이 정상화되는 즉시 매매를 재개합니다."
+            )
     except Exception as e:
+        db.rollback()
         logger.exception(f"[run_user_trading_flow] Error for user {user_id}")
     finally:
         db.close()
@@ -444,6 +467,7 @@ async def async_trading_loop():
         await asyncio.gather(*tasks)
 
     except Exception as e:
+        db.rollback()
         logger.exception("[Scheduler] CRITICAL ERROR in trading loop")
     finally:
         is_processing = False

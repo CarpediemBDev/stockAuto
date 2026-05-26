@@ -8,3 +8,5 @@ pandas
 pykrx
 apscheduler
 yfinance
+httpx
+
