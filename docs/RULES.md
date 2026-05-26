@@ -18,6 +18,7 @@
 ## 2. 모듈형 아키텍처 및 문서 체계 (Architecture & Docs)
 *   **백엔드 모듈형 레이어드 아키텍처 (Modular Layered):** 백엔드 코드는 무조건 `backend/app/` 아래에 위치하며, 도메인별 폴더(`watchlist/`, `scanner/`, `bot/`, `trades/`, `translations/`)로 격리 관리합니다. 데이터베이스 엔티티, 전역 예외, 설정은 반드시 `app/core/` (`models.py`, `database.py`, `config.py`, `exceptions.py`)로 일원화하고 루트 기준 절대경로 임포트(`from app.core...`)로 통일하여 임포트 꼬임(Circular Import)을 완벽히 차단합니다.
 *   **단일 진실 공급원 (SSOT) 및 투명성:** 설계도(`implementation_plan.md`), 현황판(`task.md`), 규칙(`RULES.md`), 전략(`SIGNAL.md`)은 무조건 프로젝트 내부의 **`docs/`** 폴더에서만 관리합니다. **AI는 자신만의 비공개 공간(Artifacts 등)에 정보를 보관하는 것을 엄격히 금지**하며, 모든 계획과 의도는 반드시 프로젝트 폴더 내 문서에 기록하여 투명성을 확보해야 합니다. **모든 코드 변경은 해당 변경 사항을 설명하는 문서(SYSTEM_MANUAL, README 등)의 업데이트와 동시에 이루어져야 합니다. (Doc-Code Sync)**
+*   **데이터베이스 마이그레이션 준수 (Alembic SSOT):** 데이터베이스 컬럼 추가/삭제/변경 발생 시, `main.py` 등에 임시 수동 SQL(ALTER TABLE) 코드를 삽입하는 행위를 절대 금지합니다. 무조건 `models.py` 수정 후 `alembic`을 통해 마이그레이션 스크립트를 작성하며, 앱 구동 시 `migrator.py`가 자동으로 이를 감지하여 안전하게 실행(기존 DB는 Stamp, 신규 DB는 Upgrade)하도록 관리합니다.
 *   **Vue 마스터용 React 가이드라인 동기화:** 프론트엔드 개발 중 **새로운 React Hook을 도입**하거나, **렌더링 버그/메모리 누수/의존성 충돌 등의 트러블슈팅**이 발생하면, AI는 반드시 그 즉시 **[docs/REACT_GUIDE.md](file:///d:/dev/workspace/stockAuto/docs/REACT_GUIDE.md)** 가이드 문서를 직관적인 비유(Vue ➔ React 매핑 등)와 함께 의무적으로 업데이트해야 합니다.
 *   **함수 지향적 모듈화:** 복잡한 상속보다는 독립적인 함수 조합(Composition)을 지향합니다. 모든 신규 함수는 표준 문서화 양식(Google Style / JSDoc)을 준수하여 입출력과 부수 효과를 명시합니다.
 

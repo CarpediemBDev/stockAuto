@@ -22,35 +22,9 @@ from app.trades.router_market import router as market_router
 from app.translations.router import router as translations_router
 from app.admin.router import router as admin_router
 
-# Create SQLite tables in core engine database
-Base.metadata.create_all(bind=engine)
-
-# 💡 SQLite 자동 스키마 마이그레이션 (v2.0 신규 컬럼 강제 추가)
-def migrate_db_columns():
-    from sqlalchemy import text
-    db = SessionLocal()
-    try:
-        # trade_logs 테이블에 regime_mode, signal_score 추가
-        for col_name, col_type in [("regime_mode", "VARCHAR"), ("signal_score", "INTEGER")]:
-            try:
-                db.execute(text(f"ALTER TABLE trade_logs ADD COLUMN {col_name} {col_type}"))
-                db.commit()
-                logger.info(f"[Migration] Column {col_name} successfully added to trade_logs table.")
-            except Exception:
-                db.rollback()
-                
-        # holdings 테이블에 regime_mode, buy_stage 추가
-        for col_name, col_type in [("regime_mode", "VARCHAR"), ("buy_stage", "INTEGER DEFAULT 1")]:
-            try:
-                db.execute(text(f"ALTER TABLE holdings ADD COLUMN {col_name} {col_type}"))
-                db.commit()
-                logger.info(f"[Migration] Column {col_name} successfully added to holdings table.")
-            except Exception:
-                db.rollback()
-    finally:
-        db.close()
-
-migrate_db_columns()
+# 💡 Alembic 프로그램 기반 자동 마이그레이션 실행 (스프링부트 Flyway 방식 이식)
+from app.core.migrator import run_migrations_programmatically
+run_migrations_programmatically()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
