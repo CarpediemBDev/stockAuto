@@ -41,6 +41,9 @@ docs/*.md
 !docs/RULES.md
 !docs/task.md
 !docs/implementation_plan.md
+!docs/AGENTS.md
+!docs/SCHEMA.md
+!docs/walkthrough.md
 
 # Private workspace logs
 docs/private_*
