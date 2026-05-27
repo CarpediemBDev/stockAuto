@@ -5,6 +5,8 @@
 # 1. 협업 및 프로젝트 수칙 (반드시 준수)
 
 @docs/RULES.md
+@docs/AGENTS.md
+
 
 # 2. 시스템 아키텍처 및 파일 맵
 
@@ -12,7 +14,7 @@
 
 # 3. 프레임워크 기술 가이드 (Next.js 등)
 
-@frontend/AGENTS.md
+@docs/NEXTJS_GUIDE.md
 
 # 4. 설계 및 작업 현황
 

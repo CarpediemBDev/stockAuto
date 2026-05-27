@@ -41,7 +41,7 @@ docs/*.md
 !docs/RULES.md
 !docs/task.md
 !docs/implementation_plan.md
-!docs/AGENTS.md
+!docs/NEXTJS_GUIDE.md
 !docs/SCHEMA.md
 !docs/walkthrough.md
 
