@@ -5,15 +5,18 @@ import {
   Radar, 
   RefreshCw, 
   TrendingUp, 
+  TrendingDown,
+  Newspaper,
   Plus, 
   Zap, 
   Eye, 
   Minus, 
   Info, 
-  ChevronDown, 
   ExternalLink, 
   Activity, 
-  MessageSquare 
+  MessageSquare,
+  BarChart2,
+  X
 } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { scannerAPI, isCancel } from "@/lib/api";
@@ -104,8 +107,8 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isSpinning, setIsSpinning] = useState(false);
   
-  // 아코디언 확장 티커 상태 관리
-  const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
+  // 퀀트 스코어 팝업 모달 상태 관리
+  const [selectedScoreItem, setSelectedScoreItem] = useState<ScanResult | null>(null);
   // AI 뉴스 상세 보기 모달 상태 관리
   const [selectedNewsItem, setSelectedNewsItem] = useState<ScanResult | null>(null);
 
@@ -130,23 +133,30 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
   usePolling(fetchScan, 30000);
 
   return (
-    <div className="bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-2xl shadow-xl flex flex-col h-full overflow-hidden">
+    <div className="bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-2xl shadow-xl flex flex-col h-full">
       {/* 아코디언 및 미세 스펙트럼 슬라이드 애니메이션 인라인 주입 */}
       <style>{`
         @keyframes slideDown {
-          from { opacity: 0; transform: translateY(-8px); max-height: 0; }
-          to { opacity: 1; transform: translateY(0); max-height: 600px; }
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
         }
         .animate-slide-down {
-          animation: slideDown 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
-        .no-scrollbar::-webkit-scrollbar {
-          display: none;
+        @keyframes newsTicker {
+          0%   { transform: translateX(100%); }
+          100% { transform: translateX(-100%); }
         }
-        .no-scrollbar {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
+        .animate-news-ticker {
+          animation: newsTicker 18s linear infinite;
+          white-space: nowrap;
+          display: inline-block;
         }
+        .animate-news-ticker:hover {
+          animation-play-state: paused;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
 
       {/* 헤더 */}
@@ -179,7 +189,7 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
       </div>
 
       {/* 테이블 영역 */}
-      <div className="flex-1 overflow-y-auto no-scrollbar">
+      <div className="flex-1 overflow-auto no-scrollbar">
         {isLoading && results.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-zinc-500">
             <Radar size={40} className="animate-ping mb-4 opacity-20 text-indigo-500" />
@@ -219,17 +229,15 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
                 const SignalIcon = signal.icon;
                 const isInWatchlist = watchlistTickers.includes(item.ticker);
                 const d = item.details;
-                
-                const isExpanded = expandedTicker === item.ticker;
 
                 return (
                   <React.Fragment key={item.ticker}>
                     {/* 메인 데이터 행 */}
                     <tr
-                      onClick={() => setExpandedTicker(isExpanded ? null : item.ticker)}
+                      onClick={() => setSelectedScoreItem(item)}
                       className={cn(
                         "group hover:bg-white/[0.02] cursor-pointer transition-all border-b border-zinc-800/30 select-none",
-                        isExpanded ? "bg-white/[0.03]" : (idx === 0 ? "bg-indigo-500/[0.02]" : "")
+                        idx === 0 ? "bg-indigo-500/[0.02]" : ""
                       )}
                     >
                       {/* 순위 */}
@@ -237,36 +245,64 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
                         <span className="text-zinc-650 font-mono text-xs">{String(idx + 1).padStart(2, '0')}</span>
                       </td>
 
-                      {/* 종목 정보 */}
-                      <td className="py-4 px-2">
-                        <div className="flex items-center gap-2">
-                          <div className="flex flex-col">
-                            <span className="text-white font-bold text-sm tracking-tight">{item.name}</span>
-                            <span className="text-zinc-500 font-mono text-[10px] uppercase tracking-wider">{item.ticker}</span>
+                      {/* 종목 정보 — 수직 스택 */}
+                      <td className="py-3 px-2 max-w-[160px]">
+                        <div className="flex flex-col gap-0.5">
+                          {/* 회사명 */}
+                          <span className="text-white font-bold text-sm tracking-tight leading-tight line-clamp-1">
+                            {item.name}
+                          </span>
+
+                          {/* 티커 + 패턴 뱃지 한 줄 */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-zinc-500 font-mono text-[10px] uppercase tracking-wider">
+                              {item.ticker}
+                            </span>
+                            {item.patterns && item.patterns.length > 0 && (
+                              <span className={cn(
+                                "inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[8px] font-black border tracking-wide",
+                                item.patterns.includes("VCP")
+                                  ? "bg-indigo-500/10 text-indigo-300 border-indigo-500/20"
+                                  : "bg-amber-500/10 text-amber-300 border-amber-500/20"
+                              )}>
+                                <Zap size={7} className="shrink-0" />
+                                {item.patterns.join("·")}
+                              </span>
+                            )}
                           </div>
-                          {d.has_news && (
-                            <span 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedNewsItem(item);
-                              }}
-                              className={cn(
-                                "flex h-4.5 items-center px-1.5 rounded text-[8.5px] font-bold border animate-pulse cursor-pointer hover:scale-105 active:scale-95 transition-all select-none",
-                                item.news_sentiment === "POSITIVE" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_6px_rgba(16,185,129,0.15)]" :
-                                item.news_sentiment === "NEGATIVE" ? "bg-rose-500/10 text-rose-400 border-rose-500/20 shadow-[0_0_6px_rgba(244,63,94,0.15)]" :
-                                "bg-amber-500/10 text-amber-500 border-amber-500/20 shadow-[0_0_6px_rgba(245,158,11,0.15)]"
-                              )}
-                            >
-                              {item.news_sentiment === "POSITIVE" ? "AI 호재 🔥" :
-                               item.news_sentiment === "NEGATIVE" ? "AI 악재 📉" : "뉴스 📰"}
-                            </span>
-                          )}
-                          {/* 패턴 탑재 여부 칩 추가 */}
-                          {item.patterns && item.patterns.length > 0 && (
-                            <span className="flex h-4.5 items-center px-1 rounded bg-indigo-500/10 text-indigo-400 text-[8px] font-black border border-indigo-500/20">
-                              {item.patterns.join(" / ")}
-                            </span>
-                          )}
+
+                          {/* 뉴스 흘러가는 줄 — 뉴스 있을 때만 */}
+                          {d.has_news && item.news_summary && (() => {
+                            const isPositive = item.news_sentiment === "POSITIVE";
+                            const isNegative = item.news_sentiment === "NEGATIVE";
+                            return (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setSelectedNewsItem(item); }}
+                                className="mt-0.5 overflow-hidden w-full cursor-pointer"
+                                title="클릭해서 AI 뉴스 분석 보기"
+                              >
+                                <div className={cn(
+                                  "flex items-center gap-1 text-[9px] font-bold",
+                                  isPositive ? "text-emerald-400" : isNegative ? "text-rose-400" : "text-sky-400"
+                                )}>
+                                  {/* 감성 아이콘 */}
+                                  {isPositive ? (
+                                    <TrendingUp size={8} className="shrink-0" />
+                                  ) : isNegative ? (
+                                    <TrendingDown size={8} className="shrink-0" />
+                                  ) : (
+                                    <Newspaper size={8} className="shrink-0" />
+                                  )}
+                                  {/* 흘러가는 텍스트 */}
+                                  <span className="overflow-hidden flex-1">
+                                    <span className="animate-news-ticker opacity-80 hover:opacity-100">
+                                      {item.news_summary}
+                                    </span>
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })()}
                         </div>
                       </td>
 
@@ -369,7 +405,7 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
                             </div>
                             <span className="text-[10px] text-zinc-400 font-mono font-bold flex items-center gap-1">
                               {item.signal_score}
-                              <ChevronDown size={11} className={cn("text-zinc-650 transition-transform duration-300", isExpanded && "rotate-180 text-indigo-400")} />
+                              <BarChart2 size={11} className="text-zinc-600 group-hover:text-indigo-400 transition-colors" />
                             </span>
                           </div>
                         </div>
@@ -394,82 +430,6 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
                         )}
                       </td>
                     </tr>
-
-                    {/* 아코디언 아웃 라인 3, 4번 동시 구현 */}
-                    {isExpanded && (
-                      <tr className="bg-zinc-950/70 border-b border-zinc-800/80">
-                        <td colSpan={8} className="p-0">
-                          <div className="overflow-hidden bg-zinc-950/40 p-6 border-l-4 border-indigo-500 animate-slide-down">
-                            <div className="max-w-3xl mx-auto bg-gradient-to-br from-zinc-900 to-zinc-950/80 border border-zinc-800/80 shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_10px_30px_rgba(0,0,0,0.5)] rounded-2xl p-6 flex flex-col gap-5">
-                              <div className="flex items-center justify-between border-b border-zinc-850 pb-3.5">
-                                <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2">
-                                  <Activity size={15} className="text-indigo-400 animate-pulse" />
-                                  Technical Score Breakdown
-                                </span>
-                                <span className="text-[10px] font-mono text-zinc-500 tracking-wider">QUANT SCORECARD • {item.ticker}</span>
-                              </div>
-                              
-                              {/* 스코어 게이지바 차오르는 애니메이션 */}
-                              <div className="flex items-center gap-4 bg-zinc-950/60 p-5 rounded-xl border border-zinc-850 shadow-inner">
-                                <div className="flex flex-col gap-2 flex-1">
-                                  <div className="flex justify-between items-end">
-                                    <span className="text-xs text-zinc-400 font-semibold tracking-wide">종합 추천 스코어</span>
-                                    <span className="text-2xl font-black font-mono tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-300">
-                                      {item.signal_score}
-                                      <span className="text-xs text-zinc-650 font-normal ml-1">/ 100</span>
-                                    </span>
-                                  </div>
-                                  <div className="w-full h-3.5 bg-zinc-900 rounded-full overflow-hidden p-[2.5px] border border-zinc-850">
-                                    <div 
-                                      className={cn(
-                                        "h-full rounded-full transition-all duration-1000 ease-out shadow-[0_0_12px_rgba(99,102,241,0.5)]",
-                                        item.signal_score >= 80 ? "bg-gradient-to-r from-indigo-500 via-purple-500 to-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.4)]" :
-                                        item.signal_score >= 60 ? "bg-gradient-to-r from-indigo-500 to-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.3)]" :
-                                        "bg-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.3)]"
-                                      )}
-                                      style={{ width: `${item.signal_score}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* 2열 격자 구조의 칩 리스트 */}
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[170px] overflow-y-auto pr-1.5 no-scrollbar mt-1">
-                                {item.score_card && item.score_card.length > 0 ? (
-                                  item.score_card.map((card, cidx) => (
-                                    <div 
-                                      key={cidx}
-                                      className={cn(
-                                        "flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold tracking-tight border transition-all duration-300 hover:bg-white/[0.01]",
-                                        card.passed 
-                                          ? "bg-emerald-500/[0.03] text-emerald-400 border-emerald-500/15 shadow-[inset_0_1px_0_rgba(16,185,129,0.05)]" 
-                                          : "bg-rose-500/[0.03] text-rose-455 border-rose-500/15 shadow-[inset_0_1px_0_rgba(244,63,94,0.05)]"
-                                      )}
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <span className={cn(
-                                          "w-1.5 h-1.5 rounded-full animate-pulse",
-                                          card.passed ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-rose-450 shadow-[0_0_8px_rgba(248,113,113,0.8)]"
-                                        )} />
-                                        <span className="text-zinc-300">{card.factor}</span>
-                                      </div>
-                                      <span className={cn(
-                                        "font-mono text-[10px] px-1.5 py-0.5 rounded-md font-extrabold",
-                                        card.passed ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
-                                      )}>
-                                        {card.score > 0 ? `+${card.score}` : card.score}
-                                      </span>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <span className="text-xs text-zinc-650 italic col-span-2 text-center py-4">세부 채점 내역이 제공되지 않는 종목입니다.</span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
                   </React.Fragment>
                 );
               })}
@@ -494,10 +454,141 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
             <span>Trend Aligned</span>
           </div>
         </div>
-        <div className="text-[10px] text-zinc-500 italic">
-          * Click any row to expand details, AI sentiments, and scorecards
+        <div className="text-[10px] text-zinc-500 italic flex items-center gap-1">
+          <BarChart2 size={10} className="text-zinc-600" />
+          행 클릭: 스코어 상세 &nbsp;·&nbsp; AI 칩 클릭: 뉴스 분석
         </div>
       </div>
+
+      {/* ── 퀀트 스코어 팝업 모달 ── */}
+      {selectedScoreItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/65 backdrop-blur-sm"
+            onClick={() => setSelectedScoreItem(null)}
+          />
+          <div className={cn(
+            "relative w-full max-w-xl bg-zinc-900/97 border-2 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] z-10 overflow-hidden",
+            selectedScoreItem.signal_score >= 80
+              ? "border-indigo-500/40 shadow-[0_0_40px_rgba(99,102,241,0.15)]"
+              : selectedScoreItem.signal_score >= 60
+              ? "border-amber-500/30 shadow-[0_0_40px_rgba(245,158,11,0.10)]"
+              : "border-zinc-700"
+          )}>
+            {/* 상단 컬러 라인 */}
+            <div className={cn(
+              "absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r",
+              selectedScoreItem.signal_score >= 80
+                ? "from-indigo-500 via-purple-500 to-rose-500"
+                : selectedScoreItem.signal_score >= 60
+                ? "from-indigo-500 to-amber-500"
+                : "from-zinc-600 to-zinc-700"
+            )} />
+
+            {/* 헤더 */}
+            <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-zinc-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
+                  <Activity size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white tracking-wide uppercase">Technical Score Breakdown</h3>
+                  <p className="text-[10px] text-zinc-500 font-mono tracking-wider mt-0.5">
+                    QUANT SCORECARD · {selectedScoreItem.name} ({selectedScoreItem.ticker})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedScoreItem(null)}
+                className="w-8 h-8 rounded-full bg-zinc-800 hover:bg-zinc-700 flex items-center justify-center text-zinc-400 hover:text-white transition-all active:scale-90"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="p-6 flex flex-col gap-5">
+              {/* 스코어 게이지바 */}
+              <div className="bg-zinc-950/60 p-5 rounded-xl border border-zinc-800 shadow-inner">
+                <div className="flex justify-between items-end mb-3">
+                  <span className="text-xs text-zinc-400 font-semibold tracking-wide">종합 추천 스코어</span>
+                  <span className="text-3xl font-black font-mono tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-400">
+                    {selectedScoreItem.signal_score}
+                    <span className="text-sm text-zinc-600 font-normal ml-1">/ 100</span>
+                  </span>
+                </div>
+                <div className="w-full h-4 bg-zinc-900 rounded-full overflow-hidden p-[2.5px] border border-zinc-850">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all duration-1000 ease-out",
+                      selectedScoreItem.signal_score >= 80
+                        ? "bg-gradient-to-r from-indigo-500 via-purple-500 to-rose-500 shadow-[0_0_16px_rgba(244,63,94,0.5)]"
+                        : selectedScoreItem.signal_score >= 60
+                        ? "bg-gradient-to-r from-indigo-500 to-amber-500 shadow-[0_0_16px_rgba(245,158,11,0.4)]"
+                        : "bg-indigo-500 shadow-[0_0_16px_rgba(99,102,241,0.4)]"
+                    )}
+                    style={{ width: `${selectedScoreItem.signal_score}%` }}
+                  />
+                </div>
+                {/* 점수 구간 레이블 */}
+                <div className="flex justify-between mt-2 text-[9px] text-zinc-700 font-mono">
+                  <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
+                </div>
+              </div>
+
+              {/* 팩터 칩 2열 그리드 */}
+              <div className="grid grid-cols-2 gap-2">
+                {selectedScoreItem.score_card && selectedScoreItem.score_card.length > 0 ? (
+                  selectedScoreItem.score_card.map((card, cidx) => (
+                    <div
+                      key={cidx}
+                      className={cn(
+                        "flex items-center justify-between px-3 py-2.5 rounded-xl text-xs border transition-all",
+                        card.passed
+                          ? "bg-emerald-500/[0.05] border-emerald-500/20 shadow-[inset_0_1px_0_rgba(16,185,129,0.07)]"
+                          : "bg-rose-500/[0.05] border-rose-500/20 shadow-[inset_0_1px_0_rgba(244,63,94,0.07)]"
+                      )}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={cn(
+                          "w-1.5 h-1.5 shrink-0 rounded-full",
+                          card.passed
+                            ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)]"
+                            : "bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.9)]"
+                        )} />
+                        <span className={cn("font-medium truncate", card.passed ? "text-zinc-300" : "text-zinc-500")}>
+                          {card.factor}
+                        </span>
+                      </div>
+                      <span className={cn(
+                        "font-mono text-[10px] px-1.5 py-0.5 rounded font-extrabold shrink-0 ml-2",
+                        card.passed ? "bg-emerald-500/15 text-emerald-400" : "bg-rose-500/10 text-rose-500"
+                      )}>
+                        {card.score > 0 ? `+${card.score}` : card.score}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <span className="col-span-2 text-xs text-zinc-600 italic text-center py-6">
+                    세부 채점 내역이 제공되지 않는 종목입니다.
+                  </span>
+                )}
+              </div>
+
+              {/* 합계 요약 */}
+              {selectedScoreItem.score_card && selectedScoreItem.score_card.length > 0 && (
+                <div className="flex items-center justify-between px-4 py-3 bg-zinc-950/80 rounded-xl border border-zinc-800">
+                  <span className="text-[11px] text-zinc-500 font-semibold">
+                    통과 {selectedScoreItem.score_card.filter(c => c.passed).length} / 전체 {selectedScoreItem.score_card.length} 항목
+                  </span>
+                  <span className="text-[11px] font-black font-mono text-indigo-400">
+                    합산 +{selectedScoreItem.score_card.filter(c => c.passed).reduce((s, c) => s + c.score, 0)}pt
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* AI Sentiment Modal Popup */}
       {selectedNewsItem && (

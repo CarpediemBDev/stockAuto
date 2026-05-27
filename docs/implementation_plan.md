@@ -1,69 +1,59 @@
-# [Implementation Plan] Phase 25: Premium UI/UX Makeover & Alert Hotfixes
+# [구현 계획서] Phase 26: 프로젝트 전용 AI 에이전트 협업 플레이북 (초경량 실용주의형)
 
-This plan details the implementation of a comprehensive visual makeover and UX separation for the **OverseasScanner** technical details and **AI Sentiment analysis**, along with a hotfix for the **Telegram purchase failure notifications**.
+본 계획서는 불필요한 바퀴를 다시 발명(파이썬 오케스트레이션 코드 직접 개발)하는 대신, 시장에 이미 완성되어 있는 고성능 에이전트 하네스 도구들(안티그라비티, 클라인 등)을 200% 활용하기 위한 **"프로젝트 전용 AI 에이전트 협업 플레이북"** 구축 설계안입니다. 
 
-## User Review Required
+프로젝트 내부에 협업 표준 가이드라인인 `docs/AGENTS.md`를 내장하여, 어떤 AI 도구가 프로젝트에 진입하더라도 이 규칙을 읽고 일사불란하게 감사관, 개발자, 검증자 등의 역할을 나누어 완벽한 협업 루프를 수행하게 만듭니다.
+
+## 사용자 검토 요구사항
 
 > [!IMPORTANT]
-> **Smart UX Separation (Quant Score Accordion vs AI News Modal):**
-> Instead of cramming both *Score Breakdown* and *AI Sentiment & Signals* into a single giant horizontal accordion row, we are separating their actions and entry points to match industry-standard trading applications (like Toss Securities):
+> **초경량 플레이북 아키텍처:**
+> 복잡한 파이썬 코딩과 패키지 설치를 생략하고, 에이전트가 즉시 읽어 가동할 수 있는 마크다운 기반의 **플레이북(Playbook)** 방식을 채택합니다.
 > 
-> 1. **Quant Score Breakdown (Inline Accordion):**
->    - **Action:** Clicking anywhere on the table row unfolds a beautiful, compact **Quant Score Card** inline.
->    - **Visuals:** Features the pulsing neon progress bar and a clean 2-column grid of technical factor chips (`grid-cols-2`). No longer shares space with news, making it tight, centered, and super readable.
+> 1. **역할 표준 매뉴얼 (`docs/AGENTS.md`):**
+>    - 6개의 가상 서브에이전트 역할(감사관, 코드 수정자, 검증자, 기능 개발자, UI 디자이너, 문서 작성자)에 대한 명확한 임무(Mission), 필수 수칙(Rules), 그리고 결과물 규격을 한국어로 상세히 정의합니다.
 > 
-> 2. **AI News Sentiment & Signals (Premium Modal Popup):**
->    - **Action:** Clicking on the **"AI 호재 🔥" / "AI 악재 📉" / "뉴스 📰"** badges inside the ticker column opens an immersive **Holographic AI News Sentiment Modal**.
->    - **Visuals:** High-fidelity popup modal featuring:
->      - Dynamic border gradient representing the sentiment (Emerald green glow for POSITIVE, Rose red for NEGATIVE).
->      - Sleek news temperature spectrum with a pulsing white-hot LED glowing pointer (`shadow-[0_0_12px_rgba(255,255,255,0.9)] animate-pulse`).
->      - Immersive glassmorphism card for the 3-line AI summary with a stylized Quote icon and a prominent "Read Original Article ↗" action.
+> 2. **표준 협업 프로세스 (Standard Workflow Pipeline):**
+>    - 오류 감사부터 수정, 검증, 최종 보고에 이르는 단계별 흐름을 규정합니다.
+>    - **"사용자 사전 승인(Human-in-the-Loop)"**을 필수 단계로 명시하여 안전 장치를 마련합니다.
 > 
-> **Telegram Alert Hotfix:**
-> Distinguish between actual **[예수금 부족] (Insufficient Cash)** and **[최소 수량 미달/단가 초과] (Minimum Lot/Price Constraint)** to prevent confusing alert messages, and apply a 1-hour `WARNING_COOLDOWN` memory cache to avoid spamming the user.
+> 3. **안티그라비티 플랫폼 즉시 가동 연동:**
+>    - 본 플레이북이 작성되면, 유저님이 **"플레이북 기반으로 하네스 작동시켜줘"**라고 지시하시는 순간, 제가 플랫폼 내장 기능(`define_subagent` / `invoke_subagent`)을 사용하여 플레이북의 정의대로 즉시 가상 개발팀을 구현해 작업을 개시합니다.
 
 ---
 
-## Proposed Changes
+## 제안된 변경 사항
 
-### [Component 1] Frontend UI/UX Separation & Makeover
+### [Component 1] AI 에이전트 플레이북 구축
 
-#### ⚙️ [MODIFY] [OverseasScanner.tsx](file:///d:/dev/workspace/stockAuto/frontend/components/OverseasScanner.tsx)
-* **Table Badge Event Listeners:**
-  - Bind a `onClick={(e) => { e.stopPropagation(); openNewsModal(item); }}` handler on the AI Sentiment/News badges so they act as a separate, highly focused entry point.
-* **Inline Accordion (Quant Score Card):**
-  - Adjust the accordion to span only the **Score Breakdown** module across a clean, elegant layout.
-  - Implement a **2-column grid** (`grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1 no-scrollbar`) for the factor checklist.
-  - Apply the premium dark-mode styled cards, neon-glowing rating slider (`from-indigo-500 via-purple-500 to-pink-500`), and pulsating LED bullets.
-* **AI Sentiment & Summary Modal:**
-  - Create a state variable `const [selectedNewsItem, setSelectedNewsItem] = useState<ScanResult | null>(null);` to manage the modal state.
-  - Render an immersive, centered modal dialog when an item is selected:
-    - Backdrop blur overlay (`bg-black/60 backdrop-blur-sm`).
-    - Holographic glass card with micro-shadowing (`bg-zinc-900/90 border border-zinc-800/80 shadow-[0_20px_50px_rgba(0,0,0,0.5)]`).
-    - Active dynamic top-border glows and pulsing LED pointer on the temperature spectrum bar.
-    - Large stylized quote styling for the AI 한글 summary, clean typography, and a prominent call-to-action button to open the original URL.
+#### [NEW] [AGENTS.md](file:///d:/dev/workspace/stockAuto/docs/AGENTS.md)
+* 프로젝트 루트의 `docs/` 폴더 내에 협업 플레이북을 신설합니다.
+* **주요 구성 내용:**
+  - **전역 수칙 (Global Rules):** Git 명령어 금지 수칙, 절대 임포트 규칙, 한글 NFC 완성형 인코딩 보장 수칙.
+  - **에이전트 역할별 명세 (6 Agents Specification):**
+    - `Auditor` (감사관): 코드 분석 및 감사 리포트(`CODE_AUDIT_REPORT.md`) 작성 전담.
+    - `Fixer` (코드 수정자): 감사 리포트 범위 내에서만 정밀 수정 수행.
+    - `Reviewer` (검증자): 린트(`npm run lint`, `npx tsc`) 및 구문 컴파일 검증 전담.
+    - `FeatureDeveloper` (기능 개발자): 백엔드 모듈 개발.
+    - `UIDesigner` (UI 디자이너): Next.js/Tailwind 프리미엄 다크 테마 화면 설계.
+    - `DocWriter` (문서 작성자): 현황판(`task.md`) 및 산출물 정리.
+  - **이관 프로토콜 (Handoff Protocol):** 감사 완료 ➔ 유저 승인 대기 ➔ 코드 수정 ➔ 품질 검증 ➔ 작업 완료 문서화 순서의 표준 가이드를 정의합니다.
 
 ---
 
-### [Component 2] Telegram Notification Hotfix
+### [Component 2] 프로젝트 설정 연동
 
-#### ⚙️ [MODIFY] [scheduler.py](file:///d:/dev/workspace/stockAuto/backend/app/bot/scheduler.py)
-* **Distinguish Order Failures:**
-  - Detect if the purchase fail is due to the stock's single share price exceeding the user's allocated slice budget (e.g., price $491 vs budget $308, resulting in quantity < 1 but with cash still remaining).
-  - If budget is the issue: format message as `⚠️ [자동매수 실패 - 단가 초과 / 최소 수량 미달]` with helpful explanatory text.
-  - If actual cash is the issue: format message as `⚠️ [자동매수 실패 - 예수금 부족]` only when total available account cash is genuinely insufficient.
-* **Cooldown Guard:**
-  - Implement a 1-hour cache guard for warnings per ticker to prevent spamming duplicate failure alerts on every scheduler loop cycle.
+#### [MODIFY] [CLAUDE.md](file:///d:/dev/workspace/stockAuto/CLAUDE.md)
+* 프로젝트 핵심 안내 파일에 `docs/AGENTS.md` 가이드라인을 등록하여, 프로젝트에 들어오는 모든 AI가 최우선으로 이를 학습하도록 연동합니다.
+
+#### [MODIFY] [task.md](file:///d:/dev/workspace/stockAuto/docs/task.md)
+* 프로젝트 작업 현황판에 `Phase 26` 항목들을 미완료 상태(`[ ]`)로 등록합니다.
 
 ---
 
-## Verification Plan
+## 검증 계획
 
-### Automated Verification
-1. **Frontend Type Check:** Run `npx tsc --noEmit` and `npm run lint` inside the `frontend` folder to guarantee zero compilation and type errors.
-2. **Backend Syntax Check:** Run `python -m py_compile backend/app/bot/scheduler.py` to ensure zero syntax issues.
-
-### Manual Verification
-1. Start the local server (`python run.py local`) and the development Next.js client (`npm run dev`).
-2. Verify row expansion: It should *only* expand the compact Score Breakdown card inline.
-3. Click the "AI 호재 🔥" badge: It should trigger the gorgeous, focused AI News Sentiment Modal. Confirm background blur, gradient borders, and responsive modal closure.
+### 수동 검증
+1. `docs/AGENTS.md` 파일이 마크다운 문법 오류 없이 깔끔하게 렌더링되는지 확인합니다.
+2. `CLAUDE.md`와 `task.md`가 플레이북 정보 및 신규 Phase 작업 항목을 완벽히 포함하고 있는지 확인합니다.
+3. 플레이북 기반으로 가상 서브에이전트(예: Fixer)를 1회 모의 호출(Dry-run)하여, 정의된 프롬프트가 서브에이전트에게 정상 주입되는지 최종 검증합니다.

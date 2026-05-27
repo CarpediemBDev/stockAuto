@@ -273,3 +273,11 @@
 - [x] **[마켓 스캐너 UI 리뉴얼]** `OverseasScanner.tsx` 상세 아코디언 컴포넌트를 Toss/TradingView 프리미엄 다크 테마로 전면 개편
 - [x] **[텔레그램 알림 핫픽스]** `scheduler.py` 매수 실패 시 단가 초과/수량 미달 vs 예수금 부족 명확히 분기 및 1시간 중복 알림 방지 Cooldown 가드 적용
 
+
+## 🌟 [Phase 26] AI 에이전트 협업 플레이북 (하네스) 구축 — 완료 [x]
+
+- [x] **[플레이북 신설]** `docs/AGENTS.md`에 6개 분야별 에이전트(Auditor, Fixer, Reviewer, Feature Dev, UI Designer, Doc Writer) 역할 정의 및 협업 이관 프로토콜 작성
+- [x] **[치트키 안내 갱신]** `CLAUDE.md` 파일에 `docs/AGENTS.md` 지침 추가 연동
+
+
+
