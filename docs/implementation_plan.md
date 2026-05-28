@@ -1,59 +1,72 @@
-# [구현 계획서] Phase 26: 프로젝트 전용 AI 에이전트 협업 플레이북 (초경량 실용주의형)
+# [구현 계획서] Phase 27: 누적 데이터 분석 기반 내일 상승 예측 스윙 스캐너 (Next-Day Breakout Predictor)
 
-본 계획서는 불필요한 바퀴를 다시 발명(파이썬 오케스트레이션 코드 직접 개발)하는 대신, 시장에 이미 완성되어 있는 고성능 에이전트 하네스 도구들(안티그라비티, 클라인 등)을 200% 활용하기 위한 **"프로젝트 전용 AI 에이전트 협업 플레이북"** 구축 설계안입니다. 
-
-프로젝트 내부에 협업 표준 가이드라인인 `docs/AGENTS.md`를 내장하여, 어떤 AI 도구가 프로젝트에 진입하더라도 이 규칙을 읽고 일사불란하게 감사관, 개발자, 검증자 등의 역할을 나누어 완벽한 협업 루프를 수행하게 만듭니다.
+본 계획서는 현재 15분봉 단기 모멘텀에 의존하는 스캐너를 넘어, **"세력이 본격적으로 움직이기 직전(주가 수렴 및 거래량 급감 구역)의 누적 데이터를 분석하여 내일 폭발할 종목을 포착하는 스윙 매집 스캐너 엔진"**을 구축하는 설계안입니다.
 
 ## 사용자 검토 요구사항
 
 > [!IMPORTANT]
-> **초경량 플레이북 아키텍처:**
-> 복잡한 파이썬 코딩과 패키지 설치를 생략하고, 에이전트가 즉시 읽어 가동할 수 있는 마크다운 기반의 **플레이북(Playbook)** 방식을 채택합니다.
+> **핵심 매커니즘: 돌파 직전의 변동성/거래량 수렴 포착 (VCP & Volume Dry-up)**
+> 15분봉의 단기 스파이크(세력 감지)에 추격 매수하는 것이 아니라, **최근 60~120일 동안의 일봉 누적 데이터**를 활용해 매집이 완료되고 내일 당장 솟구칠 수 있는 '임계점'에 도달한 종목을 진단합니다.
 > 
-> 1. **역할 표준 매뉴얼 (`docs/AGENTS.md`):**
->    - 6개의 가상 서브에이전트 역할(감사관, 코드 수정자, 검증자, 기능 개발자, UI 디자이너, 문서 작성자)에 대한 명확한 임무(Mission), 필수 수칙(Rules), 그리고 결과물 규격을 한국어로 상세히 정의합니다.
+> 1. **변동성 및 거래량 수축(VUD) 공식 고도화**:
+>    - 가격 진폭이 극도로 좁아진 수축 구역 포착 (Minervini VCP 수렴 규칙)
+>    - 당일 거래량이 최근 20일 평균 거래량의 30% 이하로 메마른 상태 검증 (매도 물량 씨 마름 감지)
 > 
-> 2. **표준 협업 프로세스 (Standard Workflow Pipeline):**
->    - 오류 감사부터 수정, 검증, 최종 보고에 이르는 단계별 흐름을 규정합니다.
->    - **"사용자 사전 승인(Human-in-the-Loop)"**을 필수 단계로 명시하여 안전 장치를 마련합니다.
+> 2. **OBV 누적 매집 다이버전스 (OBV Accumulation Divergence)**:
+>    - 주가는 평평하거나 약조정을 거치는 반면, OBV 누적선은 지난 5~10일간 꾸준히 고점을 높여가는 "세력의 몰래 매집 패턴" 공식 탑재.
 > 
-> 3. **안티그라비티 플랫폼 즉시 가동 연동:**
->    - 본 플레이북이 작성되면, 유저님이 **"플레이북 기반으로 하네스 작동시켜줘"**라고 지시하시는 순간, 제가 플랫폼 내장 기능(`define_subagent` / `invoke_subagent`)을 사용하여 플레이북의 정의대로 즉시 가상 개발팀을 구현해 작업을 개시합니다.
+> 3. **볼린저 밴드 밀착 (Bollinger Band Squeeze)**:
+>    - 일봉 볼린저 밴드 폭(Band Width)이 최근 120일 최저 수준으로 조여져 에너지가 한곳으로 응축된 종목 선별.
+> 
+> 4. **내일 상승 예측 스코어 (Next-Day Breakout Score)**:
+>    - 상기 조건들을 조합해 **0~100점 만점**의 확률 점수를 계산하고, 최상위 종목을 대시보드에 노출.
 
 ---
 
 ## 제안된 변경 사항
 
-### [Component 1] AI 에이전트 플레이북 구축
+### [Component 1] 퀀트 분석 지표 확장
 
-#### [NEW] [AGENTS.md](file:///d:/dev/workspace/stockAuto/docs/AGENTS.md)
-* 프로젝트 루트의 `docs/` 폴더 내에 협업 플레이북을 신설합니다.
-* **주요 구성 내용:**
-  - **전역 수칙 (Global Rules):** Git 명령어 금지 수칙, 절대 임포트 규칙, 한글 NFC 완성형 인코딩 보장 수칙.
-  - **에이전트 역할별 명세 (6 Agents Specification):**
-    - `Auditor` (감사관): 코드 분석 및 감사 리포트(`CODE_AUDIT_REPORT.md`) 작성 전담.
-    - `Fixer` (코드 수정자): 감사 리포트 범위 내에서만 정밀 수정 수행.
-    - `Reviewer` (검증자): 린트(`npm run lint`, `npx tsc`) 및 구문 컴파일 검증 전담.
-    - `FeatureDeveloper` (기능 개발자): 백엔드 모듈 개발.
-    - `UIDesigner` (UI 디자이너): Next.js/Tailwind 프리미엄 다크 테마 화면 설계.
-    - `DocWriter` (문서 작성자): 현황판(`task.md`) 및 산출물 정리.
-  - **이관 프로토콜 (Handoff Protocol):** 감사 완료 ➔ 유저 승인 대기 ➔ 코드 수정 ➔ 품질 검증 ➔ 작업 완료 문서화 순서의 표준 가이드를 정의합니다.
+#### [MODIFY] [indicators.py](file:///d:/dev/workspace/stockAuto/backend/app/scanner/indicators.py)
+* **신규 지표 수식 추가:**
+  - `calculate_volume_dryup(df, window=20)`: 최근 평균 거래량 대비 당일 거래량이 메마른 비율(VUD) 연산.
+  - `calculate_obv_divergence(df, window=10)`: 주가 흐름과 OBV의 누적 다이버전스 일치 여부 및 기울기 계산.
+  - `calculate_bb_squeeze(df, window=20)`: 볼린저 밴드 대폭 수축(Squeeze) 여부 및 밴드폭 지표 계산.
 
 ---
 
-### [Component 2] 프로젝트 설정 연동
+### [Component 2] 내일 상승 예측 스윙 스캐너 코어 개발
 
-#### [MODIFY] [CLAUDE.md](file:///d:/dev/workspace/stockAuto/CLAUDE.md)
-* 프로젝트 핵심 안내 파일에 `docs/AGENTS.md` 가이드라인을 등록하여, 프로젝트에 들어오는 모든 AI가 최우선으로 이를 학습하도록 연동합니다.
+#### [NEW] [swing_predictor.py](file:///d:/dev/workspace/stockAuto/backend/app/scanner/swing_predictor.py)
+* **역할:** 누적 일봉 데이터를 분석하여 내일 돌파 상승 가능성이 90% 이상인 종목을 진단하고 점수를 산출합니다.
+* **주요 메서드:**
+  - `async def analyze_swing_setup(ticker: str) -> dict`: 단일 종목의 120일 누적 일봉을 가져와 VCP, 거래량 극감, OBV 다이버전스, BB 스퀴즈를 종합 채점.
+  - `async def scan_next_day_candidates(tickers: list) -> list`: 감시 대상 종목군 전체를 병렬 스캔하여 내일 상승 확률이 가장 높은 Top 5 후보 선별 및 점수 산출.
 
-#### [MODIFY] [task.md](file:///d:/dev/workspace/stockAuto/docs/task.md)
-* 프로젝트 작업 현황판에 `Phase 26` 항목들을 미완료 상태(`[ ]`)로 등록합니다.
+---
+
+### [Component 3] 시스템 라우터 및 프론트엔드 UI 연동
+
+#### [MODIFY] [router.py](file:///d:/dev/workspace/stockAuto/backend/app/scanner/router.py)
+* **신규 API 엔드포인트 개설:**
+  - `@router.get("/swing-predict")`: 내일 상승 예측 스윙 종목 TOP 5 분석 결과와 채점 리포트를 프론트엔드로 전달하는 API 구현.
+
+#### [NEW] [SwingPredictorCard.tsx](file:///d:/dev/workspace/stockAuto/frontend/components/SwingPredictorCard.tsx)
+* **UI 기능:**
+  - Next.js 기반 프리미엄 다크 테마 카드 UI 신설.
+  - 종목별 **'내일 상승 예측 점수 (Next-Day Score)'**를 화려한 프로그레스 바(ProgressBar)로 시각화.
+  - VCP 수축 여부, 거래량 극감(Volume Dry-up) 상태, OBV 다이버전스 강도를 배지(🟢/🔴)로 한눈에 모니터링 가능하도록 구현.
+
+#### [MODIFY] [Dashboard.tsx](file:///d:/dev/workspace/stockAuto/frontend/components/Dashboard.tsx)
+* 신설된 `SwingPredictorCard` 컴포넌트를 대시보드 레이아웃에 통합 적재하여 종합 모니터링이 가능하도록 화면 배치.
 
 ---
 
 ## 검증 계획
 
+### 자동화 테스트
+1. `pytest` 또는 가상 테스트 스크립트를 통해 `swing_predictor.py`가 실제 120일 일봉 데이터를 정상적으로 수집(DataProvider 연동)하는지 검증합니다.
+2. VCP 수축 공식 및 OBV 다이버전스 알고리즘이 NaN 오류 없이 정확하게 0~100점 점수를 뱉어내는지 백엔드 문법 검증(`py_compile`)을 실시합니다.
+
 ### 수동 검증
-1. `docs/AGENTS.md` 파일이 마크다운 문법 오류 없이 깔끔하게 렌더링되는지 확인합니다.
-2. `CLAUDE.md`와 `task.md`가 플레이북 정보 및 신규 Phase 작업 항목을 완벽히 포함하고 있는지 확인합니다.
-3. 플레이북 기반으로 가상 서브에이전트(예: Fixer)를 1회 모의 호출(Dry-run)하여, 정의된 프롬프트가 서브에이전트에게 정상 주입되는지 최종 검증합니다.
+1. 프론트엔드 대시보드에 **"내일 세력 돌파 예측 (Next-Day Swing Breakout)"** 카드가 정상적으로 노출되며 실시간 점수 게이지바가 렌더링되는지 브라우저에서 최종 확인합니다.

@@ -84,22 +84,38 @@
    # 설정 파일 생성
    cp .env.example .env.local
 
-   # 서버 실행 (로컬 환경 구동)
+   # 로컬 개발 환경 구동 (Next.js 로컬 서버)
    npm run local
 
-   # 서버 실행 (개발 모드)
-   npm run dev
+   # 개발 서버 빌드 및 구동 (KIS 모의투자 연동 환경)
+   npm run build-dev
+   npm run start-dev
 
-   # 서버 실행 (운영 모드)
-   npm run prod
+   # 실전 서버 빌드 및 구동 (실거래 연동 환경)
+   npm run build-prod
+   npm run start-prod
    ```
 
 ## 🤖 AI 협업 가이드 (AI Collaboration)
 
-본 프로젝트는 AI 코딩 어시스턴트와의 효율적인 협업을 위해 최적화되어 있습니다.
+본 프로젝트는 AI 코딩 어시스턴트와의 유기적이고 안전한 협업을 위한 **AI 하네스 환경(AI Harness Environment)**이 완벽히 구축되어 있습니다.
 
-- **`CLAUDE.md`**: AI가 프로젝트 진입 시 최우선으로 읽는 가이드 맵입니다.
-- **`docs/RULES.md`**: AI와 개발자 간의 협업 규칙 및 코드 품질 수칙이 정의되어 있습니다.
+- **`CLAUDE.md`**: AI가 프로젝트 진입 시 최우선으로 읽어 스스로를 동기화하는 가이드 맵입니다.
+- **`docs/RULES.md`**: AI와 개발자 간의 협업 규칙, 코드 품질 기준 및 절대 수칙이 정의되어 있습니다.
+- **`docs/AGENTS.md`**: 7인의 분야별 전문 AI 역할 분담과 3회 자가 치유(Self-Correction) 수칙을 수립하여, **자율 협업 루프를 정교하게 제어하고 오류 없는 개발을 유도하는 프로젝트 핵심 '소프트웨어식 하네스 플레이북'**입니다.
+
+- **`docs/implementation_plan.md`**: **[구현 전 설계서]** 코드 작성 전에 변경 사양, 데이터 플로우, 타겟 수정 파일 및 검증 계획을 정의하는 최신 구축 기획 설계서입니다.
+- **`docs/walkthrough.md`**: **[구현 후 완료 보고서]** 개발이 완료된 실제 소스코드 편집 내역과 린트/컴파일 검증 테스트 결과를 투명하게 기록하는 최종 완료 보고서입니다.
+- **`docs/task.md`**: **[작업 현황판]** 프로젝트의 개발 단계별 목표와 실시간 진행 상황을 한눈에 볼 수 있도록 투명하게 관리하는 표준 작업 현황판입니다.
+- **`scripts/verify_harness.py`**: 빌드/린트 결함 발견 시 Git 커밋을 원천 봉쇄하여 환각 없는 100% 무결성 빌드를 보장하는 물리적 하드웨어식 하네스 가드입니다.
+
+#### 💡 하드 하네스 수동 검증 가이드
+커밋 전에 코드가 모든 컴파일/타입/린트 기준을 완벽하게 만족하는지 수동으로 무결성 검증을 수행하려면 프로젝트 루트 디렉터리에서 아래 명령어를 실행하십시오:
+```bash
+python scripts/verify_harness.py
+```
+> [!NOTE]
+> 만약 린트 오류나 타입 에러가 발생하면 **Git Pre-commit Hook 가드레일**에 의해 `git commit`이 자동으로 취소(Abort) 처리됩니다. 에러 로그를 분석 및 해결한 후 다시 커밋해주십시오.
 
 ## 🔒 보안 및 개인정보 보호
 
@@ -111,4 +127,5 @@
 
 ---
 
-Created by Antigravity (문서 대왕 15년 시니어)
+Developed & Maintained with Antigravity AI Engine
+

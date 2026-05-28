@@ -708,7 +708,7 @@ python run.py prod
 `/frontend` 폴더에서 실행합니다.
 
 ```bash
-npm run dev
+npm run local
 ```
 
 ### 3. Google Cloud Run 올-클라우드 통합 배포 (Unified Cloud Run Deployment)

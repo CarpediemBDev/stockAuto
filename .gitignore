@@ -39,6 +39,7 @@ docs/*.md
 !docs/SYSTEM_MANUAL.md
 !docs/REACT_GUIDE.md
 !docs/RULES.md
+!docs/AGENTS.md
 !docs/task.md
 !docs/implementation_plan.md
 !docs/NEXTJS_GUIDE.md

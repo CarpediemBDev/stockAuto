@@ -1,12 +1,7 @@
 import type { NextConfig } from "next";
-import path from "path";
-import os from "os";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    // D 드라이브 느린 파일시스템 경고 해결: 개발 캐시를 로컬 임시 디렉토리로 이동
-    cacheDir: path.join(os.tmpdir(), "stockauto-next-cache"),
-  },
+  output: "standalone", // 🚀 현업 표준: 최소 파일 압축 추출 Standalone 모드 탑재
 };
 
 export default nextConfig;

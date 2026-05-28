@@ -4,16 +4,13 @@
 
 ## 🚀 시작하기
 
-먼저, 개발 서버를 실행합니다:
+먼저, 패키지를 설치하고 로컬 환경 서버를 실행합니다:
 
 ```bash
-npm run dev
-# 또는
-yarn dev
-# 또는
-pnpm dev
-# 또는
-bun dev
+npm install
+
+# 로컬 개발 환경 구동 (Next.js 로컬 서버)
+npm run local
 ```
 
 브라우저에서 [http://localhost:3000](http://localhost:3000)을 열어 결과를 확인하세요.
