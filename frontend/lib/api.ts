@@ -103,6 +103,10 @@ export const translationAPI = {
   delete: (id: number) => api.delete(`/translations/${id}`),
 };
 
+export const reportAPI = {
+  getStats: (config?: AxiosRequestConfig) => api.get('/report/stats', config),
+};
+
 export const isCancel = axios.isCancel;
 
 export default api;

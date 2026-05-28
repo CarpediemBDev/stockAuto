@@ -58,6 +58,8 @@ class TradeLog(Base):
     order_no = Column(String, nullable=True)
     regime_mode = Column(String, nullable=True)     # ⭐ v2.0 장세 레짐 (BULLISH, BEARISH, NEUTRAL)
     signal_score = Column(Integer, nullable=True)   # ⭐ v2.0 매수 당시의 스캔 점수
+    realized_pnl = Column(Float, nullable=True)     # ⭐ v2.0 Phase 22 매도 시 실현 손익 (수익금)
+    return_rate = Column(Float, nullable=True)      # ⭐ v2.0 Phase 22 매도 시 수익률 (%)
     executed_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

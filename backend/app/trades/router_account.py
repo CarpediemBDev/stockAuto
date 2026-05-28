@@ -86,8 +86,33 @@ async def force_liquidate(
                 price = h.highest_price or h.avg_price
             
             # 통합 브로커 규격을 사용해 매도 주문 전송
-            broker.sell_order(ticker=h.ticker, quantity=h.quantity, price=price)
-            liquidated_tickers.append(h.ticker)
+            res = broker.sell_order(ticker=h.ticker, quantity=h.quantity, price=price)
+            
+            if res.get("success"):
+                filled_price = res.get("filled_price", price)
+                filled_qty = res.get("filled_qty", h.quantity)
+                order_no = res.get("order_no", "LIQUIDATE_MANUAL")
+                
+                realized_pnl = (filled_price - h.avg_price) * filled_qty
+                calc_return_rate = ((filled_price - h.avg_price) / h.avg_price) * 100 if h.avg_price > 0 else 0.0
+                
+                db.add(TradeLog(
+                    user_id=current_user.id,
+                    ticker=h.ticker,
+                    ticker_name=h.ticker_name,
+                    trade_type="SELL",
+                    price=filled_price,
+                    quantity=filled_qty,
+                    order_no=order_no,
+                    regime_mode="LIQUIDATE",
+                    signal_score=0,
+                    realized_pnl=round(realized_pnl, 2),
+                    return_rate=round(calc_return_rate, 2)
+                ))
+                db.delete(h)
+                liquidated_tickers.append(h.ticker)
+                
+        db.commit()
             
         return success_response(
             message=f"보유 중인 {len(liquidated_tickers)}개 종목({', '.join(liquidated_tickers)})이 모두 시장가 일괄 청산되었습니다."

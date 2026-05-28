@@ -10,7 +10,7 @@ import httpx
 from requests.exceptions import RequestException as RequestsRequestException
 from app.core.logging import logger
 from app.scanner.data_provider import fetch_ohlcv
-from app.core.telegram import send_message_async
+from app.core.telegram import send_message_async, send_daily_report_to_all_users_sync
 from app.bot.fx_cache import FXRateCache
 
 # 💡 네트워크 일시 장애에 따른 텔레그램 경고 도배 방지용 시간 기록 저장소
@@ -161,16 +161,23 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     res = await safe_broker_call(broker.sell_order, ticker, h.quantity, price=current_price)
 
                     if res["success"]:
+                        filled_price = res["filled_price"]
+                        filled_qty = res["filled_qty"]
+                        realized_pnl = (filled_price - h.avg_price) * filled_qty
+                        calc_return_rate = ((filled_price - h.avg_price) / h.avg_price) * 100 if h.avg_price > 0 else 0.0
+
                         db.add(TradeLog(
                             user_id=user_id,
                             ticker=ticker,
                             ticker_name=h.ticker_name,
                             trade_type="SELL",
-                            price=res["filled_price"],
-                            quantity=res["filled_qty"],
+                            price=filled_price,
+                            quantity=filled_qty,
                             order_no=res["order_no"],
                             regime_mode=sentiment,
-                            signal_score=current_score
+                            signal_score=current_score,
+                            realized_pnl=round(realized_pnl, 2),
+                            return_rate=round(calc_return_rate, 2)
                         ))
                         db.delete(h)
                         db.commit()
@@ -516,7 +523,11 @@ def start_scheduler():
         scheduler.add_job(trading_loop_wrapper, 'interval', minutes=1, id='main_trade_job', next_run_time=datetime.now())
         # ② 스캐너 캐시 갱신: 10분 주기 (yfinance 대규모 API 호출 - Rate Limit 안전)
         scheduler.add_job(scanner_cache_wrapper, 'interval', minutes=10, id='scanner_cache_job', next_run_time=datetime.now())
+        # ③ 텔레그램 일일 리포트 발송: 매일 한국시간 17:10 (미국장 마감 직후)
+        scheduler.add_job(send_daily_report_to_all_users_sync, 'cron', hour=17, minute=10, id='daily_telegram_report_job')
+        
         scheduler.start()
         logger.info("Background scheduler started (Multi-tenant 3-Mode Unified Engine).")
         logger.info("  - main_trade_job  : every 1 min  (trading logic, uses cached signals)")
         logger.info("  - scanner_cache_job: every 10 min (market scan + cache refresh)")
+        logger.info("  - daily_telegram_report_job: daily at 17:10 KST")

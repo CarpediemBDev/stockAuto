@@ -11,6 +11,7 @@ import { toast } from "sonner";
 const navItems = [
   { href: "/", label: "📈 Auto Trading" },
   { href: "/scanner", label: "🔭 Market Scanner" },
+  { href: "/report", label: "📊 Trading Report" },
 ];
 
 export function NavBar() {

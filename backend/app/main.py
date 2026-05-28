@@ -21,6 +21,7 @@ from app.watchlist.router import router as watchlist_router
 from app.trades.router_market import router as market_router
 from app.translations.router import router as translations_router
 from app.admin.router import router as admin_router
+from app.report.router import router as report_router
 
 # 💡 Alembic 프로그램 기반 자동 마이그레이션 실행 (스프링부트 Flyway 방식 이식)
 from app.core.migrator import run_migrations_programmatically
@@ -93,6 +94,7 @@ app.include_router(watchlist_router, prefix="/api/v1/watchlist", tags=["Watch Li
 app.include_router(market_router, prefix="/api/v1/market", tags=["Market Data"])
 app.include_router(translations_router, prefix="/api/v1/translations", tags=["System Translations"])
 app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin System"])
+app.include_router(report_router, prefix="/api/v1/report", tags=["Trading Report"])
 
 @app.get("/")
 def read_root():
