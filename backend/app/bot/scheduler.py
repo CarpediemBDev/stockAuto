@@ -139,20 +139,20 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                 
                 # ⭐ 지표 1. 조기 스마트 익절 (RSI 하락 다이버전스 + MACD 데드크로스)
                 if profit_rate >= 1.0 and is_smart_exit:
-                    sell_reason = f"RSI-MACD Smart Exit (조기 익절 확정 | 수익률: {profit_rate:.2f}%)"
+                    sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
                 
                 # 지표 2. 동적 손절선 돌파
                 elif profit_rate <= -stop_loss_pct:
-                    sell_reason = f"Dynamic Stop Loss ({profit_rate:.2f}% <= -{stop_loss_pct:.2f}%)"
+                    sell_reason = f"동적 손절선 이탈 (손절 기준 -{stop_loss_pct:.2f}% 돌파 | 현재 수익률: {profit_rate:.2f}%)"
                 
                 # 지표 3. 동적 트레일링 스탑 돌파 (평단가 밑으로 가더라도 최고가 대비 이탈하면 손절 성격 무조건 탈출)
                 elif current_price <= h.highest_price * (1 - trailing_stop_pct / 100) and h.highest_price > h.avg_price:
-                    sell_reason = f"Dynamic Trailing Stop (-{trailing_stop_pct:.2f}% from peak ${h.highest_price})"
+                    sell_reason = f"동적 트레일링 스탑 이탈 (최고가 ${h.highest_price:.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)"
                 
                 # 지표 4. 기술적 강세 시그널 붕괴
                 # 상승장에서는 40점 미만, 하락/횡보장에서는 50점 미만 하락 시 강제 탈출
                 elif (sentiment == "BULLISH" and current_score < 40) or (sentiment != "BULLISH" and current_score < 50):
-                    sell_reason = f"Signal Weakened ({current_score} pts - EMA/VWAP breakdown or Selling pressure)"
+                    sell_reason = f"강세 시그널 붕괴 ({current_score}점 - EMA/VWAP 지지선 이탈 또는 매도 압력)"
 
                 if sell_reason:
                     log_action(db, user_id, f"EXIT SIGNAL: {ticker} | Reason: {sell_reason}", "SIGNAL")
@@ -183,13 +183,21 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         db.commit()
                         log_action(db, user_id, f"SUCCESS: {ticker} sold via {sell_reason} | Order: {res['order_no']}", "INFO")
                         
+                        exchange_rate = FXRateCache.get_rate()
+                        filled_price_krw = filled_price * exchange_rate
+                        total_amount_usd = filled_price * filled_qty
+                        total_amount_krw = total_amount_usd * exchange_rate
+                        pnl_sign = "+" if realized_pnl >= 0 else ""
+                        pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
                         # 텔레그램 매도 알림 전송
                         send_message_async(
                             user_id,
                             f"🔴 *[자동매도 체결]* {ticker} ({h.ticker_name})\n"
-                            f"• *체결 단가:* `${res['filled_price']:,.2f}`\n"
-                            f"• *체결 수량:* `{res['filled_qty']}주`\n"
+                            f"• *체결 단가:* `${filled_price:,.2f}` (약 {filled_price_krw:,.0f}원)\n"
+                            f"• *체결 수량:* `{filled_qty}주`\n"
+                            f"• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n"
                             f"• *매도 사유:* {sell_reason}\n"
+                            f"{pnl_emoji} *수익률:* `{pnl_sign}{calc_return_rate:.2f}%` | *실현 손익:* `{pnl_sign}${realized_pnl:,.2f}`\n"
                             f"• *주문 번호:* `{res['order_no']}`"
                         )
                     else:
@@ -348,13 +356,13 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         if is_budget_exceeded:
                             reason_title = "단가 초과 - 최소 수량 미달"
                             reason_desc = (
-                                f"💡 해당 종목의 1주 단가가 이번 분할 투자 비중 예산보다 높습니다.\n"
+                                f"💡 해당 종목의 1주 단가가 이번 매수 시도 금액보다 높습니다.\n"
                                 f"1주 미만(소수점 매매 미지원)으로 산출되어 매수가 안전하게 스킵되었습니다.\n"
                                 f"포트폴리오 비중을 늘리거나 정찰병 비중을 넓혀보세요."
                             )
                         else:
                             reason_title = "예수금 부족"
-                            reason_desc = "💡 계좌의 가용 예수금이 한 주를 매수하기에 부족합니다. 계좌 예수금을 충전해 주세요."
+                            reason_desc = "💡 계좌의 주문 가능 금액이 한 주를 매수하기에 부족합니다. 계좌 예수금을 충전해 주세요."
 
                         log_action(db, user_id, (
                             f"SKIP PURCHASE ({reason_title}): {ticker}. "
@@ -373,9 +381,9 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                                 user_id,
                                 f"⚠️ *[자동매수 실패 - {reason_title}]*\n"
                                 f"종목: {ticker} ({s['name']})\n\n"
-                                f"• *실시간 현재가:* `${current_price:.2f}` (약 {current_price_krw:,.0f}원)\n"
-                                f"• *분할 투자금액:* `${proposed_value_usd:.2f}`\n"
-                                f"• *가용 예수금:* `${cash_balance_usd:.2f}`\n\n"
+                                f"• *현재가:* `${current_price:,.2f}` (약 {current_price_krw:,.0f}원)\n"
+                                f"• *매수 시도 금액:* `${proposed_value_usd:,.2f}`\n"
+                                f"• *주문 가능 금액:* `${cash_balance_usd:,.2f}`\n\n"
                                 f"{reason_desc}"
                             )
                             WARNING_COOLDOWN_CACHE[cache_key] = now
@@ -525,7 +533,6 @@ def start_scheduler():
         scheduler.add_job(scanner_cache_wrapper, 'interval', minutes=10, id='scanner_cache_job', next_run_time=datetime.now())
         # ③ 텔레그램 일일 리포트 발송: 매일 한국시간 17:10 (미국장 마감 직후)
         scheduler.add_job(send_daily_report_to_all_users_sync, 'cron', hour=17, minute=10, id='daily_telegram_report_job')
-        
         scheduler.start()
         logger.info("Background scheduler started (Multi-tenant 3-Mode Unified Engine).")
         logger.info("  - main_trade_job  : every 1 min  (trading logic, uses cached signals)")
