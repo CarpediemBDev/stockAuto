@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect, useRef } from "react";
 import { TradeLog } from "./TradeLogs";
 import { accountAPI, isCancel } from "@/lib/api";
 import { getErrorMessage } from "@/lib/utils";
-import { toast } from "sonner";
+
 
 interface AssetTrendChartProps {
   displayCurrency: "KRW" | "USD";
@@ -109,7 +109,8 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
     // 포인트가 너무 적으면 앞쪽에 시작점 기반 수평 보조 포인트를 덧붙여 7개 이상의 흐름을 만들어냅니다.
     if (historyPoints.length < 7) {
       const needed = 7 - historyPoints.length;
-      const firstTxDate = new Date(sortedLogs[0]?.executed_at || Date.now());
+      const firstTxDate = new Date(sortedLogs[0].executed_at);
+
       const fillPoints = Array.from({ length: needed }).map((_, i) => {
         const d = new Date(firstTxDate);
         d.setDate(firstTxDate.getDate() - (needed - i));

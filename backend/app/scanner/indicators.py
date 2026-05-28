@@ -311,3 +311,125 @@ def detect_cup_and_handle(df: pd.DataFrame) -> bool:
         
     return False
 
+
+def calculate_volume_dryup(df: pd.DataFrame, window: int = 20) -> pd.Series:
+    """
+    거래량 급감 (Volume Dry-up) 비율 계산.
+    당일 거래량이 최근 N일 평균 거래량 대비 얼마나 메말랐는지 비율로 나타냅니다.
+    (예: 0.3 이하면 최근 평균 수급의 30% 수준으로 거래가 극도로 메마른 상태)
+    """
+    if df.empty or len(df) < window:
+        return pd.Series(1.0, index=df.index)
+        
+    temp_df = df.copy()
+    if isinstance(temp_df.columns, pd.MultiIndex):
+        temp_df.columns = temp_df.columns.get_level_values(0)
+        
+    volume = temp_df['Volume'].squeeze()
+    if isinstance(volume, pd.DataFrame):
+        volume = volume.iloc[:, 0]
+        
+    mean_volume = volume.rolling(window=window).mean()
+    
+    # 0으로 나누기 방지
+    with np.errstate(divide='ignore', invalid='ignore'):
+        vud_ratio = np.where(mean_volume > 0, volume / mean_volume, 1.0)
+        
+    return pd.Series(vud_ratio, index=df.index).fillna(1.0)
+
+
+def calculate_bb_squeeze(df: pd.DataFrame, window: int = 20, history_window: int = 120) -> tuple[pd.Series, pd.Series]:
+    """
+    볼린저 밴드 스퀴즈(Bollinger Band Squeeze) 및 밴드폭(Band Width) 계산.
+    - Band Width = (Upper - Lower) / Middle
+    - Squeeze Score = 현재 밴드폭이 최근 120일 역사적 범위 중 어느 위치에 속하는지 백분율화 (0%에 가까울수록 역사적 대수축 상태)
+    """
+    if df.empty or len(df) < window:
+        return pd.Series(1.0, index=df.index), pd.Series(100.0, index=df.index)
+        
+    temp_df = df.copy()
+    if isinstance(temp_df.columns, pd.MultiIndex):
+        temp_df.columns = temp_df.columns.get_level_values(0)
+        
+    close = temp_df['Close'].squeeze()
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+        
+    # 볼린저 밴드 구하기
+    ma = close.rolling(window=window).mean()
+    std = close.rolling(window=window).std()
+    
+    upper = ma + (std * 2.0)
+    lower = ma - (std * 2.0)
+    
+    # 밴드폭 구하기
+    with np.errstate(divide='ignore', invalid='ignore'):
+        bandwidth = np.where(ma > 0, (upper - lower) / ma, 0.0)
+    bw_series = pd.Series(bandwidth, index=df.index).fillna(0.0)
+    
+    # 역사적 범위 내 백분율(Squeeze Score) 산출
+    if len(df) < history_window:
+        history_window = len(df)
+        
+    rolling_min = bw_series.rolling(window=history_window).min()
+    rolling_max = bw_series.rolling(window=history_window).max()
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        range_diff = rolling_max - rolling_min
+        squeeze_score = np.where(range_diff > 0, ((bw_series - rolling_min) / range_diff) * 100.0, 50.0)
+        
+    return bw_series, pd.Series(squeeze_score, index=df.index).fillna(50.0)
+
+
+def calculate_obv_divergence(df: pd.DataFrame, window: int = 10) -> pd.Series:
+    """
+    OBV 누적 매집 다이버전스(OBV Accumulation Divergence) 채점.
+    최근 N일 동안:
+    - 주가 추세: 평평하거나 하락 (하향/횡보)
+    - OBV 추세: 지속 우상향 (세력의 몰래 매집)
+    가 성립하는 강도를 0~100점 점수로 환산합니다. (Divergence Score)
+    """
+    if df.empty or len(df) < window + 2:
+        return pd.Series(0.0, index=df.index)
+        
+    temp_df = df.copy()
+    if isinstance(temp_df.columns, pd.MultiIndex):
+        temp_df.columns = temp_df.columns.get_level_values(0)
+        
+    close = temp_df['Close'].squeeze()
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+        
+    obv = calculate_obv(temp_df)
+    
+    # 각 시점별로 선형 회귀 기울기(Slope)를 통해 추세 판단
+    close_values = close.values
+    obv_values = obv.values
+    
+    scores = np.zeros(len(df))
+    x = np.arange(window)
+    
+    # 연산 속도 최적화를 위해 최소 요구량 충족 시점부터 롤링 연산
+    for i in range(window, len(df)):
+        c_segment = close_values[i - window + 1:i + 1]
+        o_segment = obv_values[i - window + 1:i + 1]
+        
+        # 정규화하여 기울기 비교 가능케 함
+        c_norm = (c_segment - np.min(c_segment)) / (np.max(c_segment) - np.min(c_segment)) if (np.max(c_segment) - np.min(c_segment)) > 0 else np.zeros(window)
+        o_norm = (o_segment - np.min(o_segment)) / (np.max(o_segment) - np.min(o_segment)) if (np.max(o_segment) - np.min(o_segment)) > 0 else np.zeros(window)
+        
+        c_slope = np.polyfit(x, c_norm, 1)[0] if len(c_norm) > 0 else 0
+        o_slope = np.polyfit(x, o_norm, 1)[0] if len(o_norm) > 0 else 0
+        
+        # 다이버전스 판정: 주가는 보합/약세 (기울기 < 0.03) 이고, OBV는 강세 (기울기 > 0.02)
+        # 조건 부합 시 점수 부여 (기울기 차이가 클수록 높은 매집 점수)
+        if c_slope <= 0.03 and o_slope > 0.02:
+            div_strength = o_slope - c_slope
+            score = min(100.0, max(0.0, div_strength * 100.0))
+            scores[i] = round(score, 1)
+        else:
+            scores[i] = 0.0
+            
+    return pd.Series(scores, index=df.index)
+
+

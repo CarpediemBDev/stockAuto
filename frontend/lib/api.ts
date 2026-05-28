@@ -83,6 +83,7 @@ export const accountAPI = {
 
 export const scannerAPI = {
   getLatest: (config?: AxiosRequestConfig) => api.get('/scanner/latest', config),
+  getSwingPredict: (config?: AxiosRequestConfig) => api.get('/scanner/swing-predict', config),
 };
 
 export const marketAPI = {

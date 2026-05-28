@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, startTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
+
 import { cn } from "@/lib/utils";
 import { botAPI } from "@/lib/api";
 import { toast } from "sonner";
@@ -25,9 +26,12 @@ export function NavBar() {
   // 현재 사용자명 읽기
   useEffect(() => {
     if (typeof window !== "undefined") {
-      setUsername(localStorage.getItem("stockauto_username"));
+      startTransition(() => {
+        setUsername(localStorage.getItem("stockauto_username"));
+      });
     }
   }, [pathname]); // 경로 이동 시 갱신
+
 
   const fetchStatus = useCallback(async () => {
     // 토큰이 있을 때만 API 호출 (무한 401 및 리다이렉트 방지)
@@ -39,9 +43,10 @@ export function NavBar() {
       setTradeMode(res.data.trade_mode);
       setIsRealEnabled(res.data.is_real_enabled);
       setIsBotRunning(res.data.is_running);
-    } catch (error) {
+    } catch {
       // Silently fail in navbar background fetches
     }
+
   }, []);
 
   useEffect(() => {
@@ -67,11 +72,13 @@ export function NavBar() {
         toast.success("자율 트레이딩 자동매매 루프를 가동했습니다.");
       }
       await fetchStatus();
-    } catch (error: any) {
-      toast.error(error.message || "봇 제어에 실패했습니다.");
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : "봇 제어에 실패했습니다.";
+      toast.error(errMsg);
     } finally {
       setIsTogglingBot(false);
     }
+
   };
 
   const handleLogout = () => {

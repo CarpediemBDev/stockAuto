@@ -16,7 +16,6 @@ import { toast } from "sonner";
 export function Dashboard() {
   const [isRunning, setIsRunning] = useState(false);
   const [isRealEnabled, setIsRealEnabled] = useState(false);
-  const [tradeMode, setTradeMode] = useState("VIRTUAL");
   const [isReal, setIsReal] = useState(false);
   const [logs, setLogs] = useState<TradeLog[]>([]);
   const [isChartOpen, setIsChartOpen] = useState(false);
@@ -26,8 +25,8 @@ export function Dashboard() {
       const res = await botAPI.getStatus({ signal });
       setIsRunning(res.data.is_running);
       setIsRealEnabled(res.data.is_real_enabled);
-      setTradeMode(res.data.trade_mode);
       setIsReal(res.data.is_real);
+
     } catch (error) {
       if (isCancel(error)) return;
       const msg = getErrorMessage(error);

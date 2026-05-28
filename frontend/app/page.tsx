@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, startTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Dashboard } from "@/components/Dashboard";
 import MarketHeader from "@/components/MarketHeader";
@@ -14,9 +14,12 @@ export default function Home() {
     if (!token) {
       router.push("/login");
     } else {
-      setIsAuthenticated(true);
+      startTransition(() => {
+        setIsAuthenticated(true);
+      });
     }
   }, [router]);
+
 
   if (!isAuthenticated) {
     return (

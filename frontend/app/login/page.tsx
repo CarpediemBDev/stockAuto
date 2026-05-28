@@ -33,11 +33,13 @@ export default function LoginPage() {
       localStorage.setItem("stockauto_username", res.data.username);
       toast.success("성공적으로 로그인되었습니다!");
       router.push("/");
-    } catch (err: any) {
-      toast.error(err.message || "로그인에 실패했습니다. 다시 시도해 주세요.");
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "로그인에 실패했습니다. 다시 시도해 주세요.";
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
+
   };
 
   return (

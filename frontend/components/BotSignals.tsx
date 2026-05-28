@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
-import { Zap, TrendingUp, BarChart3, Info } from 'lucide-react';
+import React, { useState } from 'react';
+import { Zap } from 'lucide-react';
 import { scannerAPI, isCancel } from '@/lib/api';
+
 import { usePolling } from '@/hooks/usePolling';
 import { toast } from "sonner";
 import { getErrorMessage } from '@/lib/utils';

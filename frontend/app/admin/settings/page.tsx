@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, startTransition } from "react";
+import React, { useState, useEffect, useCallback, startTransition } from "react";
 
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import {
   Globe, Plus, Search, Edit2, Check, X, HelpCircle
 } from "lucide-react";
 import api, { translationAPI } from "@/lib/api";
+
 
 interface UserSettings {
   trade_mode: string;
@@ -103,7 +104,7 @@ export default function AdminSettingsPage() {
   }, [router]);
 
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     try {
       const res = await api.get("/admin/");
       const data = res.data;
@@ -123,9 +124,9 @@ export default function AdminSettingsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     if (!isAdmin) return;
     setIsLoadingUsers(true);
     try {
@@ -137,9 +138,9 @@ export default function AdminSettingsPage() {
     } finally {
       setIsLoadingUsers(false);
     }
-  };
+  }, [isAdmin]);
 
-  const fetchTranslations = async () => {
+  const fetchTranslations = useCallback(async () => {
     setLoadingTranslations(true);
     try {
       const res = await translationAPI.getAll();
@@ -150,7 +151,7 @@ export default function AdminSettingsPage() {
     } finally {
       setLoadingTranslations(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -165,7 +166,8 @@ export default function AdminSettingsPage() {
         }
       }
     })();
-  }, [isAuthenticated, isAdmin, activeTab]);
+  }, [isAuthenticated, isAdmin, activeTab, fetchSettings, fetchUsers, fetchTranslations]);
+
 
   const handleSave = async (forceReal = false) => {
     // 1. 유효성 검사 (조기 반환으로 서버 저장 원천 차단)
