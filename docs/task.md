@@ -206,6 +206,16 @@
 - [x] **[DB/ENV 전방위 정화]** UserSettings 모델에서 개별 `telegram_bot_token` 컬럼 완전 삭제, `.env` 파일에서 `TELEGRAM_ENABLED` 및 `TELEGRAM_CHAT_ID` 전면 제거, DB를 telegram_enabled의 유일한 SSOT로 확정
 - [x] **[종합 가동 및 무결성 검증]** 로컬 Uvicorn 백엔드 및 Next.js 프론트엔드 구동 검증, 신규 가입자 딥링크 연동 시나리오 및 `/status` 명령어 실전 수발신 완벽성 통과 검증
 
+## 🌟 [Phase 20] Google Cloud Run 올-클라우드 통합 배포 파이프라인 구축 및 문서화 — 완료 [x]
+
+> **핵심 목표:** 프론트엔드(Next.js)와 백엔드(FastAPI) 전체 시스템을 Docker 컨테이너 기반으로 패키징하고, Google Cloud Run을 통해 완전 자동화된 공인 HTTPS 도메인 배포 환경을 완성하며, 이와 관련된 모든 실전 가이드 문서를 구축한다.
+
+- [x] **[컨테이너 인프라]** 백엔드 Dockerfile (`/backend/Dockerfile`) 및 프론트엔드 Dockerfile (`/frontend/Dockerfile`) 설계 및 경량 빌드 아키텍처 수립 완료
+- [x] **[CORS 동적 대응]** 백엔드 `main.py` 내 `ALLOWED_ORIGINS` 환경변수를 통한 동적 CORS 대응 구현 완료 (클라우드 환경의 유연한 도메인 매핑 보장)
+- [x] **[시스템 매뉴얼 동기화]** `docs/SYSTEM_MANUAL.md` 파일에 Google Cloud Run 올-클라우드 배포 매뉴얼 및 도메인 바인딩 가이드 기재 완료
+- [x] **[데이터베이스 영속화 설계]** `docs/SCHEMA.md` 파일에 Cloud Run 서버리스 무상태 특성을 극복하기 위한 SQLite 데이터 영속화 가이드(GCS FUSE 볼륨 마운트 및 Cloud SQL 전환) 명세화 완료
+- [x] **[작업 현황 최종 동기화]** `docs/task.md` 작업 현황판에 클라우드 배포 파이프라인 구축 및 영속성 설계 작업을 Phase 20 태스크로 완벽 반영 완료
+
 ## 🌟 [Phase 21] 투자 전략 고도화 — 뉴스 AI 감성 분석 및 퀀트 시그널 V3
 
 > **핵심 목표:** 현재 뉴스 제목의 키워드 단순 매칭(`has_news = true/false`)으로 +10점만 가산하는 수준의 원시적 뉴스 처리를 전면 도려내고, **뉴스 본문에 대한 AI 감성 분석(Sentiment Analysis)**을 도입하여 긍정/부정/중립 판별 및 시장 영향도 기반의 정밀한 다이내믹 가산/감산 스코어링 체계를 구축한다. 더불어 마크 미너비니 VCP 패턴 인식 등 고급 퀀트 지표를 추가하여 스캐너 정밀도를 극적으로 끌어올린다.
@@ -244,16 +254,6 @@
 - [ ] **[자가 복구 부트스트랩]** 서버 기동 시 로컬 DB 미존재 감지 → 클라우드에서 최신 암호화 백업 자동 다운로드 및 복호화 복원 로직 구현
 - [ ] **[환경변수 보안 관리]** AWS KMS / Secret Manager 연동을 통한 프로덕션 민감 키 동적 발급 체계 설계
 
-
-## 🌟 [Phase 20] Google Cloud Run 올-클라우드 통합 배포 파이프라인 구축 및 문서화 — 완료 [x]
-
-> **핵심 목표:** 프론트엔드(Next.js)와 백엔드(FastAPI) 전체 시스템을 Docker 컨테이너 기반으로 패키징하고, Google Cloud Run을 통해 완전 자동화된 공인 HTTPS 도메인 배포 환경을 완성하며, 이와 관련된 모든 실전 가이드 문서를 구축한다.
-
-- [x] **[컨테이너 인프라]** 백엔드 Dockerfile (`/backend/Dockerfile`) 및 프론트엔드 Dockerfile (`/frontend/Dockerfile`) 설계 및 경량 빌드 아키텍처 수립 완료
-- [x] **[CORS 동적 대응]** 백엔드 `main.py` 내 `ALLOWED_ORIGINS` 환경변수를 통한 동적 CORS 대응 구현 완료 (클라우드 환경의 유연한 도메인 매핑 보장)
-- [x] **[시스템 매뉴얼 동기화]** `docs/SYSTEM_MANUAL.md` 파일에 Google Cloud Run 올-클라우드 배포 매뉴얼 및 도메인 바인딩 가이드 기재 완료
-- [x] **[데이터베이스 영속화 설계]** `docs/SCHEMA.md` 파일에 Cloud Run 서버리스 무상태 특성을 극복하기 위한 SQLite 데이터 영속화 가이드(GCS FUSE 볼륨 마운트 및 Cloud SQL 전환) 명세화 완료
-- [x] **[작업 현황 최종 동기화]** `docs/task.md` 작업 현황판에 클라우드 배포 파이프라인 구축 및 영속성 설계 작업을 Phase 20 태스크로 완벽 반영 완료
 
 ## 🌟 [Phase 24] 개선 작업 — 미완료
 
