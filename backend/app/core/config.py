@@ -110,6 +110,10 @@ class Settings:
     MIN_CASH_BALANCE_USD = 200.0
     MIN_SMART_EXIT_PROFIT_RATE = 2.5
     REENTRY_COOLDOWN_MINUTES = 60
+    
+    # [Phase 30] 거래 수수료 및 제비용 상수
+    KIS_FEE_RATE = 0.0008         # 0.08% KIS 우대 수수료율
+    SEC_FEE_RATE = 0.0000278      # 0.00278% 미국 매도 제비용 (SEC Fee)
 
 settings = Settings()
 logger.info(f"[*] Active Profile: {settings.PROFILE.upper()} | Trade Mode: {settings.TRADE_MODE} | Real-Trading Ready: {settings.IS_REAL}")

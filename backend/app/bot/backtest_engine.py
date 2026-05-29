@@ -9,6 +9,8 @@ from app.scanner.indicators import (
 )
 from app.core.logging import logger
 
+from app.core.config import settings
+
 class BacktestBroker:
     """
     가상의 시간축 위에서 자산 잔고, 가상 포지션, 체결 로그를 기록하고 시뮬레이션하는 백테스트 전용 브로커.
@@ -39,18 +41,23 @@ class BacktestBroker:
         }
 
     def buy_order(self, ticker: str, quantity: int, price: float, buy_stage: int, timestamp: datetime, ticker_name: str = "") -> dict:
-        """가상 매수 주문 집행 및 1:2:6 피라미딩 단가 가중평균 시뮬레이션"""
+        """가상 매수 주문 집행 및 KIS 매수 수수료가 적용된 평단가 가중평균 시뮬레이션"""
         cost = quantity * price
-        if self.cash < cost:
-            # 잔고 안전장치: 남은 예수금 내에서 최대한 매매 시도
-            max_qty = int(self.cash / price)
+        buy_fee = cost * settings.KIS_FEE_RATE
+        total_cost = cost + buy_fee
+        
+        if self.cash < total_cost:
+            # 잔고 안전장치: 남은 예수금 내에서 수수료까지 감안하여 최대한 매매 시도
+            max_qty = int(self.cash / (price * (1 + settings.KIS_FEE_RATE)))
             if max_qty >= 1:
                 quantity = max_qty
                 cost = quantity * price
+                buy_fee = cost * settings.KIS_FEE_RATE
+                total_cost = cost + buy_fee
             else:
                 return {"success": False, "message": "Insufficient cash for backtest buy order."}
 
-        self.cash -= cost
+        self.cash -= total_cost
         
         if ticker in self.holdings:
             # 💡 피라미딩 추가 매수 (불타기)
@@ -95,7 +102,7 @@ class BacktestBroker:
         return {"success": True, "order_no": order_no, "filled_qty": quantity, "filled_price": price}
 
     def sell_order(self, ticker: str, quantity: int, price: float, reason: str, timestamp: datetime) -> dict:
-        """가상 매도 주문 집행 및 실현 손익 기록"""
+        """가상 매도 주문 집행 및 KIS 매도 수수료 및 SEC Fee가 정밀 차감된 실수익(Net) 기록"""
         if ticker not in self.holdings:
             return {"success": False, "message": f"Ticker {ticker} not in holdings."}
 
@@ -103,10 +110,20 @@ class BacktestBroker:
         sell_qty = min(quantity, h["quantity"])
         revenue = sell_qty * price
         
-        self.cash += revenue
+        # 매도 시 제비용 차감
+        sell_fee = revenue * settings.KIS_FEE_RATE
+        sec_fee = revenue * settings.SEC_FEE_RATE
+        net_revenue = revenue - sell_fee - sec_fee
         
-        realized_pnl = (price - h["avg_price"]) * sell_qty
-        return_rate = ((price - h["avg_price"]) / h["avg_price"]) * 100
+        self.cash += net_revenue
+        
+        # 총 매입 금액 및 매수 시 수수료 계산
+        buy_gross = h["avg_price"] * sell_qty
+        buy_fee = buy_gross * settings.KIS_FEE_RATE
+        
+        # 최종 실수익 (Net realized PnL) = 매도 정산금 - (매수 금액 + 매수 시 수수료)
+        realized_pnl = net_revenue - (buy_gross + buy_fee)
+        return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
         
         order_no = f"BT-SELL-{timestamp.strftime('%Y%m%d%H%M%S')}"
         self.trade_logs.append({

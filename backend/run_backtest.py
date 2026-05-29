@@ -75,8 +75,8 @@ async def main():
     print("==========================================================================")
     print(f" 💵 초기 자산   : ${report['initial_cash']:,.2f}")
     print(f" 💵 최종 자산   : ${report['final_value']:,.2f}")
-    print(f" 📈 누적 수익금 : ${report['total_pnl']:+,.2f} ({report['total_return_rate']:+.2f}%)")
-    print(f" 📊 QQQ 지수 대비 초과수익률: {report['total_return_rate'] - report['qqq_bench_return_rate']:+.2f}% (QQQ 단순보유: {report['qqq_bench_return_rate']:+.2f}%)")
+    print(f" 📈 누적 실수익 : ${report['total_pnl']:+,.2f} ({report['total_return_rate']:+.2f}% 실수익률)")
+    print(f" 📊 QQQ 지수 대비 초과실수익률: {report['total_return_rate'] - report['qqq_bench_return_rate']:+.2f}% (QQQ 단순보유: {report['qqq_bench_return_rate']:+.2f}%)")
     print(f" 📉 최대 낙폭 (MDD): {report['mdd']:.2f}%")
     print("--------------------------------------------------------------------------")
     print(f" 🔄 총 매매 횟수: {report['total_trades']} 회")
@@ -89,7 +89,7 @@ async def main():
     if trade_logs:
         print("\n 📝 최근 체결 거래 내역 (최근 15건 요약):")
         print("----------------------------------------------------------------------------------------------------")
-        print(f"{'시간':<17} | {'종목':<5} | {'유형':<4} | {'수량':<4} | {'체결단가':<8} | {'실현손익':<10} | {'수익률':<7} | {'체결사유'}")
+        print(f"{'시간':<17} | {'종목':<5} | {'유형':<4} | {'수량':<4} | {'체결단가':<8} | {'실수익금':<10} | {'실수익률':<7} | {'체결사유'}")
         print("----------------------------------------------------------------------------------------------------")
         for log in trade_logs[-15:]:
             ts_str = log['timestamp'].strftime('%y-%m-%d %H:%M') if isinstance(log['timestamp'], datetime) else str(log['timestamp'])[:16]

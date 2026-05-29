@@ -94,7 +94,7 @@ export function NavBar() {
   const isAuthPage = pathname.startsWith("/login") || pathname.startsWith("/signup");
 
   return (
-    <nav className="sticky top-0 z-50 w-full backdrop-blur-md bg-black/50 border-b border-zinc-800">
+    <nav className="sticky top-0 z-[100] w-full backdrop-blur-md bg-black/50 border-b border-zinc-800">
       <div className="max-w-[1600px] mx-auto px-6">
         <div className="flex items-center justify-between h-16">
           {/* 로고 영역 */}
@@ -151,13 +151,14 @@ export function NavBar() {
                 })}
               </div>
 
-              {/* 사용자 계정 & 마이크로 컨트롤 센터 팝오버 */}
+              {/* 사용자 계정 프로필 드롭다운 */}
               {username && (
-                <div className="relative border-l border-zinc-800 pl-6 flex items-center">
-                  <button
-                    onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                    className="flex items-center space-x-2.5 px-3.5 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 hover:bg-zinc-900/50 text-white font-semibold text-xs tracking-tight transition-all duration-200 active:scale-[0.98] cursor-pointer"
-                  >
+                <div className="flex items-center space-x-4 border-l border-zinc-800 pl-6">
+                  <div className="relative flex items-center">
+                    <button
+                      onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                      className="flex items-center space-x-2.5 px-3.5 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 hover:bg-zinc-900/50 text-white font-semibold text-xs tracking-tight transition-all duration-200 active:scale-[0.98] cursor-pointer"
+                    >
                     <span className={cn("w-1.5 h-1.5 rounded-full animate-pulse", isBotRunning ? "bg-emerald-500" : "bg-zinc-500")}></span>
                     <span>{username}님</span>
                     <svg
@@ -230,6 +231,20 @@ export function NavBar() {
                         
                         <div className="border-t border-zinc-800/60 my-1"></div>
 
+                        {/* 어드민 패널 단축 링크 (어드민 전용) */}
+                        {username === "admin" && (
+                          <Link
+                            href="/admin"
+                            onClick={() => setIsUserMenuOpen(false)}
+                            className="flex items-center space-x-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-zinc-800/50 text-xs font-semibold transition-all duration-200 cursor-pointer"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                            </svg>
+                            <span className="text-blue-400 font-bold">🛡️ 마스터 어드민 패널</span>
+                          </Link>
+                        )}
+
                         {/* 개인 투자 설정 단축 링크 */}
                         <Link
                           href="/admin/settings"
@@ -259,6 +274,7 @@ export function NavBar() {
                       </div>
                     </>
                   )}
+                  </div>
                 </div>
               )}
             </div>

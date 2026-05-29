@@ -107,6 +107,10 @@ export const reportAPI = {
   getStats: (config?: AxiosRequestConfig) => api.get('/report/stats', config),
 };
 
+export const adminAPI = {
+  getSystemLogs: (config?: AxiosRequestConfig) => api.get('/admin/system-logs', config),
+};
+
 export const isCancel = axios.isCancel;
 
 export default api;

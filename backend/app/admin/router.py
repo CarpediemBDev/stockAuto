@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.core.database import get_db
-from app.core.models import User, UserSettings
+from app.core.models import User, UserSettings, ActionLog
 from app.core.dependencies import get_current_user
 
 router = APIRouter()
@@ -202,3 +202,14 @@ def delete_user(
     db.delete(target_user)
     db.commit()
     return {"message": f"Successfully deleted user {user_id}"}
+
+@router.get("/system-logs")
+def get_system_logs(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """[슈퍼어드민 전용] 모든 사용자 봇의 최신 100개 디버깅 로그 조회"""
+    if current_user.username != "admin":
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+        
+    return db.query(ActionLog).order_by(ActionLog.created_at.desc()).limit(100).all()

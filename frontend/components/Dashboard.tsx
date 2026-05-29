@@ -1,11 +1,9 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { BotControl } from "./BotControl";
 import { TradeLogs, TradeLog } from "./TradeLogs";
 import { AccountBalance } from "./AccountBalance";
 import PortfolioView from "./PortfolioView";
-import LiveLogViewer from "./LiveLogViewer";
 import { AssetTrendChart } from "./AssetTrendChart";
 
 import { botAPI, tradeAPI, isCancel } from "@/lib/api";
@@ -14,7 +12,6 @@ import { getErrorMessage } from "@/lib/utils";
 import { toast } from "sonner";
 
 export function Dashboard() {
-  const [isRunning, setIsRunning] = useState(false);
   const [isRealEnabled, setIsRealEnabled] = useState(false);
   const [isReal, setIsReal] = useState(false);
   const [logs, setLogs] = useState<TradeLog[]>([]);
@@ -23,7 +20,6 @@ export function Dashboard() {
   const fetchStatus = useCallback(async (signal?: AbortSignal) => {
     try {
       const res = await botAPI.getStatus({ signal });
-      setIsRunning(res.data.is_running);
       setIsRealEnabled(res.data.is_real_enabled);
       setIsReal(res.data.is_real);
 
@@ -52,22 +48,6 @@ export function Dashboard() {
   }, [fetchStatus, fetchLogs]);
 
   usePolling(fetchData, 5000);
-
-  const handleToggle = async () => {
-    try {
-      if (isRunning) {
-        await botAPI.stop();
-      } else {
-        await botAPI.start();
-      }
-      fetchStatus();
-      toast.success(isRunning ? "봇이 중지되었습니다." : "봇이 가동되었습니다.");
-    } catch (error) {
-      const msg = getErrorMessage(error);
-      console.error("Failed to toggle bot:", msg);
-      toast.error(`봇 제어 실패: ${msg}`);
-    }
-  };
 
   const handleToggleReal = async () => {
     try {
@@ -141,30 +121,12 @@ export function Dashboard() {
 
         <AccountBalance displayCurrency={displayCurrency} onTotalAssetClick={() => setIsChartOpen(true)} />
         
-        <div className="mb-10">
+        <div className="mb-12">
           <h2 className="text-xl font-bold text-slate-100 mb-4 flex items-center">
             <div className="w-1.5 h-6 bg-blue-500 rounded-full mr-3"></div>
             실시간 포트폴리오 (Portfolio)
           </h2>
           <PortfolioView displayCurrency={displayCurrency} />
-        </div>
-
-
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 mb-20">
-          <div className="xl:col-span-1">
-            <h2 className="text-xl font-bold text-slate-100 mb-4 flex items-center">
-              <div className="w-1.5 h-6 bg-blue-400 rounded-full mr-3"></div>
-              컨트롤 패널
-            </h2>
-            <BotControl isRunning={isRunning} onToggle={handleToggle} />
-          </div>
-          <div className="xl:col-span-2">
-            <h2 className="text-xl font-bold text-slate-100 mb-4 flex items-center">
-              <div className="w-1.5 h-6 bg-emerald-500 rounded-full mr-3"></div>
-              실시간 봇 활동 상황 (Live Actions)
-            </h2>
-            <LiveLogViewer />
-          </div>
         </div>
 
         <TradeLogs logs={logs} />

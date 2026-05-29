@@ -164,8 +164,16 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     if res["success"]:
                         filled_price = res["filled_price"]
                         filled_qty = res["filled_qty"]
-                        realized_pnl = (filled_price - h.avg_price) * filled_qty
-                        calc_return_rate = ((filled_price - h.avg_price) / h.avg_price) * 100 if h.avg_price > 0 else 0.0
+                        
+                        # 💡 [Phase 30] 매수/매도 수수료 및 SEC Fee가 정밀 차감된 실수익(Net) 연산
+                        buy_gross = h.avg_price * filled_qty
+                        buy_fee = buy_gross * settings.KIS_FEE_RATE
+                        sell_gross = filled_price * filled_qty
+                        sell_fee = sell_gross * settings.KIS_FEE_RATE
+                        sec_fee = sell_gross * settings.SEC_FEE_RATE
+                        
+                        realized_pnl = sell_gross - buy_gross - buy_fee - sell_fee - sec_fee
+                        calc_return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
 
                         db.add(TradeLog(
                             user_id=user_id,
@@ -188,17 +196,21 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         filled_price_krw = filled_price * exchange_rate
                         total_amount_usd = filled_price * filled_qty
                         total_amount_krw = total_amount_usd * exchange_rate
-                        pnl_sign = "+" if realized_pnl >= 0 else ""
+                        
+                        pnl_sign = "+" if realized_pnl >= 0 else "-"
                         pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
-                        # 텔레그램 매도 알림 전송
+                        realized_pnl_abs = abs(realized_pnl)
+                        
+                        # 텔레그램 매도 알림 전송 (초경량 정화 및 실수익 기준 부호 교정 완비)
                         send_message_async(
                             user_id,
                             f"🔴 *[자동매도 체결]* {ticker} ({h.ticker_name})\n"
                             f"• *체결 단가:* `${filled_price:,.2f}` (약 {filled_price_krw:,.0f}원)\n"
                             f"• *체결 수량:* `{filled_qty}주`\n"
                             f"• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n"
-                            f"• *매도 사유:* {sell_reason}\n"
-                            f"{pnl_emoji} *수익률:* `{pnl_sign}{calc_return_rate:.2f}%` | *실현 손익:* `{pnl_sign}${realized_pnl:,.2f}`\n"
+                            f"• *매도 사유:* {sell_reason}\n\n"
+                            f"{pnl_emoji} *실수익률:* `{pnl_sign}{calc_return_rate:.2f}%`\n"
+                            f"💰 *실현 실수익:* `{pnl_sign}${realized_pnl_abs:,.2f}`\n"
                             f"• *주문 번호:* `{res['order_no']}`"
                         )
                     else:
