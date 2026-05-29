@@ -21,6 +21,11 @@ import time
 # 매수 실패(단가 초과, 예수금 부족) 알림 도배 방지용 쿨타임 캐시 (1시간)
 WARNING_COOLDOWN_CACHE = {}
 
+# 💡 동적 손절선 및 트레일링 스탑 이탈 연속 횟수 추적 캐시 (Whipsaw 방지용 연속 2회 확정 가드)
+# 키: (user_id, ticker) -> 값: int (연속 이탈 횟수)
+BREACH_COUNT_CACHE = {}
+
+
 
 from app.scanner.scanner import scan_overseas_market, analyze_single_ticker, check_market_sentiment
 
@@ -137,22 +142,36 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
 
                 # 매도 조건 체크
                 sell_reason = None
+                is_breached = False
+                breach_reason = ""
                 
-                # ⭐ 지표 1. 조기 스마트 익절 (RSI 하락 다이버전스 + MACD 데드크로스)
-                if profit_rate >= settings.MIN_SMART_EXIT_PROFIT_RATE and is_smart_exit:
+                if profit_rate <= -stop_loss_pct:
+                    is_breached = True
+                    breach_reason = f"동적 손절선 이탈 (손절 기준 -{stop_loss_pct:.2f}% 돌파 | 현재 수익률: {profit_rate:.2f}%)"
+                elif current_price <= h.highest_price * (1 - trailing_stop_pct / 100) and h.highest_price > h.avg_price:
+                    is_breached = True
+                    breach_reason = f"동적 트레일링 스탑 이탈 (최고가 ${h.highest_price:.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)"
+                
+                # 💡 손절선/트레일링 스탑 이탈 감지 시, 연속 2회 확정식 가드 적용
+                if is_breached:
+                    cache_key = (user_id, ticker)
+                    BREACH_COUNT_CACHE[cache_key] = BREACH_COUNT_CACHE.get(cache_key, 0) + 1
+                    count = BREACH_COUNT_CACHE[cache_key]
+                    
+                    if count >= 2:
+                        sell_reason = breach_reason + " [2회 연속 이탈 확정]"
+                    else:
+                        log_action(db, user_id, f"[Noise Buffer] {ticker} first breach detected ({breach_reason}). Delaying sell for noise protection (Count: {count}/2).", "INFO")
+                else:
+                    # 이탈 상태가 아니면 연속 이탈 횟수를 0으로 리셋 (캐시 제거)
+                    BREACH_COUNT_CACHE.pop((user_id, ticker), None)
+                
+                # ⭐ 지표 1. 조기 스마트 익절 (RSI 하락 다이버전스 + MACD 데드크로스) - 스마트 익절은 버퍼 없이 즉시 실행
+                if not sell_reason and profit_rate >= settings.MIN_SMART_EXIT_PROFIT_RATE and is_smart_exit:
                     sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
                 
-                # 지표 2. 동적 손절선 돌파
-                elif profit_rate <= -stop_loss_pct:
-                    sell_reason = f"동적 손절선 이탈 (손절 기준 -{stop_loss_pct:.2f}% 돌파 | 현재 수익률: {profit_rate:.2f}%)"
-                
-                # 지표 3. 동적 트레일링 스탑 돌파 (평단가 밑으로 가더라도 최고가 대비 이탈하면 손절 성격 무조건 탈출)
-                elif current_price <= h.highest_price * (1 - trailing_stop_pct / 100) and h.highest_price > h.avg_price:
-                    sell_reason = f"동적 트레일링 스탑 이탈 (최고가 ${h.highest_price:.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)"
-                
-                # 지표 4. 기술적 강세 시그널 붕괴
-                # 상승장에서는 40점 미만, 하락/횡보장에서는 50점 미만 하락 시 강제 탈출
-                elif (sentiment == "BULLISH" and current_score < 40) or (sentiment != "BULLISH" and current_score < 50):
+                # 지표 4. 기술적 강세 시그널 붕괴 - 시그널 붕괴는 버퍼 없이 즉시 실행
+                elif not sell_reason and ((sentiment == "BULLISH" and current_score < 40) or (sentiment != "BULLISH" and current_score < 50)):
                     sell_reason = f"강세 시그널 붕괴 ({current_score}점 - EMA/VWAP 지지선 이탈 또는 매도 압력)"
 
                 if sell_reason:
@@ -160,6 +179,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     
                     # 브로커를 통한 매도 주문 집행 (💡 safe_broker_call 세마포어 격리 가드 탑재)
                     res = await safe_broker_call(broker.sell_order, ticker, h.quantity, price=current_price)
+
 
                     if res["success"]:
                         filled_price = res["filled_price"]
@@ -190,6 +210,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         ))
                         db.delete(h)
                         db.commit()
+                        BREACH_COUNT_CACHE.pop((user_id, ticker), None) # 매도 완료 후 캐시 제거
                         log_action(db, user_id, f"SUCCESS: {ticker} sold via {sell_reason} | Order: {res['order_no']}", "INFO")
                         
                         exchange_rate = FXRateCache.get_rate()
@@ -230,8 +251,8 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
             else:
                 all_signals_to_process = all_signals
 
-            # 장세별 통과 커트라인 점수 분기 (상승장 80점, 하락/횡보장 92점 (기존 90점에서 보수화))
-            cutoff_score = 80 if sentiment == "BULLISH" else 92
+            # 장세별 통과 커트라인 점수 분기 (상승장 85점, 하락/횡보장 95점 (수수료 절감 최적화 적용))
+            cutoff_score = 85 if sentiment == "BULLISH" else 95
             cached_balance_data = None # 💡 사용자별 1분 루프 내 KIS 잔고 임시 캐싱 (DDoS급 중복 조회 제거)
             
             for s in all_signals_to_process:
@@ -258,21 +279,22 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         profit_rate = ((current_price - existing_holding.avg_price) / existing_holding.avg_price) * 100
                         
                         if buy_stage == 1:
-                            # 1단계 -> 2단계 피라미딩 조건: 평단 대비 +1.5% 이상 수익권 & 점수 80점 이상 유지
-                            if profit_rate >= 1.5:
+                            # 1단계 -> 2단계 피라미딩 조건: 평단 대비 +3.0% 이상 수익권 & 점수 85점 이상 유지
+                            if profit_rate >= 3.0:
                                 proposed_alloc_factor = 0.35 # 2차 추가 매수 비중: 35%
                                 next_stage = 2
                                 log_action(db, user_id, f"[Pyramiding] {ticker} meets 2nd Buy Condition (+{profit_rate:.2f}% profit). Placing 35% confirm order.", "SIGNAL")
                             else:
                                 continue
                         elif buy_stage == 2:
-                            # 2단계 -> 3단계 피라미딩 조건: 평단 대비 +3.0% 이상 수익권 & 점수 80점 이상 유지
-                            if profit_rate >= 3.0:
+                            # 2단계 -> 3단계 피라미딩 조건: 평단 대비 +6.0% 이상 수익권 & 점수 85점 이상 유지
+                            if profit_rate >= 6.0:
                                 proposed_alloc_factor = 0.50 # 3차 추가 매수 비중: 50%
                                 next_stage = 3
                                 log_action(db, user_id, f"[Pyramiding] {ticker} meets 3rd Buy Condition (+{profit_rate:.2f}% profit). Placing 50% ultimate order.", "SIGNAL")
                             else:
                                 continue
+
                         else:
                             continue # 이미 3단계 풀배팅 완료 상태
                     else:

@@ -391,9 +391,9 @@ async def scan_market_expert() -> list:
                 final_score = max(0, min(final_score, 100))
                 
                 if sentiment == "BULLISH":
-                    sig_type = "STRONG_BUY" if final_score >= 80 else "BUY" if final_score >= 60 else "WATCH"
+                    sig_type = "STRONG_BUY" if final_score >= 85 else "BUY" if final_score >= 65 else "WATCH"
                 else:
-                    sig_type = "STRONG_BUY" if final_score >= 90 else "BUY" if final_score >= 70 else "WATCH"
+                    sig_type = "STRONG_BUY" if final_score >= 95 else "BUY" if final_score >= 75 else "WATCH"
                 
                 atr_series = calculate_atr(df_1m, period=14)
                 latest_atr = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
@@ -540,9 +540,9 @@ async def analyze_single_ticker(ticker: str) -> dict:
         final_score = max(0, min(final_score, 100))
 
         if sentiment == "BULLISH":
-            sig_type = "STRONG_BUY" if final_score >= 80 else "BUY" if final_score >= 60 else "WATCH"
+            sig_type = "STRONG_BUY" if final_score >= 85 else "BUY" if final_score >= 65 else "WATCH"
         else:
-            sig_type = "STRONG_BUY" if final_score >= 90 else "BUY" if final_score >= 70 else "WATCH"
+            sig_type = "STRONG_BUY" if final_score >= 95 else "BUY" if final_score >= 75 else "WATCH"
 
         atr_series = calculate_atr(df_1m, period=14)
         latest_atr = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0

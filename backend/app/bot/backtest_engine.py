@@ -175,6 +175,9 @@ class BacktestSimulator:
         self.csv_path = csv_path
         self.broker = BacktestBroker(initial_cash)
         
+        # 💡 이탈 연속 횟수 추적 캐시 (2회 연속 이탈 확정용)
+        self.breach_counts = {}  # {ticker: count}
+        
         # 다운로드된 원시 데이터들 저장소
         self.tickers_data = {}  # {ticker: DataFrame}
         self.qqq_data = None  # QQQ DataFrame
@@ -439,30 +442,45 @@ class BacktestSimulator:
                     trailing_stop_pct = max(2.0, atr_pct * 1.0)
 
                 sell_reason = None
+                is_breached = False
+                breach_reason = ""
 
-                # ⭐ [지표 1] 조기 스마트 익절 (RSI 다이버전스/MACD 크로스 조건)
-                if profit_rate >= 1.0 and row['is_smart_exit']:
-                    sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
-                    
                 # [지표 2] 동적 손절선 이탈
-                elif profit_rate <= -stop_loss_pct:
-                    sell_reason = f"동적 손절선 이탈 (손절선 -{stop_loss_pct:.2f}% 돌파 | 수익률: {profit_rate:.2f}%)"
+                if profit_rate <= -stop_loss_pct:
+                    is_breached = True
+                    breach_reason = f"동적 손절선 이탈 (손절선 -{stop_loss_pct:.2f}% 돌파 | 수익률: {profit_rate:.2f}%)"
                     
                 # [지표 3] 동적 트레일링 스탑 이탈
                 elif price <= h["highest_price"] * (1 - trailing_stop_pct / 100) and h["highest_price"] > h["avg_price"]:
-                    sell_reason = f"동적 트레일링 스탑 이탈 (최고가 대비 -{trailing_stop_pct:.2f}% 하락 | 수익률: {profit_rate:.2f}%)"
+                    is_breached = True
+                    breach_reason = f"동적 트레일링 스탑 이탈 (최고가 대비 -{trailing_stop_pct:.2f}% 하락 | 수익률: {profit_rate:.2f}%)"
+
+                # 💡 손절선/트레일링 스탑 이탈 감지 시, 연속 2회 확정식 가드 적용
+                if is_breached:
+                    self.breach_counts[ticker] = self.breach_counts.get(ticker, 0) + 1
+                    count = self.breach_counts[ticker]
                     
-                # [지표 4] 기술적 강세 시그널 붕괴
-                elif (regime == "BULLISH" and score < 40) or (regime != "BULLISH" and score < 50):
+                    if count >= 2:
+                        sell_reason = breach_reason + " [2회 연속 이탈 확정]"
+                else:
+                    self.breach_counts.pop(ticker, None)
+
+                # ⭐ [지표 1] 조기 스마트 익절 (RSI 다이버전스/MACD 크로스 조건) - 스마트 익절은 버퍼 없이 바로 집행
+                if not sell_reason and profit_rate >= 1.0 and row['is_smart_exit']:
+                    sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
+                    
+                # [지표 4] 기술적 강세 시그널 붕괴 - 시그널 붕괴는 버퍼 없이 바로 집행
+                elif not sell_reason and ((regime == "BULLISH" and score < 40) or (regime != "BULLISH" and score < 50)):
                     sell_reason = f"강세 시그널 붕괴 ({score}점 도달)"
 
                 if sell_reason:
                     # 매도 체결
                     self.broker.sell_order(ticker, h["quantity"], price, sell_reason, t)
+                    self.breach_counts.pop(ticker, None)  # 매도 성공 시 캐시 비우기
 
             # 4. 신규 매수 기회 채점 및 1:2:6 피라미딩 자금 관리 집행
-            # 상승장 컷오프 80점, 하락/횡보장 컷오프 90점
-            cutoff_score = 80 if regime == "BULLISH" else 90
+            # 상승장 컷오프 85점, 하락/횡보장 컷오프 95점 (수수료 절감 최적화 적용)
+            cutoff_score = 85 if regime == "BULLISH" else 95
             
             # 매 타임스탬프마다 컷오프 점수를 충족하는 종목 후보군 수집
             scored_candidates = []
@@ -503,15 +521,15 @@ class BacktestSimulator:
                     profit_rate = ((price - existing_holding["avg_price"]) / existing_holding["avg_price"]) * 100
                     
                     if buy_stage == 1:
-                        # 1단계 -> 2단계 피라미딩 조건: 평단 대비 +1.5% 이상 수익권
-                        if profit_rate >= 1.5:
+                        # 1단계 -> 2단계 피라미딩 조건: 평단 대비 +3.0% 이상 수익권
+                        if profit_rate >= 3.0:
                             proposed_alloc_factor = 0.35  # 2차 추가 매수 비중: 35%
                             next_stage = 2
                         else:
                             continue
                     elif buy_stage == 2:
-                        # 2단계 -> 3단계 피라미딩 조건: 평단 대비 +3.0% 이상 수익권
-                        if profit_rate >= 3.0:
+                        # 2단계 -> 3단계 피라미딩 조건: 평단 대비 +6.0% 이상 수익권
+                        if profit_rate >= 6.0:
                             proposed_alloc_factor = 0.50  # 3차 추가 매수 비중: 50%
                             next_stage = 3
                         else:
