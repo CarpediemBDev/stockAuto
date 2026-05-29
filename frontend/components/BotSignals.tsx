@@ -62,13 +62,12 @@ const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
               <th className="px-5 py-3 font-semibold">Ticker</th>
               <th className="px-2 py-3 font-semibold">Price</th>
               <th className="px-2 py-3 font-semibold text-center">Score</th>
-              <th className="px-2 py-3 font-semibold">Indicators</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/30">
             {signals.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-5 py-10 text-center text-slate-600 italic">No signals detected yet.</td>
+                <td colSpan={3} className="px-5 py-10 text-center text-slate-600 italic">No signals detected yet.</td>
               </tr>
             ) : (
               signals.map((s) => (
@@ -87,22 +86,6 @@ const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
                           s.signal_score >= 60 ? 'border-amber-500 text-amber-500' : 'border-slate-700 text-slate-500'}`}>
                         {s.signal_score}
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-2 py-3">
-                    <div className="flex items-center space-x-3 text-[11px]">
-                      {s.rsi && (
-                        <div className="flex flex-col">
-                          <span className="text-slate-600">RSI</span>
-                          <span className={s.rsi > 70 ? 'text-rose-400' : s.rsi < 30 ? 'text-emerald-400' : 'text-slate-400'}>{s.rsi.toFixed(1)}</span>
-                        </div>
-                      )}
-                      {s.rvol && (
-                        <div className="flex flex-col">
-                          <span className="text-slate-600">RVOL</span>
-                          <span className={s.rvol > 2 ? 'text-amber-400' : 'text-slate-400'}>{s.rvol.toFixed(1)}x</span>
-                        </div>
-                      )}
                     </div>
                   </td>
                 </tr>

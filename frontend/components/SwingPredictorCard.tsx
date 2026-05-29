@@ -6,7 +6,12 @@ import { Compass, ShieldCheck, Flame, Layers, TrendingUp, TrendingDown, HelpCirc
 import { scannerAPI, isCancel } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
 import { toast } from 'sonner';
-import { getErrorMessage } from '@/lib/utils';
+import { cn, getErrorMessage } from '@/lib/utils';
+
+interface SwingPredictorCardProps {
+  activeTab?: "15m" | "swing";
+  setActiveTab?: (tab: "15m" | "swing") => void;
+}
 
 interface SwingCandidate {
   ticker: string;
@@ -20,7 +25,7 @@ interface SwingCandidate {
   is_bullish_trend: boolean;
 }
 
-export function SwingPredictorCard() {
+export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingPredictorCardProps) {
   const [candidates, setCandidates] = useState<SwingCandidate[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -53,6 +58,33 @@ export function SwingPredictorCard() {
             </div>
           </div>
         </div>
+        {/* 2-Tab Selector inside Scanner Container */}
+        <div className="flex border-b border-zinc-850 bg-zinc-950 px-2 pt-1 gap-6 mb-6">
+          <button
+            onClick={() => setActiveTab?.("15m")}
+            className={cn(
+              "pb-3 text-xs font-bold transition-all duration-300 flex items-center gap-2 cursor-pointer border-b-2",
+              activeTab === "15m"
+                ? "border-amber-500 text-amber-400 font-extrabold"
+                : "border-transparent text-zinc-500 hover:text-zinc-300"
+            )}
+          >
+            <span className={cn("w-1.5 h-1.5 rounded-full bg-amber-500", activeTab === "15m" && "animate-pulse")} />
+            15m 단타(기존)
+          </button>
+          <button
+            onClick={() => setActiveTab?.("swing")}
+            className={cn(
+              "pb-3 text-xs font-bold transition-all duration-300 flex items-center gap-2 cursor-pointer border-b-2",
+              activeTab === "swing"
+                ? "border-indigo-500 text-indigo-400 font-extrabold"
+                : "border-transparent text-zinc-500 hover:text-zinc-300"
+            )}
+          >
+            <span className={cn("w-1.5 h-1.5 rounded-full bg-indigo-500", activeTab === "swing" && "animate-pulse")} />
+            내일 세력돌파 예측(스윙)
+          </button>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="h-44 bg-zinc-900/50 rounded-2xl border border-zinc-800 animate-pulse"></div>
@@ -84,6 +116,34 @@ export function SwingPredictorCard() {
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
           SWING ALGORITHM ACTIVE
         </span>
+      </div>
+
+      {/* 2-Tab Selector inside Scanner Container */}
+      <div className="flex border-b border-zinc-850 bg-zinc-950 px-2 pt-1 gap-6 mb-6">
+        <button
+          onClick={() => setActiveTab?.("15m")}
+          className={cn(
+            "pb-3 text-xs font-bold transition-all duration-300 flex items-center gap-2 cursor-pointer border-b-2",
+            activeTab === "15m"
+              ? "border-amber-500 text-amber-400 font-extrabold"
+              : "border-transparent text-zinc-500 hover:text-zinc-300"
+          )}
+        >
+          <span className={cn("w-1.5 h-1.5 rounded-full bg-amber-500", activeTab === "15m" && "animate-pulse")} />
+          15m 단타(기존)
+        </button>
+        <button
+          onClick={() => setActiveTab?.("swing")}
+          className={cn(
+            "pb-3 text-xs font-bold transition-all duration-300 flex items-center gap-2 cursor-pointer border-b-2",
+            activeTab === "swing"
+              ? "border-indigo-500 text-indigo-400 font-extrabold"
+              : "border-transparent text-zinc-500 hover:text-zinc-300"
+          )}
+        >
+          <span className={cn("w-1.5 h-1.5 rounded-full bg-indigo-500", activeTab === "swing" && "animate-pulse")} />
+          내일 세력돌파 예측(스윙)
+        </button>
       </div>
 
       {/* 포착된 종목 리스트 */}

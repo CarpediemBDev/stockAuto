@@ -99,9 +99,16 @@ function HeaderTooltip({ title, desc }: HeaderTooltipProps) {
 interface OverseasScannerProps {
   onAddToWatchlist?: (ticker: string, name: string) => void;
   watchlistTickers?: string[];
+  activeTab?: "15m" | "swing";
+  setActiveTab?: (tab: "15m" | "swing") => void;
 }
 
-export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: OverseasScannerProps) {
+export function OverseasScanner({ 
+  onAddToWatchlist, 
+  watchlistTickers = [],
+  activeTab = "15m",
+  setActiveTab
+}: OverseasScannerProps) {
   const [results, setResults] = useState<ScanResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -157,6 +164,21 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
         }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .custom-scrollbar::-webkit-scrollbar {
+          height: 6px;
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.02);
+          border-radius: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.12);
+          border-radius: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.22);
+        }
       `}</style>
 
       {/* 헤더 */}
@@ -166,7 +188,7 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
             <Radar size={22} />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white tracking-tight">Market Scanner</h2>
+            <h2 className="text-lg font-bold text-white tracking-tight">실시간 정밀 스캔</h2>
             <p className="text-zinc-500 text-xs font-medium">실시간 전수 조사 (Gap, News, RVOL, RS)</p>
           </div>
         </div>
@@ -188,8 +210,36 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
         </div>
       </div>
 
+      {/* 2-Tab Selector inside Scanner Container */}
+      <div className="flex border-b border-zinc-800/80 bg-zinc-900/20 px-5 pt-3 gap-6">
+        <button
+          onClick={() => setActiveTab?.("15m")}
+          className={cn(
+            "pb-3 text-xs font-bold transition-all duration-300 flex items-center gap-2 cursor-pointer border-b-2",
+            activeTab === "15m"
+              ? "border-amber-500 text-amber-400 font-extrabold"
+              : "border-transparent text-zinc-500 hover:text-zinc-300"
+          )}
+        >
+          <span className={cn("w-1.5 h-1.5 rounded-full bg-amber-500", activeTab === "15m" && "animate-pulse")} />
+          15m 단타(기존)
+        </button>
+        <button
+          onClick={() => setActiveTab?.("swing")}
+          className={cn(
+            "pb-3 text-xs font-bold transition-all duration-300 flex items-center gap-2 cursor-pointer border-b-2",
+            activeTab === "swing"
+              ? "border-indigo-500 text-indigo-400 font-extrabold"
+              : "border-transparent text-zinc-500 hover:text-zinc-300"
+          )}
+        >
+          <span className={cn("w-1.5 h-1.5 rounded-full bg-indigo-500", activeTab === "swing" && "animate-pulse")} />
+          내일 세력돌파 예측(스윙)
+        </button>
+      </div>
+
       {/* 테이블 영역 */}
-      <div className="flex-1 overflow-auto no-scrollbar">
+      <div className="flex-1 overflow-auto custom-scrollbar">
         {isLoading && results.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-zinc-500">
             <Radar size={40} className="animate-ping mb-4 opacity-20 text-indigo-500" />
@@ -202,7 +252,7 @@ export function OverseasScanner({ onAddToWatchlist, watchlistTickers = [] }: Ove
             <p className="text-sm">현재 시그널이 포착된 종목이 없습니다.</p>
           </div>
         ) : (
-          <table className="w-full text-left border-collapse">
+          <table className="w-full min-w-[850px] text-left border-collapse">
             <thead>
               <tr className="border-b border-zinc-800/50 text-zinc-500 text-[10px] uppercase tracking-[0.1em]">
                 <th className="py-4 px-5 font-semibold">Rank</th>

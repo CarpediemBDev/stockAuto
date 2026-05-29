@@ -9,9 +9,9 @@ import { botAPI } from "@/lib/api";
 import { toast } from "sonner";
 
 const navItems = [
-  { href: "/", label: "📈 Auto Trading" },
-  { href: "/scanner", label: "🔭 Market Scanner" },
-  { href: "/report", label: "📊 Trading Report" },
+  { href: "/", label: "📈 자동 매매" },
+  { href: "/scanner", label: "🔭 마켓 스캐너" },
+  { href: "/report", label: "📊 매매 보고서" },
 ];
 
 export function NavBar() {

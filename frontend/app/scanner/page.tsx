@@ -76,53 +76,32 @@ export default function ScannerPage() {
   return (
     <div className="min-h-screen bg-black p-6 pt-12">
       <div className="max-w-[1600px] mx-auto">
-        <header className="mb-10">
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-            <div>
-              <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500 mb-2">
-                Market Scanner
-              </h1>
-              <p className="text-zinc-400 font-medium">봇의 실시간 정밀 스캔 결과와 나의 관심종목을 통합 관리합니다.</p>
-            </div>
-            
-            {/* 2-Tab Segmented Control */}
-            <div className="flex bg-zinc-900 border border-zinc-800 p-1 rounded-xl shadow-inner">
-              <button
-                onClick={() => setActiveTab("15m")}
-                className={`px-6 py-2 rounded-lg text-sm font-bold transition-all duration-300 ${
-                  activeTab === "15m"
-                    ? "bg-zinc-800 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.15)]"
-                    : "text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                15m 단타(기존)
-              </button>
-              <button
-                onClick={() => setActiveTab("swing")}
-                className={`px-6 py-2 rounded-lg text-sm font-bold transition-all duration-300 ${
-                  activeTab === "swing"
-                    ? "bg-zinc-800 text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.15)]"
-                    : "text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                내일 세력돌파 예측(스윙)
-              </button>
-            </div>
+        <header className="mb-8">
+          <div>
+            <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-zinc-200 to-zinc-400 tracking-tight mb-2">
+              마켓 스캐너
+            </h1>
+            <p className="text-zinc-400 font-medium">봇의 실시간 정밀 스캔 결과와 나의 관심종목을 통합 관리합니다.</p>
           </div>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-8">
+          <div className="lg:col-span-9 min-w-0">
             {activeTab === "15m" ? (
               <OverseasScanner 
                 onAddToWatchlist={handleAddToWatchlist} 
                 watchlistTickers={watchlistTickers}
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
               />
             ) : (
-              <SwingPredictorCard />
+              <SwingPredictorCard 
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+              />
             )}
           </div>
-          <div className="lg:col-span-4">
+          <div className="lg:col-span-3 min-w-0">
             <div className="sticky top-6 space-y-4">
               <ManualWatchList key={watchlistKey} />
             </div>
