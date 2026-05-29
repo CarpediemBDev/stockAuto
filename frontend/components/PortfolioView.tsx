@@ -237,9 +237,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
         {holdings.map((h) => {
           const currentPrice = h.current_price !== undefined ? h.current_price : h.avg_price * 1.02;
           const profitRate = ((currentPrice - h.avg_price) / h.avg_price) * 100;
-          const trailingLine = h.highest_price * 0.98;
           const dropFromPeak = ((currentPrice - h.highest_price) / h.highest_price) * 100;
-          const distToExit = ((currentPrice - trailingLine) / currentPrice) * 100;
           const news = newsMap[h.ticker];
 
           return (
@@ -338,18 +336,26 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                     </div>
                   </div>
 
-                  {/* 트레일링 스탑 게이지 */}
+                  {/* 고점 대비 하락 게이지 */}
                   <div className="space-y-1.5 mt-4">
                     <div className="flex justify-between text-[10px] font-bold tracking-tight">
-                      <span className="text-slate-500">TRAILING STOP LINE (-2% from peak)</span>
-                      <span className={distToExit < 0.5 ? 'text-amber-500' : 'text-slate-400'}>
-                        EXIT IN {distToExit.toFixed(2)}%
+                      <span className="group/drop relative inline-flex items-center gap-1 cursor-help text-slate-500 w-fit">
+                        <span>DROP FROM PEAK (최고가 대비)</span>
+                        <Info size={10} className="text-slate-600 group-hover/drop:text-slate-400 transition-colors" />
+                        <span className="pointer-events-none absolute bottom-full left-0 mb-2 w-64 scale-95 opacity-0 group-hover/drop:scale-100 group-hover/drop:opacity-100 transition-all duration-200 bg-slate-950 text-slate-300 text-[10px] font-normal normal-case leading-relaxed p-3 rounded-xl shadow-2xl border border-slate-700 z-50 text-left whitespace-normal">
+                          매수 이후 찍었던 <b>최고가(Peak)</b> 대비 현재 주가가 몇 % 떨어졌는지 보여줍니다.<br/><br/>
+                          <span className="text-blue-400">📉 마이너스(-)</span> : 고점 대비 하락 (봇이 변동성을 계산해 동적 방어선을 감시합니다).<br/>
+                          <span className="text-rose-400">🚀 플러스(+)</span> : 이전 최고가를 돌파하며 상승 중입니다!
+                        </span>
+                      </span>
+                      <span className={dropFromPeak < -5 ? 'text-amber-500' : 'text-slate-400'}>
+                        {dropFromPeak.toFixed(2)}%
                       </span>
                     </div>
                     <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
                       <div
-                        className={`h-full transition-all duration-500 ${distToExit < 0.5 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                        style={{ width: `${Math.max(0, Math.min(100, (1 - Math.abs(dropFromPeak)/2) * 100))}%` }}
+                        className={`h-full transition-all duration-500 ${dropFromPeak < -5 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                        style={{ width: `${Math.max(0, Math.min(100, (1 - Math.abs(dropFromPeak)/10) * 100))}%` }}
                       />
                     </div>
                   </div>
@@ -371,10 +377,10 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                       }
                     </span>
                   </div>
-                  {distToExit < 0.5 && (
+                  {dropFromPeak < -3 && h.highest_price > h.avg_price && (
                     <div className="flex items-center text-amber-500 animate-pulse">
                       <ShieldAlert size={16} className="mr-1" />
-                      <span className="text-[11px] font-bold">탈출 준비</span>
+                      <span className="text-[11px] font-bold">동적 탈출 감시중</span>
                     </div>
                   )}
                 </div>

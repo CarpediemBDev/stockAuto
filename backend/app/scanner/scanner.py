@@ -478,8 +478,8 @@ async def analyze_single_ticker(ticker: str) -> dict:
         last_close = float(df_1m['Close'].iloc[-1])
         rvol = calculate_rvol(df_15m)
         
-        ema9 = calculate_ema(df_15m, 9)
-        ema20 = calculate_ema(df_15m, 20)
+        ema9 = calculate_ema(df_15m['Close'], 9)
+        ema20 = calculate_ema(df_15m['Close'], 20)
         ema_aligned = False
         if not ema9.empty and not ema20.empty:
             ema_aligned = bool(ema9.iloc[-1] > ema20.iloc[-1])

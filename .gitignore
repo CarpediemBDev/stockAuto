@@ -45,7 +45,7 @@ docs/*.md
 !docs/NEXTJS_GUIDE.md
 !docs/SCHEMA.md
 !docs/walkthrough.md
-
+!docs/mistake_note.md
 # Private workspace logs
 docs/private_*
 
