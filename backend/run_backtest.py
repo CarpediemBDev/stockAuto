@@ -1,11 +1,6 @@
 import argparse
 import asyncio
 import os
-import matplotlib
-# 백그라운드 환경에서 GUI 없이 파일로 바로 저장할 수 있도록 Non-interactive 백엔드(Agg) 탑재
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import pandas as pd
 from datetime import datetime
 from app.bot.backtest_engine import BacktestSimulator
@@ -98,51 +93,6 @@ async def main():
             print(f"{ts_str:<17} | {log['ticker']:<5} | {log['trade_type']:<4} | {log['quantity']:<4} | ${log['price']:<7.2f} | {pnl_str:<10} | {ret_str:<7} | {log['reason']}")
         print("----------------------------------------------------------------------------------------------------")
 
-    # 4. 차트 생성 및 시각화 저장
-    print("\n ⏳ 3단계: 누적 수익 곡선(Equity Curve) 및 드로다운(MDD) 결합 차트 생성 중...")
-    df_eq = pd.DataFrame(report["equity_curve"])
-    
-    # QQQ 대조 시계열 매핑
-    qqq_close = sim.qqq_metrics['Close']
-    df_eq['qqq_bench'] = df_eq['timestamp'].map(qqq_close)
-    df_eq['qqq_bench_normalized'] = (df_eq['qqq_bench'] / df_eq['qqq_bench'].iloc[0]) * args.cash
-
-    plt.style.use('dark_background')
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
-    
-    # Top Subplot: Equity Curve
-    ax1.plot(df_eq['timestamp'], df_eq['total'], color='#f59e0b', label=f"StockAuto Strategy ({report['total_return_rate']:+.2f}%)", linewidth=2.5)
-    ax1.plot(df_eq['timestamp'], df_eq['qqq_bench_normalized'], color='#64748b', linestyle='--', label=f"QQQ Buy & Hold ({report['qqq_bench_return_rate']:+.2f}%)", linewidth=1.5)
-    ax1.set_title("StockAuto v2.0 - Cumulative Equity Curve", fontsize=14, pad=15, color='#ffffff', weight='bold')
-    ax1.set_ylabel("Portfolio Value ($ USD)", fontsize=11, color='#e2e8f0')
-    ax1.grid(True, linestyle=':', alpha=0.3)
-    ax1.legend(loc="upper left", frameon=True, facecolor="#1e293b", edgecolor="#475569")
-    
-    # 포맷팅 데코레이션
-    ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:,}".format(int(x))))
-    
-    # Bottom Subplot: Drawdown Curve
-    df_eq['peak'] = df_eq['total'].cummax()
-    df_eq['drawdown'] = (df_eq['total'] - df_eq['peak']) / df_eq['peak'] * 100
-    
-    ax2.fill_between(df_eq['timestamp'], df_eq['drawdown'], 0, color='#ef4444', alpha=0.3, label="Drawdown")
-    ax2.plot(df_eq['timestamp'], df_eq['drawdown'], color='#f87171', linewidth=1.2)
-    ax2.set_title(f"Portfolio Drawdown (Max Drawdown: {report['mdd']:.2f}%)", fontsize=11, color='#fca5a5', weight='bold')
-    ax2.set_ylabel("Drawdown (%)", fontsize=11, color='#e2e8f0')
-    ax2.set_xlabel("Timeline", fontsize=11, color='#e2e8f0')
-    ax2.grid(True, linestyle=':', alpha=0.3)
-    ax2.set_ylim(bottom=min(df_eq['drawdown'].min() - 2, -5), top=1)
-    
-    # X축 시간축 가독성 튜닝
-    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M' if args.interval != '1d' else '%Y-%m-%d'))
-    plt.xticks(rotation=15)
-    
-    plt.tight_layout()
-    chart_name = "backtest_result.png"
-    plt.savefig(chart_name, dpi=150, facecolor="#0f172a")
-    plt.close()
-    
-    print(f" 🟢 차트 시각화 완성! [ {chart_name} ] 파일로 저장 완료되었습니다.")
     print("==========================================================================")
 
 if __name__ == "__main__":

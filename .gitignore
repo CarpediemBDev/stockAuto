@@ -33,6 +33,10 @@ frontend/.env*
 .gemini/
 **/__pycache__/
 
+# Backtest output
+backtest_result.png
+
+
 # Core Strategy & Implementation Docs (Whitelist ONLY specified documents)
 docs/*.md
 !docs/README.md
