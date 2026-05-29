@@ -8,7 +8,8 @@ import {
 import { 
   TrendingUp, Target, Activity, DollarSign, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
-import { reportAPI } from '@/lib/api';
+import { reportAPI, tradeAPI } from '@/lib/api';
+import { TradeLogs, TradeLog } from '@/components/TradeLogs';
 
 interface TradeItem {
   id: number;
@@ -36,6 +37,8 @@ export default function ReportPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<StatsData | null>(null);
+  const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
+  const [logs, setLogs] = useState<TradeLog[]>([]);
 
   useEffect(() => {
     const token = localStorage.getItem('stockauto_token');
@@ -50,20 +53,24 @@ export default function ReportPage() {
     if (!isAuthenticated) return;
     
     let isMounted = true;
-    async function fetchStats() {
+    async function fetchStatsAndLogs() {
       try {
-        const res = await reportAPI.getStats();
+        const [statsRes, logsRes] = await Promise.all([
+          reportAPI.getStats(),
+          tradeAPI.getLogs()
+        ]);
         if (isMounted) {
-          setStats(res.data);
+          setStats(statsRes.data);
+          setLogs(logsRes.data);
           setLoading(false);
         }
       } catch (error) {
-        console.error("Failed to fetch report stats", error);
-        setLoading(false);
+        console.error("Failed to fetch report stats or logs", error);
+        if (isMounted) setLoading(false);
       }
     }
     
-    fetchStats();
+    fetchStatsAndLogs();
     return () => { isMounted = false; };
   }, [isAuthenticated]);
 
@@ -93,11 +100,11 @@ export default function ReportPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400 tracking-tight">
-          Trading Performance
+          종합 매매 성적표 (Trading Performance)
         </h1>
         <div className="flex items-center space-x-2 text-sm text-slate-400">
           <Activity className="w-4 h-4 text-emerald-500 animate-pulse" />
-          <span>Real-time Live Data</span>
+          <span>실시간 라이브 데이터 동기화</span>
         </div>
       </div>
 
@@ -110,7 +117,7 @@ export default function ReportPage() {
           <div className="relative z-10 flex flex-col justify-between h-full">
             <div className="flex items-center space-x-2 text-slate-400 mb-4">
               <DollarSign className="w-5 h-5" />
-              <span className="font-semibold text-sm tracking-wide uppercase">Total Net Profit</span>
+              <span className="font-semibold text-sm tracking-wide uppercase">총 실수익금 (세전/비용후)</span>
             </div>
             <div className="flex items-baseline space-x-2">
               <span className={`text-4xl font-black tracking-tighter ${isProfitable ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -126,7 +133,7 @@ export default function ReportPage() {
           <div className="relative z-10 flex flex-col justify-between h-full">
             <div className="flex items-center space-x-2 text-slate-400 mb-4">
               <Target className="w-5 h-5 text-indigo-400" />
-              <span className="font-semibold text-sm tracking-wide uppercase">Win Rate</span>
+              <span className="font-semibold text-sm tracking-wide uppercase">승률 (Win Rate)</span>
             </div>
             <div className="flex items-baseline space-x-2">
               <span className="text-4xl font-black tracking-tighter text-white">
@@ -142,7 +149,7 @@ export default function ReportPage() {
           <div className="relative z-10 flex flex-col justify-between h-full">
             <div className="flex items-center space-x-2 text-slate-400 mb-4">
               <TrendingUp className="w-5 h-5 text-amber-400" />
-              <span className="font-semibold text-sm tracking-wide uppercase">Profit Factor</span>
+              <span className="font-semibold text-sm tracking-wide uppercase">프로핏 팩터 (손익비)</span>
             </div>
             <div className="flex items-baseline space-x-2">
               <span className="text-4xl font-black tracking-tighter text-white">
@@ -158,7 +165,7 @@ export default function ReportPage() {
           <div className="relative z-10 flex flex-col justify-between h-full">
             <div className="flex items-center space-x-2 text-slate-400 mb-4">
               <Activity className="w-5 h-5 text-cyan-400" />
-              <span className="font-semibold text-sm tracking-wide uppercase">Total Trades</span>
+              <span className="font-semibold text-sm tracking-wide uppercase">총 매매 거래 횟수</span>
             </div>
             <div className="flex items-baseline space-x-2">
               <span className="text-4xl font-black tracking-tighter text-white">
@@ -173,7 +180,7 @@ export default function ReportPage() {
       <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 p-6 rounded-3xl shadow-2xl">
         <h2 className="text-xl font-bold text-white mb-6 flex items-center space-x-2">
           <TrendingUp className="w-5 h-5 text-emerald-400" />
-          <span>Cumulative Profit Curve</span>
+          <span>누적 수익 곡선 (Cumulative Profit)</span>
         </h2>
         <div className="h-96 w-full">
           {chart_data.length > 0 ? (
@@ -209,7 +216,7 @@ export default function ReportPage() {
                 <Area 
                   type="monotone" 
                   dataKey="cumulative_pnl" 
-                  name="Cumulative Profit"
+                  name="누적 실수익금"
                   stroke={isProfitable ? '#10b981' : '#f43f5e'} 
                   strokeWidth={4}
                   fillOpacity={1} 
@@ -228,56 +235,43 @@ export default function ReportPage() {
         </div>
       </div>
 
-      {/* Trade History Table */}
-      <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 p-6 rounded-3xl shadow-2xl">
-        <h2 className="text-xl font-bold text-white mb-6">Recent Trades (Realized)</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-700 text-slate-400 text-sm tracking-wider uppercase">
-                <th className="py-4 px-4 font-semibold">Date</th>
-                <th className="py-4 px-4 font-semibold">Ticker</th>
-                <th className="py-4 px-4 font-semibold text-right">Return Rate</th>
-                <th className="py-4 px-4 font-semibold text-right">Realized PnL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...chart_data].reverse().map((trade: TradeItem, idx) => (
-                <tr key={idx} className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
-                  <td className="py-4 px-4 text-slate-300">
-                    <div className="font-medium">{trade.date}</div>
-                    <div className="text-xs text-slate-500">{trade.time}</div>
-                  </td>
-                  <td className="py-4 px-4">
-                    <div className="font-bold text-white">{trade.ticker}</div>
-                    <div className="text-xs text-slate-400">{trade.ticker_name || 'N/A'}</div>
-                  </td>
-                  <td className="py-4 px-4 text-right">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                      trade.return_rate > 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
-                    }`}>
-                      {trade.return_rate > 0 ? <ArrowUpRight className="w-3 h-3 mr-1" /> : <ArrowDownRight className="w-3 h-3 mr-1" />}
-                      {trade.return_rate}%
-                    </span>
-                  </td>
-                  <td className={`py-4 px-4 text-right font-bold tracking-tight ${
-                    trade.realized_pnl > 0 ? 'text-emerald-400' : 'text-rose-400'
-                  }`}>
-                    {trade.realized_pnl > 0 ? '+' : ''}${trade.realized_pnl}
-                  </td>
-                </tr>
-              ))}
-              {chart_data.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="py-8 text-center text-slate-500">
-                    매도 기록이 없습니다.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+      {/* 실시간 체결 로그 팝업 메뉴 버튼 (그래프 바로 밑에 배치) */}
+      <div className="flex justify-center pt-2">
+        <button
+          onClick={() => setIsLogsModalOpen(true)}
+          className="bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white px-6 py-3 rounded-2xl border border-slate-700/60 text-xs font-bold transition-all duration-300 flex items-center gap-2 active:scale-95 shadow-lg group hover:border-emerald-500/40"
+        >
+          <Activity className="w-4 h-4 text-emerald-400 animate-pulse group-hover:scale-110 transition-transform" />
+          실시간 체결 로그 (Execution Logs) 팝업 조회
+        </button>
       </div>
+
+      {/* 프리미엄 다크 글래스모피즘 모달 (전체 거래 내역 상세 조회) */}
+      {isLogsModalOpen && (
+        <div 
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsLogsModalOpen(false);
+          }}
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300"
+        >
+          <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-5xl w-full p-6 relative shadow-2xl animate-in zoom-in-95 duration-300 overflow-hidden max-h-[85vh] flex flex-col">
+            {/* 닫기 버튼 */}
+            <button 
+              onClick={() => setIsLogsModalOpen(false)}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-white p-2 rounded-full hover:bg-zinc-900 active:scale-95 transition-all z-10 font-bold"
+              aria-label="닫기"
+            >
+              ✕
+            </button>
+
+            {/* 거래 내역 테이블 로드 (모달 모드로 테두리 투명화) */}
+            <div className="overflow-y-auto pr-1">
+              <TradeLogs logs={logs} isModalMode={true} />
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

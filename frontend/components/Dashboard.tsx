@@ -125,15 +125,13 @@ export function Dashboard() {
 
         <AccountBalance displayCurrency={displayCurrency} onTotalAssetClick={() => setIsChartOpen(true)} />
         
-        <div className="mb-12">
+        <div className="mb-6">
           <h2 className="text-xl font-bold text-slate-100 mb-4 flex items-center">
             <div className="w-1.5 h-6 bg-blue-500 rounded-full mr-3"></div>
             실시간 포트폴리오 (Portfolio)
           </h2>
           <PortfolioView displayCurrency={displayCurrency} />
         </div>
-
-        <TradeLogs logs={logs} />
       </div>
 
       {/* 프리미엄 다크 글래스모피즘 모달 (자산 성장 차트) */}

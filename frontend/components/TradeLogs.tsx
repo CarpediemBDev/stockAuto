@@ -14,14 +14,18 @@ export interface TradeLog {
 
 interface TradeLogsProps {
   logs: TradeLog[];
+  isModalMode?: boolean;
 }
 
-export function TradeLogs({ logs }: TradeLogsProps) {
+export function TradeLogs({ logs, isModalMode = false }: TradeLogsProps) {
   return (
-    <div className="bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-2xl overflow-hidden shadow-xl mt-6">
-      <div className="p-6 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/20">
+    <div className={isModalMode 
+      ? "bg-transparent w-full" 
+      : "bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-2xl overflow-hidden shadow-xl mt-6"
+    }>
+      <div className={`p-6 border-b border-zinc-800 flex justify-between items-center ${isModalMode ? 'bg-transparent px-0 pt-0' : 'bg-zinc-950/20'}`}>
         <h3 className="text-lg font-semibold text-white tracking-tight flex items-center gap-2">
-          <span className="w-1.5 h-4 bg-emerald-500 rounded-full"></span>
+          <span className="w-1.5 h-4 bg-emerald-500 rounded-full animate-pulse"></span>
           실시간 체결 로그 (Execution Logs)
         </h3>
         <span className="text-[10px] text-zinc-500 font-medium">실시간 동기화 중</span>
