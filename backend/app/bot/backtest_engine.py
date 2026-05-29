@@ -330,9 +330,9 @@ class BacktestSimulator:
         row = metrics.loc[timestamp]
         
         # 1. 필수 관문 필터 (단 하나라도 충족되지 않으면 즉시 0점 탈락)
-        # 필수 거래대금 필터: 당일 거래대금 $1,000,000 이상 (여기서는 백테스트 데이터의 유효성 보장을 위해 volume * close 검증)
+        # 필수 거래대금 필터: 당일 거래대금 최소 1억 원 이상 (여기서는 백테스트 데이터의 유효성 보장을 위해 volume * close 검증, 10x 완화하여 1천만 원 상당인 $7,400 적용)
         dollar_volume = row['Close'] * row['Volume']
-        if dollar_volume < 100000.0:  # 백테스트 종목 필터 완화 (유동성 부족에 따른 백테스트 먹통 방지)
+        if dollar_volume < 7400.0:  # 백테스트 종목 필터 완화 (유동성 부족에 따른 백테스트 먹통 방지)
             return 0.0
             
         # 세력선 지지 필터: 주가가 VWAP 위인지 확인 (VWAP 계산이 nan인 경우 통과시킴)

@@ -78,7 +78,11 @@ async def scan_market_expert() -> list:
     df_qqq = await fetch_index_data(MARKET_INDEX)
     qqq_perf = (df_qqq['Close'].iloc[-1] / df_qqq['Close'].iloc[0] - 1) if not df_qqq.empty else 0
     
-    print(f"[Stage 1] Scanning {len(tickers)} tickers with 15m data...")
+    # 1.5. 최소 거래대금 기준 설정 (한국 돈 1억 원 기준 환산)
+    from app.bot.fx_cache import FXRateCache
+    min_dollar_volume = 100000000.0 / FXRateCache.get_rate()
+    
+    print(f"[Stage 1] Scanning {len(tickers)} tickers with 15m data (Min Vol: ${min_dollar_volume:,.2f})...")
     
     # 2. Stage 1: 15분봉 벌크 다운로드 및 필터링 (데이터 프로바이더 연동)
     chunk_size = 100
@@ -112,8 +116,8 @@ async def scan_market_expert() -> list:
                     today_df = temp_df[temp_df['Date'] == today]
                     today_dollar_volume = float((today_df['Close'] * today_df['Volume']).sum())
                     
-                    # 필수 유동성 필터: 당일 거래대금 최소 $1,000,000 이상만 선별
-                    if today_dollar_volume < 1000000.0:
+                    # 필수 유동성 필터: 당일 거래대금 최소 1억 원 이상만 선별
+                    if today_dollar_volume < min_dollar_volume:
                         continue
                     
                     gap_pct = (open_price / prev_close - 1) * 100
