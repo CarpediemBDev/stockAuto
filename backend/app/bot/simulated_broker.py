@@ -3,7 +3,7 @@ from app.scanner.data_provider import fetch_bulk_ohlcv_sync, fetch_ohlcv_sync
 from datetime import datetime
 from app.bot.base_broker import BaseBroker
 from app.core.database import SessionLocal
-from app.core.models import Holding
+from app.core.models import Holding, TradeLog
 from app.core.config import settings
 from app.bot.fx_cache import FXRateCache
 
@@ -24,13 +24,26 @@ class LocalSimulatedBroker(BaseBroker):
         try:
             if self.user_id:
                 holdings = db.query(Holding).filter(Holding.user_id == self.user_id).all()
+                trade_logs = db.query(TradeLog).filter(
+                    TradeLog.user_id == self.user_id,
+                    TradeLog.trade_type == "SELL",
+                    TradeLog.realized_pnl != None
+                ).all()
             else:
                 holdings = db.query(Holding).all()
+                trade_logs = db.query(TradeLog).filter(
+                    TradeLog.trade_type == "SELL",
+                    TradeLog.realized_pnl != None
+                ).all()
         finally:
             db.close()
 
         initial_cash = 10000000.0  # 가상 시작 예수금: 1,000만 원 (10,000,000 KRW)
         exchange_rate = FXRateCache.get_rate()
+
+        # 누적 실현 손익 계산 (TradeLog 기준 매매 누적 성과)
+        total_realized_pnl_usd = sum(log.realized_pnl for log in trade_logs) if trade_logs else 0.0
+        total_realized_pnl_krw = total_realized_pnl_usd * exchange_rate
 
         total_purchase_krw = 0.0
         total_eval_krw = 0.0
@@ -67,8 +80,8 @@ class LocalSimulatedBroker(BaseBroker):
                     total_purchase_krw += (h.avg_price * h.quantity) * exchange_rate
                     total_eval_krw += (h.avg_price * h.quantity) * exchange_rate
 
-        # 남은 가상 예수금
-        cash_balance = max(0.0, initial_cash - total_purchase_krw)
+        # 남은 가상 예수금 = 초기 예수금 + 누적 실현 손익 - 현재 보유 종목들의 총 매입 금액
+        cash_balance = max(0.0, initial_cash + total_realized_pnl_krw - total_purchase_krw)
         stock_balance = total_eval_krw
         total_asset = cash_balance + stock_balance
         
