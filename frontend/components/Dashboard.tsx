@@ -5,6 +5,7 @@ import { TradeLogs, TradeLog } from "./TradeLogs";
 import { AccountBalance } from "./AccountBalance";
 import PortfolioView from "./PortfolioView";
 import { AssetTrendChart } from "./AssetTrendChart";
+import { LiveTradeTicker } from "./LiveTradeTicker";
 
 import { botAPI, tradeAPI, isCancel } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
@@ -16,6 +17,7 @@ export function Dashboard() {
   const [isReal, setIsReal] = useState(false);
   const [logs, setLogs] = useState<TradeLog[]>([]);
   const [isChartOpen, setIsChartOpen] = useState(false);
+  const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
 
   const fetchStatus = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -88,6 +90,8 @@ export function Dashboard() {
           </div>
         )}
 
+        <LiveTradeTicker latestLog={logs[0]} onClick={() => setIsLogsModalOpen(true)} />
+
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center gap-3">
             <span className="bg-indigo-600 w-2.5 h-6 rounded-full"></span>
@@ -153,6 +157,32 @@ export function Dashboard() {
             {/* 자산 차트 로드 */}
             <div className="pt-2">
               <AssetTrendChart displayCurrency={displayCurrency} logs={logs} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 프리미엄 다크 글래스모피즘 모달 (전체 거래 내역 상세 조회) */}
+      {isLogsModalOpen && (
+        <div 
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsLogsModalOpen(false);
+          }}
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300"
+        >
+          <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-5xl w-full p-6 relative shadow-2xl animate-in zoom-in-95 duration-300 overflow-hidden max-h-[85vh] flex flex-col">
+            {/* 닫기 버튼 */}
+            <button 
+              onClick={() => setIsLogsModalOpen(false)}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-white p-2 rounded-full hover:bg-zinc-900 active:scale-95 transition-all z-10 font-bold"
+              aria-label="닫기"
+            >
+              ✕
+            </button>
+
+            {/* 거래 내역 테이블 로드 */}
+            <div className="overflow-y-auto pr-1">
+              <TradeLogs logs={logs} />
             </div>
           </div>
         </div>

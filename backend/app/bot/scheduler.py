@@ -388,8 +388,10 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     # 예수금 안전장치
                     max_order_budget_usd = cash_balance_usd * 0.95
                     
-                    # 최종 수량 산출
+                    # 최종 수량 산출 (소수점 거래 불가능으로 1주 미만 시 예수금이 충분하면 최소 1주 매수 보장)
                     final_qty = int(min(proposed_qty, max_order_budget_usd / current_price))
+                    if final_qty == 0 and max_order_budget_usd >= current_price:
+                        final_qty = 1
                     
                     log_action(db, user_id, (
                         f"ENTRY SIGNAL: {ticker} ({score} pts) | Price: ${current_price:.2f} | "
