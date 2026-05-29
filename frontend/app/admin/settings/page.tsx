@@ -35,7 +35,7 @@ export default function PersonalSettingsPage() {
     global_bot_username: "",
   });
   const [username, setUsername] = useState<string>("");
-  const [subTab, setSubTab] = useState<"mode" | "broker" | "telegram" | "danger">("mode");
+  const [subTab, setSubTab] = useState<"environment" | "telegram" | "danger">("environment");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [showRealWarning, setShowRealWarning] = useState(false);
@@ -201,8 +201,7 @@ export default function PersonalSettingsPage() {
         <div className="flex flex-col md:flex-row gap-8 items-start">
           <div className="w-full md:w-48 shrink-0 flex flex-row md:flex-col gap-1 bg-zinc-950 md:bg-transparent pb-3 md:pb-0 border-b md:border-b-0 border-zinc-900 overflow-x-auto md:overflow-x-visible">
             {[
-              { id: "mode", label: "Trading Mode", icon: Server, color: "text-blue-400" },
-              { id: "broker", label: "Broker Config", icon: Key, color: "text-amber-400" },
+              { id: "environment", label: "Trading Environment", icon: Server, color: "text-blue-400" },
               { id: "telegram", label: "Telegram Bridge", icon: Send, color: "text-indigo-400" },
               { id: "danger", label: "Danger Zone", icon: AlertTriangle, color: "text-red-500" },
             ].map((item) => {
@@ -211,7 +210,7 @@ export default function PersonalSettingsPage() {
               return (
                 <button
                   key={item.id}
-                  onClick={() => setSubTab(item.id as "mode" | "broker" | "telegram" | "danger")}
+                  onClick={() => setSubTab(item.id as "environment" | "telegram" | "danger")}
                   className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold transition-all text-left w-full cursor-pointer whitespace-nowrap ${
                     isActive 
                       ? "bg-zinc-900 text-white shadow-inner" 
@@ -226,143 +225,145 @@ export default function PersonalSettingsPage() {
           </div>
 
           <div className="flex-1 min-w-0 w-full">
-            {subTab === "mode" && (
-              <div className="space-y-6">
-                <div className="flex flex-col gap-1.5 pb-4 border-b border-zinc-900">
-                  <h2 className="text-base font-bold text-zinc-100 flex items-center gap-2">
-                    <Server className="w-4 h-4 text-blue-400" />
-                    Trading Mode
-                  </h2>
-                  <p className="text-xs text-zinc-400 leading-relaxed">
-                    트레이딩 엔진의 실행 모드를 선택합니다. 가상 데이터 시뮬레이션부터 KIS 증권사의 모의서버 및 실거래 구동 환경을 제어합니다.
-                  </p>
-                </div>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div 
-                    onClick={() => setSettings({ ...settings, trade_mode: "SIMULATED" })}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                      settings.trade_mode === "SIMULATED" 
-                        ? "border-blue-500 bg-blue-500/5 shadow-[0_0_15px_rgba(59,130,246,0.1)]" 
-                        : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-800 hover:bg-zinc-900/20"
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="font-bold text-xs text-blue-400">SIMULATED</span>
-                      <ShieldCheck className="w-4 h-4 text-blue-400" />
-                    </div>
-                    <p className="text-[10px] text-zinc-500 leading-relaxed">
-                      실시간 시장 가격 기반 가상 투자. API 키 불필요. 안전한 테스트용 모드.
-                    </p>
-                  </div>
-
-                  <div 
-                    onClick={() => setSettings({ ...settings, trade_mode: "MOCK" })}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                      settings.trade_mode === "MOCK" 
-                        ? "border-amber-500 bg-amber-500/5 shadow-[0_0_15px_rgba(245,158,11,0.1)]" 
-                        : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-800 hover:bg-zinc-900/20"
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="font-bold text-xs text-amber-400">MOCK</span>
-                      <Server className="w-4 h-4 text-amber-400" />
-                    </div>
-                    <p className="text-[10px] text-zinc-500 leading-relaxed">
-                      한투 모의투자 서버 연동. 가상 계좌에 모의 증권사 API Key 등록 필요.
-                    </p>
-                  </div>
-
-                  <div 
-                    onClick={() => setSettings({ ...settings, trade_mode: "REAL" })}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                      settings.trade_mode === "REAL" 
-                        ? "border-red-500 bg-red-500/5 shadow-[0_0_15px_rgba(239,68,68,0.1)]" 
-                        : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-800 hover:bg-zinc-900/20"
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="font-bold text-xs text-red-500">REAL</span>
-                      <ShieldAlert className="w-4 h-4 text-red-500" />
-                    </div>
-                    <p className="text-[10px] text-zinc-500 leading-relaxed">
-                      실제 현금 기반 실전 자동매매. 고도로 검증된 상태에서만 신중하게 연동할 것.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-6 border-t border-zinc-900">
-                  <button 
-                    onClick={() => handleSave(false)}
-                    disabled={isSaving}
-                    className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center gap-2 cursor-pointer shadow-md shadow-blue-900/30"
-                  >
-                    {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                    저장
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {subTab === "broker" && (
-              <div className="space-y-6">
-                <div className="flex flex-col gap-1.5 pb-4 border-b border-zinc-900">
-                  <h2 className="text-base font-bold text-zinc-100 flex items-center gap-2">
-                    <Key className="w-4 h-4 text-amber-400" />
-                    Broker Config
-                  </h2>
-                  <p className="text-xs text-zinc-400 leading-relaxed">
-                    매매를 실행할 증권사를 지정하고 API 인증 키 정보를 연동합니다. 입력값은 양방향 암호화 처리됩니다.
-                  </p>
-                </div>
-                
+            {subTab === "environment" && (
+              <div className="space-y-8">
+                {/* 섹션 1. 투자 구동 모드 선택 */}
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-400 mb-1.5">Provider</label>
-                    <select 
-                      value={settings.broker_provider}
-                      onChange={(e) => setSettings({ ...settings, broker_provider: e.target.value })}
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none text-xs transition-all"
+                  <div className="flex flex-col gap-1.5 pb-3 border-b border-zinc-900">
+                    <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                      <Server className="w-4 h-4 text-blue-400" />
+                      1단계: 투자 구동 모드 선택 (Trading Mode)
+                    </h2>
+                    <p className="text-[11px] text-zinc-400 leading-relaxed">
+                      자동매매 엔진의 구동 환경을 지정합니다. Simulated 모드는 API Key 검증 없이 즉시 가상 모의 투자를 체험할 수 있는 가장 안전한 모드입니다.
+                    </p>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div 
+                      onClick={() => setSettings({ ...settings, trade_mode: "SIMULATED" })}
+                      className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                        settings.trade_mode === "SIMULATED" 
+                          ? "border-blue-500 bg-blue-500/5 shadow-[0_0_15px_rgba(59,130,246,0.1)]" 
+                          : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-800 hover:bg-zinc-900/20"
+                      }`}
                     >
-                      <option value="KIS">Korea Investment & Securities (KIS)</option>
-                      <option value="TOSS" disabled>Toss Securities (Coming Soon)</option>
-                    </select>
-                  </div>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="font-bold text-xs text-blue-400">SIMULATED</span>
+                        <ShieldCheck className="w-4 h-4 text-blue-400" />
+                      </div>
+                      <p className="text-[10px] text-zinc-500 leading-relaxed">
+                        실시간 시장 가격 기반 가상 투자. API 키 불필요. 안전한 테스트용 모드.
+                      </p>
+                    </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-400 mb-1.5">APP KEY</label>
-                    <input 
-                      type="text" 
-                      value={settings.kis_app_key || ""}
-                      onChange={(e) => setSettings({ ...settings, kis_app_key: e.target.value })}
-                      placeholder="Enter your API Key"
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
-                    />
-                  </div>
+                    <div 
+                      onClick={() => setSettings({ ...settings, trade_mode: "MOCK" })}
+                      className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                        settings.trade_mode === "MOCK" 
+                          ? "border-amber-500 bg-amber-500/5 shadow-[0_0_15px_rgba(245,158,11,0.1)]" 
+                          : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-800 hover:bg-zinc-900/20"
+                      }`}
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="font-bold text-xs text-amber-400">MOCK</span>
+                        <Server className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <p className="text-[10px] text-zinc-500 leading-relaxed">
+                        한투 모의투자 서버 연동. 가상 계좌에 모의 증권사 API Key 등록 필요.
+                      </p>
+                    </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-400 mb-1.5">APP SECRET</label>
-                    <input 
-                      type="password" 
-                      value={settings.kis_app_secret || ""}
-                      onChange={(e) => setSettings({ ...settings, kis_app_secret: e.target.value })}
-                      placeholder="Enter your API Secret"
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-400 mb-1.5">ACCOUNT NO (계좌번호)</label>
-                    <input 
-                      type="text" 
-                      value={settings.kis_account_no || ""}
-                      onChange={(e) => setSettings({ ...settings, kis_account_no: e.target.value })}
-                      placeholder="e.g. 12345678-01"
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
-                    />
+                    <div 
+                      onClick={() => setSettings({ ...settings, trade_mode: "REAL" })}
+                      className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                        settings.trade_mode === "REAL" 
+                          ? "border-red-500 bg-red-500/5 shadow-[0_0_15px_rgba(239,68,68,0.1)]" 
+                          : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-800 hover:bg-zinc-900/20"
+                      }`}
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="font-bold text-xs text-red-500">REAL</span>
+                        <ShieldAlert className="w-4 h-4 text-red-500" />
+                      </div>
+                      <p className="text-[10px] text-zinc-500 leading-relaxed">
+                        실제 현금 기반 실전 자동매매. 고도로 검증된 상태에서만 신중하게 연동할 것.
+                      </p>
+                    </div>
                   </div>
                 </div>
 
+                {/* 섹션 2. 증권사 연동 설정 */}
+                <div className="space-y-4 pt-6 border-t border-zinc-900">
+                  <div className="flex flex-col gap-1.5 pb-2">
+                    <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                      <Key className="w-4 h-4 text-amber-400" />
+                      2단계: 증권사 API 연동 정보 (Broker Config)
+                    </h2>
+                    <p className="text-[11px] text-zinc-400 leading-relaxed">
+                      매매 주문을 직접 송신할 증권사 연동 정보 및 API Key를 연동합니다. KIS 모의/실전 거래 시 필수입니다.
+                    </p>
+                  </div>
+                  
+                  {settings.trade_mode === "SIMULATED" ? (
+                    <div className="p-4 rounded-xl border border-blue-500/20 bg-blue-500/5 flex items-center gap-3">
+                      <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0" />
+                      <div className="text-[11px] text-zinc-400 leading-relaxed">
+                        현재 안전한 <strong>SIMULATED (가상 모의투자) 모드</strong>가 활성화되어 있습니다. 
+                        가상 투자는 증권사 API Key 입력 없이 즉시 백엔드 엔진이 작동하므로 키를 입력하실 필요가 없습니다.
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-300">
+                      <div>
+                        <label className="block text-xs font-semibold text-zinc-400 mb-1.5">Provider</label>
+                        <select 
+                          value={settings.broker_provider}
+                          onChange={(e) => setSettings({ ...settings, broker_provider: e.target.value })}
+                          className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none text-xs transition-all"
+                        >
+                          <option value="KIS">Korea Investment & Securities (KIS)</option>
+                          <option value="TOSS" disabled>Toss Securities (Coming Soon)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-zinc-400 mb-1.5">APP KEY</label>
+                        <input 
+                          type="text" 
+                          value={settings.kis_app_key || ""}
+                          onChange={(e) => setSettings({ ...settings, kis_app_key: e.target.value })}
+                          placeholder="Enter your API Key"
+                          className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-zinc-400 mb-1.5">APP SECRET</label>
+                        <input 
+                          type="password" 
+                          value={settings.kis_app_secret || ""}
+                          onChange={(e) => setSettings({ ...settings, kis_app_secret: e.target.value })}
+                          placeholder="Enter your API Secret"
+                          className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-zinc-400 mb-1.5">ACCOUNT NO (계좌번호)</label>
+                        <input 
+                          type="text" 
+                          value={settings.kis_account_no || ""}
+                          onChange={(e) => setSettings({ ...settings, kis_account_no: e.target.value })}
+                          placeholder="e.g. 12345678-01"
+                          className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 원스톱 저장 버튼 */}
                 <div className="flex justify-end pt-6 border-t border-zinc-900">
                   <button 
                     onClick={() => handleSave(false)}
@@ -370,7 +371,7 @@ export default function PersonalSettingsPage() {
                     className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 flex items-center gap-2 cursor-pointer shadow-md shadow-blue-900/30"
                   >
                     {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                    저장
+                    설정 저장 및 연동 검증
                   </button>
                 </div>
               </div>
