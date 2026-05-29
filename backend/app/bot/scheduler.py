@@ -9,6 +9,7 @@ import socket
 import httpx
 from requests.exceptions import RequestException as RequestsRequestException
 from app.core.logging import logger
+from app.core.config import settings
 from app.scanner.data_provider import fetch_ohlcv
 from app.core.telegram import send_message_async, send_daily_report_to_all_users_sync
 from app.bot.fx_cache import FXRateCache
@@ -138,7 +139,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                 sell_reason = None
                 
                 # ⭐ 지표 1. 조기 스마트 익절 (RSI 하락 다이버전스 + MACD 데드크로스)
-                if profit_rate >= 1.0 and is_smart_exit:
+                if profit_rate >= settings.MIN_SMART_EXIT_PROFIT_RATE and is_smart_exit:
                     sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
                 
                 # 지표 2. 동적 손절선 돌파
@@ -209,11 +210,19 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         if not is_us_market_open():
             log_action(db, user_id, "[BUY SKIP] US market is currently closed. No new buy orders placed.", "INFO")
         elif all_signals:
-            # 장세별 통과 커트라인 점수 분기 (상승장 80점, 하락/횡보장 90점)
-            cutoff_score = 80 if sentiment == "BULLISH" else 90
+            # 💡 [Phase 29] MAX_HOLDINGS 포트폴리오 안전 가드
+            current_holdings_count = db.query(Holding).filter(Holding.user_id == user_id).count()
+            if current_holdings_count >= settings.MAX_HOLDINGS:
+                log_action(db, user_id, f"[BUY SKIP] Max holdings limit reached ({current_holdings_count}/{settings.MAX_HOLDINGS}). Skipping new buy scans.", "INFO")
+                all_signals_to_process = []
+            else:
+                all_signals_to_process = all_signals
+
+            # 장세별 통과 커트라인 점수 분기 (상승장 80점, 하락/횡보장 92점 (기존 90점에서 보수화))
+            cutoff_score = 80 if sentiment == "BULLISH" else 92
             cached_balance_data = None # 💡 사용자별 1분 루프 내 KIS 잔고 임시 캐싱 (DDoS급 중복 조회 제거)
             
-            for s in all_signals:
+            for s in all_signals_to_process:
                 if s['signal_score'] >= cutoff_score:
                     ticker = s['ticker']
                     
@@ -271,8 +280,8 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                                 proposed_alloc_factor = 0.50 # 횡보장: 비중 50% 제한
                                 log_action(db, user_id, f"[New Entry] {ticker} scanned in NEUTRAL market. Placing 50% single defensive order.", "INFO")
 
-                    # ① 20분 쿨다운: 동일 종목 매도 후 20분간 재매수 금지 (Whipsaw 방지)
-                    cooldown_cutoff = datetime.now() - timedelta(minutes=20)
+                    # ① 동적 쿨다운: 동일 종목 매도 후 일정 시간 재매수 금지 (Whipsaw 방지)
+                    cooldown_cutoff = datetime.now() - timedelta(minutes=settings.REENTRY_COOLDOWN_MINUTES)
                     recent_sell = db.query(TradeLog).filter(
                         TradeLog.user_id == user_id,
                         TradeLog.ticker == ticker,
@@ -281,7 +290,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     ).first()
                     if recent_sell:
                         log_action(db, user_id,
-                            f"[BUY SKIP] {ticker} cooldown active — sold at {recent_sell.executed_at.strftime('%H:%M')} (20min cooldown).",
+                            f"[BUY SKIP] {ticker} cooldown active — sold at {recent_sell.executed_at.strftime('%H:%M')} ({settings.REENTRY_COOLDOWN_MINUTES}min cooldown).",
                             "INFO")
                         continue
 
@@ -316,6 +325,11 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
 
                     total_asset_usd = total_asset_krw / exchange_rate
                     cash_balance_usd = cash_balance_krw / exchange_rate
+
+                    # 💡 [Phase 29] 예수금 안전장치: MIN_CASH_BALANCE_USD 미만 시 조기 차단
+                    if cash_balance_usd < settings.MIN_CASH_BALANCE_USD:
+                        log_action(db, user_id, f"[BUY SKIP] Insufficient cash balance (${cash_balance_usd:.2f} < ${settings.MIN_CASH_BALANCE_USD:.2f}). Skipping {ticker}.", "WARNING")
+                        continue
 
                     # 기준 투자금 (총 달러 자산의 10%, 최소 $500 보장)
                     base_alloc_usd = max(500.0, total_asset_usd * 0.10)
@@ -370,8 +384,11 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                             f"Proposed Qty: {proposed_qty:.2f}"
                         ), "WARNING")
                         
-                        # 💡 1시간 동안 동일 종목 중복 실패 경고 스팸 발송 차단 가드 적용
-                        cache_key = (user_id, ticker, reason_title)
+                        # 💡 1시간 동안 중복 실패 경고 스팸 발송 차단 가드 적용
+                        if reason_title == "예수금 부족":
+                            cache_key = (user_id, "SYSTEM_INSUFFICIENT_CASH")
+                        else:
+                            cache_key = (user_id, ticker, reason_title)
                         now = time.time()
                         last_sent = WARNING_COOLDOWN_CACHE.get(cache_key, 0.0)
                         

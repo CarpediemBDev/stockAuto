@@ -104,6 +104,12 @@ class Settings:
     # Global Constants
     API_TITLE = "StockAuto API"
     VERSION = "2.0.0" # 3-Mode Architecture
+    
+    # [Phase 29] 안전 거래 가드 상수 (Safety & Cost Optimization)
+    MAX_HOLDINGS = 5
+    MIN_CASH_BALANCE_USD = 200.0
+    MIN_SMART_EXIT_PROFIT_RATE = 2.5
+    REENTRY_COOLDOWN_MINUTES = 60
 
 settings = Settings()
 logger.info(f"[*] Active Profile: {settings.PROFILE.upper()} | Trade Mode: {settings.TRADE_MODE} | Real-Trading Ready: {settings.IS_REAL}")

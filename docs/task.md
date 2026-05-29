@@ -290,3 +290,25 @@
 - [x] **[시스템 API 라우터 연동]** `router.py`에 `@router.get("/swing-predict")` 엔드포인트 개설 및 데이터 프로바이더 통합 연동
 - [x] **[프론트엔드 UI 컴포넌트 신설]** `SwingPredictorCard.tsx` Next.js 탭 스위치 기반 프리미엄 다크 카드 컴포넌트 신규 개발
 - [x] **[대시보드 통합 연동]** `Dashboard.tsx` 및 `/scanner` 페이지에 2단 탭 제어 스위치 및 스윙 예측 카드 통합 화면 이식
+
+## 🌟 [Phase 28] 역사적 백테스팅 엔진 (Historical Backtesting Engine) 및 성적 분석 실장 — 완료 [x]
+
+> **핵심 목표:** StockAuto v2.0 트레이딩 전략(레짐 스위칭, 1:2:6 피라미딩, ATR 손절/트레일링스탑, RSI-MACD 조기익절)의 역사적 수익곡선(Equity Curve) 및 MDD를 검증하는 자체 이벤트 기반 백테스팅 엔진을 구축하고 검증한다.
+
+- [x] **[백테스트 코어 개발]** `backend/app/bot/backtest_engine.py` 신설 (가상 가상잔고/포지션을 처리하는 `BacktestBroker` 및 시간 루프를 흘려보내며 매수/매도를 체뮬레이션하는 `BacktestSimulator` 구축)
+- [x] **[CLI 실행기 개발]** `backend/run_backtest.py` CLI 프로그램 구축 (yfinance 데이터를 로드하여 백테스트를 실행하고, matplotlib을 활용해 누적 수익 곡선 및 드로다운(MDD) 차트를 png 파일로 저장하는 시각화 도구 완비)
+- [x] **[FastAPI 라우터 추가]** `backend/app/bot/router_backtest.py` 엔드포인트 구축 및 `main.py` 라우터 연동 (프론트엔드 대시보드 연동을 위해 백테스트 실행 및 PnL, MDD, 거래 기록 일괄 반환 API 개설)
+- [x] **[통합 실증 검증]** 최근 30일(1분봉) 및 최근 2년(1시간봉) QQQ 레짐 모드 연동 백테스트 구동 검증 및 MDD 산출 무결성 테스트 완료
+
+## 🌟 [Phase 29] 실거래 비용 최적화 및 스마트 리스크/예수금 제어 시스템 구축
+
+> **핵심 목표:** 과도한 실거래 비용(수수료 및 환전 스프레드)을 상쇄하는 익절/쿨다운 가드를 도입하고, 예수금 부족 스팸 및 무용한 증권사 API 호출을 방지하기 위한 안전 포트폴리오 차단막을 구축한다.
+
+- [x] **[글로벌 상수 이식]** `config.py`에 포트폴리오 안전 및 비용 극복 관련 전역 제어 상수 4종 (`MAX_HOLDINGS`, `MIN_CASH_BALANCE_USD`, `MIN_SMART_EXIT_PROFIT_RATE`, `REENTRY_COOLDOWN_MINUTES`) 추가
+- [x] **[익절 및 쿨다운 세분화]** `scheduler.py` 내 스마트 조기 익절 최저 마진을 `2.5%`로 상향조정하고, 재매수 방지 쿨타임을 `60분`으로 연장하여 수수료 휩소 원천 격리
+- [x] **[포트폴리오 개수 가드]** `scheduler.py`에 최대 보유 종목 수(5개) 상한선을 도입하여, 보유 한도 초과 시 신규 매수 분석 및 API 실행 원천 스킵 가드 구현
+- [x] **[안전 예수금 가드]** `scheduler.py`에 최소 달러 예수금 가드라인($200)을 도입하여, 잔고 바닥 시 신규 진입 시도 조기 차단
+- [x] **[스팸 메시지 차단]** 예수금 부족 텔레그램 알림을 종목별에서 '계좌 전체 대표 쿨타임(1시간)'으로 구조화하여 알림 소음 100% 진압
+
+
+
