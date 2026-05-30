@@ -513,6 +513,12 @@ async def refresh_scanner_cache():
     자동매매 루프와 완전히 분리되어 Rate Limit 위험 없이 안전하게 동작합니다.
     """
     global latest_scanned_signals
+    
+    # 장 외 시간 API 비용/호출 낭비 방지 가드
+    if not is_us_market_open():
+        logger.info("[Scanner Cache] Market is closed. Skipping scan to save API quotas.")
+        return
+        
     logger.info("[Scanner Cache] Starting 10-min market scan refresh cycle...")
     try:
         signals = await scan_overseas_market()
