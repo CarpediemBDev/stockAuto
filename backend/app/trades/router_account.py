@@ -7,6 +7,7 @@ from app.bot.broker_factory import get_broker_client
 from app.core.response import success_response
 from app.core.dependencies import get_current_user
 from app.core.models import User, Holding, TradeLog, ActionLog
+from app.core.config import settings as app_settings
 
 router = APIRouter(tags=["Account"])
 
@@ -93,8 +94,15 @@ async def force_liquidate(
                 filled_qty = res.get("filled_qty", h.quantity)
                 order_no = res.get("order_no", "LIQUIDATE_MANUAL")
                 
-                realized_pnl = (filled_price - h.avg_price) * filled_qty
-                calc_return_rate = ((filled_price - h.avg_price) / h.avg_price) * 100 if h.avg_price > 0 else 0.0
+                # 💡 [수수료 정밀 반영] 스케줄러의 자동 매도와 동일한 수수료 공식 적용
+                buy_gross = h.avg_price * filled_qty
+                buy_fee = buy_gross * app_settings.KIS_FEE_RATE
+                sell_gross = filled_price * filled_qty
+                sell_fee = sell_gross * app_settings.KIS_FEE_RATE
+                sec_fee = sell_gross * app_settings.SEC_FEE_RATE
+                
+                realized_pnl = sell_gross - buy_gross - buy_fee - sell_fee - sec_fee
+                calc_return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
                 
                 db.add(TradeLog(
                     user_id=current_user.id,
@@ -118,4 +126,5 @@ async def force_liquidate(
             message=f"보유 중인 {len(liquidated_tickers)}개 종목({', '.join(liquidated_tickers)})이 모두 시장가 일괄 청산되었습니다."
         )
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=f"일괄 청산 과정 중 오류가 발생했습니다: {str(e)}")

@@ -153,7 +153,7 @@ async def scan_market_expert() -> list:
                             if not prev_day_data.empty:
                                 prev_day_close = float(prev_day_data['Close'].iloc[-1])
                                 premarket_gap_pct = (first_open_today / prev_day_close - 1) * 100
-                    except:
+                    except Exception:
                         premarket_gap_pct = 0.0
                     
                     s1_score = 0
@@ -189,7 +189,8 @@ async def scan_market_expert() -> list:
                             "momentum_candles": momentum_candles,
                             "premarket_gap_pct": round(premarket_gap_pct, 2),
                         })
-                except: continue
+                except Exception:
+                    continue
             await asyncio.sleep(0.1)
         except Exception as e:
             print(f"[Stage 1] Error in chunk: {e}")
@@ -215,7 +216,7 @@ async def scan_market_expert() -> list:
             try:
                 # yfinance Ticker 날것 호출을 데이터 프로바이더로 전면 격리
                 return await fetch_ticker_news(ticker)
-            except:
+            except Exception:
                 return []
 
         news_tasks = [fetch_news_data(t) for t in candidate_tickers]
@@ -335,7 +336,7 @@ async def scan_market_expert() -> list:
                         score_card.append({"factor": "장초반 5분봉 고가 상방 대량 돌파 (ORB)", "score": 20, "passed": True})
                         final_score += 20
                 else:
-                    final_score = 0
+                    final_score = cand['s1_score']  # 💡 S1 점수를 보존 (기존: 0으로 리셋하여 Stage 1 분석 결과가 폐기됨)
                     if is_obv_accumulation:
                         score_card.append({"factor": "세력 OBV 매집 다이버전스 골든크로스", "score": 30, "passed": True})
                         final_score += 30

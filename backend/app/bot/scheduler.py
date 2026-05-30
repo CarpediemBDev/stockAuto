@@ -5,6 +5,7 @@ from app.core.models import TradeLog, Holding, ActionLog, UserSettings
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import asyncio
+import threading
 import socket
 import httpx
 from requests.exceptions import RequestException as RequestsRequestException
@@ -33,6 +34,7 @@ scheduler = BackgroundScheduler()
 
 
 is_processing = False # 중복 실행 방지용 플래그
+_processing_lock = threading.Lock()  # 💡 is_processing 레이스 컨디션 방지용 스레드 락
 latest_scanned_signals = [] # 글로벌 실시간 마켓 스캔 시그널 캐시용
 
 # 💡 KIS API 동시성 제어 세마포어 (초당 최대 15회 호출로 자동 제한 - 429 차단 철벽 방어)
@@ -315,7 +317,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                                 log_action(db, user_id, f"[New Entry] {ticker} scanned in NEUTRAL market. Placing 50% single defensive order.", "INFO")
 
                     # ① 동적 쿨다운: 동일 종목 매도 후 일정 시간 재매수 금지 (Whipsaw 방지)
-                    cooldown_cutoff = datetime.now() - timedelta(minutes=settings.REENTRY_COOLDOWN_MINUTES)
+                    cooldown_cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.REENTRY_COOLDOWN_MINUTES)
                     recent_sell = db.query(TradeLog).filter(
                         TradeLog.user_id == user_id,
                         TradeLog.ticker == ticker,
@@ -522,15 +524,14 @@ async def refresh_scanner_cache():
 def scanner_cache_wrapper():
     """스캐너 캐시 갱신용 동기 래퍼 (APScheduler 호출용)"""
     try:
-        loop = asyncio.get_event_loop()
+        asyncio.run(refresh_scanner_cache())
     except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    if loop.is_running():
-        asyncio.create_task(refresh_scanner_cache())
-    else:
-        loop.run_until_complete(refresh_scanner_cache())
+        # 💡 이미 실행 중인 이벤트 루프가 있는 경우 (FastAPI/uvicorn 내부 등)
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(refresh_scanner_cache())
+        else:
+            loop.run_until_complete(refresh_scanner_cache())
 
 async def async_trading_loop():
     """
@@ -538,11 +539,11 @@ async def async_trading_loop():
     스캔은 별도 10분 주기 잡에서 수행되며, 여기서는 캐시된 시그널만 사용합니다.
     """
     global is_processing
-    if is_processing:
-        logger.info("[Scheduler] Previous loop still running. Skipping this cycle.")
-        return
-
-    is_processing = True
+    with _processing_lock:
+        if is_processing:
+            logger.info("[Scheduler] Previous loop still running. Skipping this cycle.")
+            return
+        is_processing = True
     db = SessionLocal()
     try:
         # 1. 자동매매 기동 중인 활성 유저 리스트 로드
@@ -568,15 +569,14 @@ async def async_trading_loop():
 
 def trading_loop_wrapper():
     try:
-        loop = asyncio.get_event_loop()
+        asyncio.run(async_trading_loop())
     except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    if loop.is_running():
-        asyncio.create_task(async_trading_loop())
-    else:
-        loop.run_until_complete(async_trading_loop())
+        # 💡 이미 실행 중인 이벤트 루프가 있는 경우 (FastAPI/uvicorn 내부 등)
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(async_trading_loop())
+        else:
+            loop.run_until_complete(async_trading_loop())
 
 def start_scheduler():
     if not scheduler.running:

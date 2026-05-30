@@ -528,6 +528,144 @@ export default function PersonalSettingsPage() {
             )}
           </div>
         </div>
+
+        {/* Modal 1: Real Trading Warning */}
+        {showRealWarning && (
+          <div
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center"
+            onClick={() => setShowRealWarning(false)}
+          >
+            <div
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex flex-col items-center text-center gap-4">
+                <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center">
+                  <ShieldAlert className="w-7 h-7 text-red-500" />
+                </div>
+                <h3 className="text-lg font-extrabold text-white">⚠️ 실전 트레이딩 모드 전환 확인</h3>
+                <div className="space-y-2">
+                  <p className="text-xs text-red-400 font-bold leading-relaxed">
+                    경고: 실제 현금이 투입되는 실전 모드로 전환됩니다.
+                  </p>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    실전 모드에서는 자동매매 엔진이 <strong className="text-red-400">실제 증권 계좌의 현금</strong>으로 주식을 매수/매도합니다.
+                    발생한 손실은 <strong className="text-red-400">절대 되돌릴 수 없으며</strong>, 시스템 오류 또는 알고리즘 판단 실패로 인한 금전적 피해에 대해 전적으로 본인이 책임져야 합니다.
+                  </p>
+                  <p className="text-[11px] text-amber-400/80 font-semibold leading-relaxed">
+                    충분한 백테스팅과 모의투자 검증을 완료한 후에만 진행하십시오.
+                  </p>
+                </div>
+                <div className="flex gap-3 w-full pt-2">
+                  <button
+                    onClick={() => setShowRealWarning(false)}
+                    className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-all cursor-pointer"
+                  >
+                    취소
+                  </button>
+                  <button
+                    onClick={() => handleSave(true)}
+                    className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                    실전 모드 저장
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal 2: Reset Balance Confirmation */}
+        {showResetModal && (
+          <div
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center"
+            onClick={() => setShowResetModal(false)}
+          >
+            <div
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex flex-col items-center text-center gap-4">
+                <div className="w-14 h-14 rounded-full bg-amber-500/10 flex items-center justify-center">
+                  <RefreshCw className="w-7 h-7 text-amber-500" />
+                </div>
+                <h3 className="text-lg font-extrabold text-white">가상 계좌 자산 초기화</h3>
+                <div className="space-y-2">
+                  <p className="text-xs text-red-400 font-bold leading-relaxed">
+                    ⚠️ 이 작업은 되돌릴 수 없습니다.
+                  </p>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    모의투자 계좌의 <strong className="text-red-400">모든 보유 주식</strong>, <strong className="text-red-400">거래 기록</strong>, <strong className="text-red-400">활동 로그</strong>가 영구적으로 삭제되며
+                    초기 상태로 완전히 포맷됩니다.
+                  </p>
+                </div>
+                <div className="flex gap-3 w-full pt-2">
+                  <button
+                    onClick={() => setShowResetModal(false)}
+                    className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-all cursor-pointer"
+                  >
+                    취소
+                  </button>
+                  <button
+                    onClick={handleResetBalance}
+                    disabled={isDangerActionLoading}
+                    className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    {isDangerActionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                    초기화 실행
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal 3: Force Liquidate Confirmation */}
+        {showLiquidateModal && (
+          <div
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center"
+            onClick={() => setShowLiquidateModal(false)}
+          >
+            <div
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex flex-col items-center text-center gap-4">
+                <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center">
+                  <Trash2 className="w-7 h-7 text-red-500" />
+                </div>
+                <h3 className="text-lg font-extrabold text-white">보유 주식 전량 강제 청산</h3>
+                <div className="space-y-2">
+                  <p className="text-xs text-red-400 font-bold leading-relaxed">
+                    ⚠️ 이 작업은 되돌릴 수 없습니다.
+                  </p>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    현재 보유 중인 <strong className="text-red-400">모든 종목</strong>이 <strong className="text-red-400">시장가로 즉시 매도</strong>됩니다.
+                    시장 상황에 따라 예상보다 불리한 가격에 체결될 수 있으며, 일단 실행되면 절대 되돌릴 수 없습니다.
+                  </p>
+                </div>
+                <div className="flex gap-3 w-full pt-2">
+                  <button
+                    onClick={() => setShowLiquidateModal(false)}
+                    className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-all cursor-pointer"
+                  >
+                    취소
+                  </button>
+                  <button
+                    onClick={handleForceLiquidate}
+                    disabled={isDangerActionLoading}
+                    className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    {isDangerActionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    전량 청산 실행
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
