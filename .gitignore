@@ -34,19 +34,7 @@ frontend/.env*
 **/__pycache__/
 
 
-# Core Strategy & Implementation Docs (Whitelist ONLY specified documents)
-docs/*.md
-!docs/README.md
-!docs/SYSTEM_MANUAL.md
-!docs/REACT_GUIDE.md
-!docs/RULES.md
-!docs/AGENTS.md
-!docs/task.md
-!docs/implementation_plan.md
-!docs/NEXTJS_GUIDE.md
-!docs/SCHEMA.md
-!docs/walkthrough.md
-!docs/mistake_note.md
+
 # Private workspace logs
 docs/private_*
 

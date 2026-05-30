@@ -333,3 +333,29 @@
 
 
 
+
+
+# 🔧 시니어 코드 리뷰 지적사항 일괄 수정 (2026-05-30)
+
+## 🔴 CRITICAL
+
+- [ ] **1. 설정 페이지 확인 모달 3개 복원** — `showRealWarning`, `showResetModal`, `showLiquidateModal` 렌더링 JSX 추가
+- [ ] **2. 타임존 불일치 수정** — `datetime.utcnow` → `datetime.now(timezone.utc)` 통일 + 스케줄러 쿨다운 비교 UTC 정합성
+- [ ] **3. `is_processing` 레이스 컨디션 방지** — `threading.Lock()` 추가
+- [ ] **4. KIS 브로커 체결 확인 로직** — `check_order_status()` 폴링 기반 체결 확인 추가
+
+## 🟠 HIGH
+
+- [ ] **5. `force-liquidate` 수수료 반영 + 롤백 추가** — KIS_FEE_RATE/SEC_FEE_RATE 차감 및 except에 db.rollback()
+- [ ] **6. 비상승장 S1 점수 반영 수정** — `final_score = 0` → `final_score = cand['s1_score']`
+- [ ] **7. asyncio 이벤트 루프 안정화** — `asyncio.run()` 사용으로 통일
+- [ ] **8. bare except → except Exception + 로깅** — scanner.py 내 3곳 수정
+
+## 📝 Documentation (2026-05-30)
+
+- [x] **9. 스윙 예측 알고리즘 문서화** — FILTER.md, TRADING_SCORECARD.md, SYSTEM_MANUAL.md 에 스윙 파이프라인 및 배점표 업데이트
+
+## 🐛 Bug Fixes (2026-05-30)
+
+- [x] **10. 스윙 예측 역배열 페널티 완화** (`swing_predictor.py`) — 하락장 종목 완전 소멸 방지
+- [x] **11. 스윙 감시 풀 확대** (`router.py`) — 대형주 12개 한정 스캔 풀을 시장 주도주 풀로 확장

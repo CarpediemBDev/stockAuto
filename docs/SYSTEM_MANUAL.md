@@ -254,7 +254,7 @@ graph TD
 
 - **`watchlist/`**: 관심종목 도메인. 종목 추가/삭제 및 신규 주식 등록 시 한글 번역 자동 연동 자가학습 API(`router.py`).
 
-- **`scanner/`**: 스캐너 도메인. 최신 봇 시그널 제공 API(`router.py`) 및 QQQ 나스닥 지수 기반의 2-Stage expert 필터 핵심 스캔 모듈(`scanner.py`).
+- **`scanner/`**: 스캐너 도메인. 최신 봇 시그널 제공 API(`router.py`), QQQ 나스닥 지수 기반의 단타 돌파 전용 2-Stage expert 필터 모듈(`scanner.py`), 그리고 120일 일봉 기반으로 내일의 급등주를 예측하는 마크 미너비니 VCP 패턴 기반의 스윙 예측 모듈(`swing_predictor.py`)을 포함하는 **투트랙(Two-track) 스캐닝 엔진**입니다.
 
 - **`bot/`**: 자동매매 제어 도메인. 봇 구동 제어 API(`router.py`), 하이브리드 트레이딩 메인 루프 스케줄러(`scheduler.py`), 한국투자증권 API 클라이언트(`kis_api.py`), 공통 추상 브로커 인터페이스(`base_broker.py`), 한투 래퍼 브로커(`kis_broker.py`), 가상 예수금 및 실시간 가격 연동 시뮬레이터 브로커(`simulated_broker.py`), 이들을 설정에 따라 동적으로 생산 및 반환하는 팩토리(`broker_factory.py`).
 

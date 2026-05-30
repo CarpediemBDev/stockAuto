@@ -42,7 +42,15 @@ async def get_swing_prediction(
     user_tickers = [item.ticker for item in watchlist_items]
     
     # 2. 시장 주도 우량주 기본 수령 풀과 결합하여 감시 리스트 셋업 (De-duplication)
-    default_pool = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "NFLX", "AMD", "PLTR", "SMCI"]
+    # 스캔 결과 소멸 현상(감시 풀 부족)을 막기 위해 12개에서 약 60여 개의 주도주/변동성 종목으로 확대 (Task 11)
+    default_pool = [
+        "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "NFLX", "AMD", 
+        "PLTR", "SMCI", "ARM", "QCOM", "MU", "INTC", "ASML", "TSM", "LRCX", "AMAT", 
+        "COIN", "MSTR", "MARA", "RIOT", "HOOD", "SQ", "PYPL", "SOFI", "AFRM", "UPST", 
+        "CRWD", "PANW", "ZS", "NET", "SNOW", "DDOG", "NOW", "CRM", "ADBE", "INTU", 
+        "LLY", "NVO", "V", "MA", "JPM", "WMT", "COST", "HD", "UBER", "ABNB",
+        "RIVN", "LCID", "CVNA", "ROKU", "DOCU", "ZM", "GME", "AMC", "DKNG", "PENN"
+    ]
     combined_tickers = list(set(user_tickers + default_pool))
     
     # 3. 누적 일봉 스윙 예측 모듈 기동

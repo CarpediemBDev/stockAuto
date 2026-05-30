@@ -85,8 +85,9 @@ async def analyze_swing_setup(ticker: str) -> dict:
         total_score = vcp_score + vud_score + obv_score + squeeze_score
         
         # 역배열/하락 추세 종목은 2차 패널티 부여 (상승 추세가 아닌 횡보/하락장에서의 매집은 기회비용 소모)
+        # 잦은 휩소나 종목 소멸을 막기 위해 기존 -35점에서 -15점으로 완화 (Task 10)
         if not is_bullish_trend:
-            total_score = max(0.0, total_score - 35.0)
+            total_score = max(0.0, total_score - 15.0)
 
         # 최종 가중점수 반올림
         total_score = round(total_score, 1)
