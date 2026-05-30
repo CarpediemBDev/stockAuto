@@ -264,8 +264,8 @@ export default function ReportPage() {
               ✕
             </button>
 
-            {/* 거래 내역 테이블 로드 (모달 모드로 테두리 투명화) */}
-            <div className="overflow-y-auto pr-1">
+            {/* 거래 내역 테이블 로드 (단일 팝업 디자인으로 통합) */}
+            <div className="flex-1 mt-2">
               <TradeLogs logs={logs} isModalMode={true} />
             </div>
           </div>

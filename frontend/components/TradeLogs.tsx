@@ -20,20 +20,19 @@ interface TradeLogsProps {
 export function TradeLogs({ logs, isModalMode = false }: TradeLogsProps) {
   return (
     <div className={isModalMode 
-      ? "bg-transparent w-full" 
-      : "bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-2xl overflow-hidden shadow-xl mt-6"
+      ? "bg-transparent w-full h-[75vh] flex flex-col" 
+      : "bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-2xl overflow-hidden shadow-xl flex flex-col h-[75vh]"
     }>
-      <div className={`p-6 border-b border-zinc-800 flex justify-between items-center ${isModalMode ? 'bg-transparent px-0 pt-0' : 'bg-zinc-950/20'}`}>
+      <div className={`shrink-0 p-6 border-b border-zinc-800 flex justify-between items-center ${isModalMode ? 'bg-transparent px-0 pt-0' : 'bg-zinc-950/20'}`}>
         <h3 className="text-lg font-semibold text-white tracking-tight flex items-center gap-2">
           <span className="w-1.5 h-4 bg-emerald-500 rounded-full animate-pulse"></span>
           실시간 체결 로그 (Execution Logs)
         </h3>
-        <span className="text-[10px] text-zinc-500 font-medium">실시간 동기화 중</span>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-auto flex-1 min-h-0">
         <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-zinc-950/40 text-zinc-400 text-xs tracking-wider uppercase border-b border-zinc-800/50">
+          <thead className="sticky top-0 z-20 bg-zinc-900">
+            <tr className="text-zinc-400 text-xs tracking-wider uppercase">
               <th className="p-4 font-semibold">Time</th>
               <th className="p-4 font-semibold">Ticker</th>
               <th className="p-4 font-semibold">Type</th>
@@ -83,7 +82,7 @@ export function TradeLogs({ logs, isModalMode = false }: TradeLogsProps) {
                     </td>
                     <td className="p-4 text-right">
                       {isSell && hasPnL ? (
-                        <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold ${
+                        <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold whitespace-nowrap ${
                           isProfit 
                             ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
                             : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'

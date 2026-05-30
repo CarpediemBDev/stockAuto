@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: dark;
   --background: #09090b;
   --foreground: #ededed;
 }
@@ -19,6 +20,22 @@ body {
   background-image: radial-gradient(circle at 50% 0%, #1e1b4b 0%, var(--background) 70%);
   min-height: 100vh;
   background-attachment: fixed;
+}
+
+/* 커스텀 다크 스크롤바 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(82, 82, 91, 0.5); /* zinc-600 */
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(113, 113, 122, 0.8); /* zinc-500 */
 }
 
 /* 스크롤바 숨기기 유틸리티 */
