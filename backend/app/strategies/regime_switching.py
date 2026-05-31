@@ -9,7 +9,7 @@ class RegimeSwitching(BaseStrategy):
     """
     
     def __init__(self):
-        super().__init__(name="👑 마스터 레짐스위칭 (Regime Switching)")
+        super().__init__(name="⚙️ 마스터 레짐스위칭 (Regime Switching)")
 
     def calculate_score(self, row, regime: str, is_entry: bool = True) -> float:
         close = self._safe_get(row, 'Close')

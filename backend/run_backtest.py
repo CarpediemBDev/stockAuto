@@ -34,7 +34,7 @@ async def main():
     print(f" • 검증 기간   : {args.start} ~ {args.end}")
     print(f" • 타임프레임  : {args.interval}")
     print(f" • 시작 예수금 : ${args.cash:,.2f} USD")
-    print(f" • 적용 전략   : {'시니어 단순화 (Strategy S)' if args.strategy == 'senior_simple' else '11대 복합 가감점 (Strategy C)'}")
+    print(f" • 적용 전략   : {'🥈 시니어 단순화 (Strategy S)' if args.strategy == 'senior_simple' else '🥇 전략 C (11대 복합)'}")
     print("--------------------------------------------------------------------------")
     print(" ⏳ 1단계: 역사적 OHLCV 시세 및 QQQ 지수 데이터 병렬 다운로드 중...")
     

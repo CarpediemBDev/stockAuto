@@ -27,20 +27,20 @@ async def main():
     print("==========================================================================\n")
 
     strategies = {
-        "strategy_a": "🔴 전략 A (태초 10% 비중 + 하드 컷)",
-        "strategy_b": "🟠 전략 B (채점 분리 + 40% 비중 + 1% 익절)",
-        "strategy_c": "🏆 전략 C (익절 2.5% + 불타기 완화)",
-        "exploded_c": "🔥 전략 C-폭발형 (즉시 풀비중 + 넓은 손절선)",
-        "senior_simple": "시니어 단순화 (Strategy S)",
-        "qullamaggie": "쿨라매기 돌파 (Qullamaggie)",
-        "obv_only": "차트픽 OBV 매집 (OBV Only)",
-        "rsi_bb_only": "RSI 볼린저밴드 (RSI BB Only)",
-        "ema_only": "EMA 이평정배열 (EMA Only)",
-        "vwap_only": "VWAP 세력지지선 (VWAP Only)",
-        "orb_only": "토비크라벨 ORB (ORB Only)",
-        "rsi2_connors": "래리코너스 RSI 2 (RSI 2 Only)",
-        "bb_squeeze": "존카터 BB스퀴즈 (TTM Squeeze)",
-        "regime_switching": "마스터 레짐스위칭 (Regime Switching)"
+        "strategy_a": "🥉 전략 A (태초 v1.0)",
+        "strategy_b": "🧪 전략 B (실험용)",
+        "strategy_c": "🥇 전략 C (11대 복합)",
+        "exploded_c": "🧪 전략 C-폭발형 (즉시 풀비중)",
+        "senior_simple": "🥈 시니어 단순화 (Strategy S)",
+        "qullamaggie": "⚙️ 쿨라매기 돌파 (Qullamaggie)",
+        "obv_only": "⚙️ 차트픽 OBV 매집 (OBV Only)",
+        "rsi_bb_only": "⚙️ RSI 볼린저밴드 (RSI BB Only)",
+        "ema_only": "⚙️ EMA 이평정배열 (EMA Only)",
+        "vwap_only": "⚙️ VWAP 세력지지선 (VWAP Only)",
+        "orb_only": "⚙️ 토비크라벨 ORB (ORB Only)",
+        "rsi2_connors": "⚙️ 래리코너스 RSI 2 (RSI 2 Only)",
+        "bb_squeeze": "⚙️ 존카터 BB스퀴즈 (TTM Squeeze)",
+        "regime_switching": "⚙️ 마스터 레짐스위칭 (Regime Switching)"
     }
 
     results = []

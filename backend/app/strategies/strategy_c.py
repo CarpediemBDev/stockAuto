@@ -11,7 +11,7 @@ class StrategyC(BaseStrategy):
     - 보유 중 필수 필터 붕괴 시 칼손절 대신 -15점 소프트 감점 적용
     """
     
-    def __init__(self, name: str = "🏆 전략 C (익절 2.5% + 불타기 완화)"):
+    def __init__(self, name: str = "🥇 전략 C (11대 복합)"):
         super().__init__(name=name)
         self.base_allocation_pct = 0.40
         self.min_allocation_usd = 2000.0

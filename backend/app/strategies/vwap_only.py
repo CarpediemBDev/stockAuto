@@ -8,7 +8,7 @@ class VwapOnly(BaseStrategy):
     """
     
     def __init__(self):
-        super().__init__(name="VWAP 세력지지선 (VWAP Only)")
+        super().__init__(name="⚙️ VWAP 세력지지선 (VWAP Only)")
 
     def calculate_score(self, row, regime: str, is_entry: bool = True) -> float:
         close = self._safe_get(row, 'Close')

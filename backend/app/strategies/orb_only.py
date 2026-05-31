@@ -7,7 +7,7 @@ class OrbOnly(BaseStrategy):
     """
     
     def __init__(self):
-        super().__init__(name="토비크라벨 ORB (ORB Only)")
+        super().__init__(name="⚙️ 토비크라벨 ORB (ORB Only)")
 
     def calculate_score(self, row, regime: str, is_entry: bool = True) -> float:
         close = self._safe_get(row, 'Close')

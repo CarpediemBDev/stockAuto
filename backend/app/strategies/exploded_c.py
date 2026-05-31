@@ -10,7 +10,8 @@ class ExplodedC(StrategyC):
     """
     
     def __init__(self):
-        super().__init__(name="🔥 전략 C-폭발형 (즉시 풀비중 + 넓은 손절선)")
+        super().__init__()
+        self.name = "🧪 전략 C-폭발형"
 
     def get_initial_entry_factor(self, regime: str) -> float:
         return 1.0  # 정찰병 15% 단계를 과감히 생략하고 즉시 100% 비중 진입

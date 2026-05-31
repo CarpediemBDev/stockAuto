@@ -8,7 +8,7 @@ class Qullamaggie(BaseStrategy):
     """
     
     def __init__(self):
-        super().__init__(name="쿨라매기 돌파 (Qullamaggie)")
+        super().__init__(name="⚙️ 쿨라매기 돌파 (Qullamaggie)")
 
     def calculate_score(self, row, regime: str, is_entry: bool = True) -> float:
         close = self._safe_get(row, 'Close')

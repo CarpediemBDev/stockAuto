@@ -10,7 +10,8 @@ class StrategyB(StrategyC):
     """
     
     def __init__(self):
-        super().__init__(name="🟠 전략 B (채점 분리 + 40% 비중 + 1% 익절)")
+        super().__init__()
+        self.name = "🧪 전략 B (실험용)"
         self.min_smart_exit_profit = 1.0  # 1.0% 조기 익절 마진
 
     def get_pyramid_trigger(self, stage: int) -> float:

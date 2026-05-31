@@ -8,7 +8,7 @@ class BbSqueeze(BaseStrategy):
     """
     
     def __init__(self):
-        super().__init__(name="존카터 BB스퀴즈 (TTM Squeeze)")
+        super().__init__(name="⚙️ 존카터 BB스퀴즈 (TTM Squeeze)")
 
     def calculate_score(self, row, regime: str, is_entry: bool = True) -> float:
         close = self._safe_get(row, 'Close')

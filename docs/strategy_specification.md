@@ -1,4 +1,4 @@
-# 🏆 StockAuto v2.0 천하통일 트레이딩 전략 명세서 (Trading Strategy)
+# 🥇 StockAuto v2.0 천하통일 트레이딩 전략 명세서 (Trading Strategy)
 
 본 문서는 StockAuto 시스템의 **공식 트레이딩 전략 명세서**입니다. 기존 v1.0의 하이브리드 매도 및 탈출 엔진의 뼈대를 고스란히 보존하면서, 11대 핵심 투자 대가 기법(8대 유튜브 기법 + 3대 추가 단타 기법)을 **'단일 엔진 QQQ 레짐 스위칭'** 구조로 완벽히 흡수·통합하여 새로 개편되었습니다.
 
@@ -8,7 +8,7 @@
 
 우리 프로젝트의 치열한 빌드업 과정과 정밀한 기술적 성장을 기록하기 위해, 버전별 매매 전략의 패러다임 변화를 일목요연하게 비교한 진화표입니다.
 
-| 비교 항목 | 🛡️ StockAuto v1.0 | 🏆 StockAuto v2.0 (천하통일) | 🚀 StockAuto v2.1 (수수료 절감 최적화) | 개선 효과 |
+| 비교 항목 | 🥉 StockAuto v1.0 | 🥇 StockAuto v2.0 (천하통일) | 🥇 StockAuto v2.1 (수수료 절감 최적화) | 개선 효과 |
 | :---: | :--- | :--- | :--- | :--- |
 | **장세 레짐 판단** | 이분법적 QQQ 감시 | 3-Mode 다이내믹 스위칭 | **3-Mode 다이내믹 스위칭** (동일) | - |
 | **매수 진입 장벽** | 일괄 80점 컷오프 | 상승장 80점 / 약세장 90점 | **상승장 85점 / 약세장 95점** (상향) | 잦은 뇌동 및 하위권 종목 진입을 억제하여 수수료 지출 최소화 |
@@ -96,6 +96,34 @@
 
 ---
 
-## 🗺️ 5. 전략 맵 및 채점 상세 참조
-*   **11대 기법 소스코드 매핑 정보:** [strategy_map.md](file:///d:/dev/workspace/stockAuto/docs/strategy_map.md)
-*   **장세별 다이내믹 채점 점수판:** [strategy_scorecard.md](file:///d:/dev/workspace/stockAuto/docs/strategy_scorecard.md)
+## 🧩 5. 독립 실행형 개별 전략 명세 (Standalone Strategies)
+
+객체 지향 전략 패턴(Strategy Pattern) 도입에 따라, 통합 완전체인 `Strategy C (complex)` 외에 각각의 기법을 단독으로 구동하여 실거래 및 백테스트에 적용할 수 있는 독립 실행형 전략들이 함께 설계 및 구현되었습니다.
+
+### A. 🥈 시니어 단순화 전략 (SeniorSimple - Strategy S)
+* **목적**: 복잡한 다자택일형 가감점 배점표(85~95점 컷오프)의 기술적 노이즈를 완전 걷어내고, 시니어가 직관적으로 판단할 수 있는 핵심 지표 조합으로만 기동되는 고안정성 단순화 전략입니다.
+* **진입(Entry) 규칙**:
+  * **상승장 (BULLISH)**: 토비 크라벨 ORB 시가 돌파
+    * 조건: `현재가 > 시가` 이고 `현재가 >= VWAP` 이며 `RVOL(상대거래량) >= 1.1` 이고 `EMA 9 > EMA 20 정배열`일 때 즉시 100점(STRONG_BUY) 진입.
+  * **하락/횡보장 (BEARISH/NEUTRAL)**: RSI 볼밴 극점 반등 + OBV 세력 매집
+    * 조건: 5분봉상 RSI 선이 자체 볼린저 밴드 하단을 하향 이탈(`is_rsi_bb_extreme`=True)하고, 일봉 기준 `OBV 매집 다이버전스 > 0`일 때 즉시 100점(STRONG_BUY) 진입.
+* **보유 및 청산(Holding & Exit) 규칙**:
+  * **상승장**: `현재가 >= VWAP` 또는 `EMA 9 > EMA 20` 유지 시 100점 홀딩, 조건 이탈 시 즉시 청산(30점).
+  * **하락/횡보장**: `RSI >= 40.0` 또는 `현재가 > EMA 9` 유지 시 100점 홀딩, 조건 이탈 시 즉시 청산(30점).
+
+### B. ⚙️ 단독 기술형 전략 (Standalone Technical Strategies)
+1. **쿨라매기 돌파 (`Qullamaggie`)**
+   * **진입**: 주가가 52주 최고가 대비 이격 -2.0% 이내에 근접(`is_near_52w_high` = True)하고, 최근 일봉 기준 3일 연속 거래량이 실린 강세 양봉(`momentum_candles` = True) 형성 시 즉시 진입.
+   * **청산**: 단기 9일/20일선 정배열(`EMA 9 > EMA 20`) 붕괴 시 즉시 시장가 전량 청산.
+2. **존 카터 BB 스퀴즈 (`BbSqueeze`)**
+   * **진입**: 볼린저 밴드가 켈트너 채널 내에 완전히 응축되는 횡보 압축 구간(Squeeze)을 겪은 후, 상방을 뚫고 튀어 오르는 시점(`is_squeeze_breakout` = True)에 즉시 추세 탑승.
+   * **청산**: 단기 생명선인 `EMA 9`선 아래로 주가가 하향 붕괴 시 즉시 전량 청산.
+3. **래리 코너스 RSI 2 (`Rsi2Connors`)**
+   * **진입**: QQQ 상승장 레짐 하에서 단기 과매도가 극대화되어 RSI 2일선이 10 미만(`RSI 2 < 10.0`)으로 폭락할 때 역추세 스나이핑 진입.
+   * **청산**: 주가가 급반등하여 5일선(`EMA 5`)을 넘었다가 다시 아래로 꺾일 때(`현재가 < EMA 5`) 즉시 타이트하게 전량 익절.
+
+---
+
+## 🗺️ 6. 전략 맵 및 채점 상세 참조
+* **11대 기법 소스코드 매핑 정보:** [strategy_map.md](file:///d:/dev/workspace/stockAuto/docs/strategy_map.md)
+* **장세별 다이내믹 채점 점수판:** [strategy_scorecard.md](file:///d:/dev/workspace/stockAuto/docs/strategy_scorecard.md)

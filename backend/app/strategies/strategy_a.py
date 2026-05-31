@@ -10,7 +10,7 @@ class StrategyA(BaseStrategy):
     """
     
     def __init__(self):
-        super().__init__(name="🔴 전략 A (태초 10% 비중 + 하드 컷)")
+        super().__init__(name="🥉 전략 A (태초 v1.0)")
         self.base_allocation_pct = 0.10  # 10% 소액 비중
         self.min_allocation_usd = 0.0    # 최소 투자 하한 없음
         self.min_smart_exit_profit = 999.0 # 스마트 익절 비활성화 (999% 도달 불가)

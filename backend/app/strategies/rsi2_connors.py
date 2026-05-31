@@ -8,7 +8,7 @@ class Rsi2Connors(BaseStrategy):
     """
     
     def __init__(self):
-        super().__init__(name="래리코너스 RSI 2 (RSI 2 Only)")
+        super().__init__(name="⚙️ 래리코너스 RSI 2 (RSI 2 Only)")
         self.min_smart_exit_profit = 1.0  # 1.0% 수준의 아주 짧은 조기 청산 마진 허용
 
     def calculate_score(self, row, regime: str, is_entry: bool = True) -> float:

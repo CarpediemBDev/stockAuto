@@ -8,7 +8,7 @@ class RsiBbOnly(BaseStrategy):
     """
     
     def __init__(self):
-        super().__init__(name="RSI 볼린저밴드 (RSI BB Only)")
+        super().__init__(name="⚙️ RSI 볼린저밴드 (RSI BB Only)")
 
     def calculate_score(self, row, regime: str, is_entry: bool = True) -> float:
         close = self._safe_get(row, 'Close')

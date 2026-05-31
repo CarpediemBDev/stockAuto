@@ -7,7 +7,7 @@ class EmaOnly(BaseStrategy):
     """
     
     def __init__(self):
-        super().__init__(name="EMA 이평정배열 (EMA Only)")
+        super().__init__(name="⚙️ EMA 이평정배열 (EMA Only)")
 
     def calculate_score(self, row, regime: str, is_entry: bool = True) -> float:
         close = self._safe_get(row, 'Close')
