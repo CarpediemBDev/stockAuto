@@ -87,27 +87,32 @@ class MultiStrategyManager:
                 # 레거시 일반 종목의 경우 기본적으로 마스터 레짐스위칭 슬롯에 가산
                 slot_stock_values["regime_switching"] += qty * price
                 
-        # 2. 실시간 레짐 수위 조절 장치 (Regime Sluice) 동적 비중 산출
+        # 2. 50:50 엄격 격리 지분에 기반한 수학적 보존 분배 공식 적용
         slot_allocations = {}
+        
+        # 각 슬롯별 자본 배정(Allocation) 지분 가중치 설정 (언제나 50:50 격리)
+        # 하락장이라고 해서 지분 자체가 증발하지 않도록 weight는 항상 0.50 고정
+        slot_weights = {
+            "episodic_pivot": 0.50,
+            "regime_switching": 0.50
+        }
+        
+        # 총 가중치 합산 (무오류 처리를 위해 분모 계산)
+        total_weight = sum(slot_weights.values())
+        denom_weight = total_weight if total_weight > 0 else 1.0
+        
         for slot_key, cfg in self.SLOTS.items():
-            if sentiment == "BULLISH":
-                # 💡 상승장(BULLISH)일 때는 두 슬롯 모두 적극 가동하되, 엄격한 50% 격리 장벽을 사수하기 위해 한도를 각각 50%(0.50)로 제한!
-                weight = 0.50
-            else:
-                # 🛡️ 하락/횡보장(BEARISH/NEUTRAL)일 때는 철저한 방어 비중으로 차단 및 축소
-                if slot_key == "regime_switching":
-                    weight = 0.0  # 마스터 레짐스위칭 V2 자동 비활성화 (현금 100% 보호)
-                else:
-                    weight = 0.50 # 에피소딕 피벗은 50% 방어 비중으로 단독 저격
-                    
-            # 슬롯에 약정된 총 평가 자산 목표금액
-            slot_total_asset = total_asset_usd * weight
-            # 슬롯 주식 평가 가치
+            weight = slot_weights[slot_key]
+            
+            # 💡 [보존의 법칙 가드] 실제 전체 예수금을 가중치 지분 비율에 따라 정확히 1대1 비례 분배
+            # 이 공식을 통해 EP_cash + RS_cash는 항상 실제 cash_balance_usd와 100% 완벽 일치합니다!
+            slot_cash = cash_balance_usd * (weight / denom_weight)
+            
+            # 해당 슬롯의 주식 평가 가치
             slot_stock_val = slot_stock_values[slot_key]
-            # 슬롯 가용 현금 = 슬롯 총 자산 - 슬롯 주식 평가 가치
-            slot_cash = max(0.0, slot_total_asset - slot_stock_val)
-            # 계좌의 실제 가용 현금을 절대 초과하지 않도록 보수적인 이중 한도 가드 적용
-            slot_cash = min(cash_balance_usd, slot_cash)
+            
+            # 슬롯의 실시간 총 자산 가치 = 슬롯 가용 현금 + 슬롯 주식 평가 가치
+            slot_total_asset = slot_cash + slot_stock_val
             
             slot_allocations[slot_key] = {
                 "weight": weight,

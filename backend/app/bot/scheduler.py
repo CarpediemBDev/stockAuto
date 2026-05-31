@@ -121,6 +121,81 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                 db.commit()
                 log_action(db, user_id, f"[Migration Guard] Legacy holding migrated: {legacy_ticker} -> {h.ticker}", "INFO")
 
+        # 💡 [Self-Healing] 보유 종목 실시간 계좌 정합성 동기화 가드 (Holding Sync Guard)
+        # DB와 실제 증권사 계좌 보유 종목 간 유령 누락 및 수량 불일치 정화
+        try:
+            real_holdings = await safe_broker_call(broker.get_holdings)
+            db_holdings_map = {db_h.ticker: db_h for db_h in holdings}
+            real_ticker_set = set()
+            
+            for rh in real_holdings:
+                r_ticker = rh.get("ticker", "")
+                r_qty = int(rh.get("quantity", 0))
+                r_price = float(rh.get("avg_price", 0.0))
+                r_name = rh.get("ticker_name", r_ticker)
+                
+                if r_qty <= 0:
+                    continue
+                    
+                real_ticker_set.add(r_ticker)
+                
+                # 접두사가 붙은 형태(EP_ASTC, RS_ASTC)로 DB에 있는지 탐색
+                found_in_db = False
+                for slot_key, cfg in ms_manager.SLOTS.items():
+                    prefixed = ms_manager.make_prefixed_ticker(slot_key, r_ticker)
+                    if prefixed in db_holdings_map:
+                        found_in_db = True
+                        db_h = db_holdings_map[prefixed]
+                        # 수량 불일치 시 DB 동기화 강제 정화
+                        if db_h.quantity != r_qty:
+                            log_action(db, user_id, f"[Sync Guard] Quantity discrepancy fixed for {prefixed}: {db_h.quantity} -> {r_qty}", "WARNING")
+                            db_h.quantity = r_qty
+                            db.commit()
+                        break
+                
+                if not found_in_db:
+                    # DB에 유령 누락된 실제 보유 주식 발견! 자가 치료(Self-Healing) 작동
+                    last_buy = db.query(TradeLog).filter(
+                        TradeLog.user_id == user_id,
+                        TradeLog.ticker.like(f"%_{r_ticker}"),
+                        TradeLog.trade_type == "BUY"
+                    ).order_by(TradeLog.executed_at.desc()).first()
+                    
+                    target_prefixed_ticker = None
+                    if last_buy:
+                        target_prefixed_ticker = last_buy.ticker
+                    else:
+                        target_prefixed_ticker = ms_manager.make_prefixed_ticker("regime_switching", r_ticker)
+                        
+                    log_action(db, user_id, f"[Self-Healing] Phantom holding detected in account: {r_ticker} (Qty: {r_qty}). Restoring DB record as {target_prefixed_ticker}!", "ERROR")
+                    
+                    db.add(Holding(
+                        user_id=user_id,
+                        ticker=target_prefixed_ticker,
+                        ticker_name=r_name,
+                        avg_price=r_price,
+                        quantity=r_qty,
+                        highest_price=r_price,
+                        regime_mode=sentiment,
+                        buy_stage=1
+                    ))
+                    db.commit()
+            
+            # DB에는 있으나 실제 증권사 계좌에는 없는 종목 자동 청소 (장외 수동 청산 등 대응)
+            for db_h in holdings:
+                parsed = ms_manager.get_slot_by_holding_ticker(db_h.ticker)
+                if parsed:
+                    _, clean_t = parsed
+                    if clean_t not in real_ticker_set:
+                        log_action(db, user_id, f"[Self-Healing] DB Holding {db_h.ticker} does not exist in actual broker account. Sweeping legacy DB record.", "ERROR")
+                        db.delete(db_h)
+                        db.commit()
+                        
+            # 정화 후 DB holdings 최종 갱신
+            holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
+        except Exception as sync_err:
+            log_action(db, user_id, f"[Self-Healing] Failed to sync holding discrepancy: {sync_err}", "ERROR")
+
         # 💡 KIS 및 Simulated 잔고 실시간 조회 (Rate Limit 세마포어 적용)
         balance_data = await safe_broker_call(broker.get_account_balance)
         total_asset_krw = balance_data.get("total_asset", 10000000.0)
