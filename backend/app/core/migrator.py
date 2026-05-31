@@ -78,6 +78,11 @@ def seed_competitive_users():
             {"username": "admin3", "strategy": "episodic_pivot"},
             {"username": "admin4", "strategy": "qullamaggie"},
             {"username": "admin5", "strategy": "obv_only"},
+            {"username": "admin6", "strategy": "multi_slot"},
+            {"username": "admin7", "strategy": "three_slot"},
+            {"username": "admin8", "strategy": "asqs"},
+            {"username": "admin9", "strategy": "bb_squeeze"},
+            {"username": "admin10", "strategy": "rsi2_connors"},
         ]
         
         for comp in competitors:

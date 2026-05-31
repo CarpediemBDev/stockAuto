@@ -43,7 +43,8 @@ class MultiStrategyManager:
             "strategy_a": "SA_",
             "strategy_b": "SB_",
             "strategy_c": "SC_",
-            "exploded_c": "XC_"
+            "exploded_c": "XC_",
+            "asqs": "ASQS_"
         }
         return prefix_map.get(strategy_type, "ST_")
 
@@ -63,7 +64,8 @@ class MultiStrategyManager:
             "strategy_a": "전략 A (태초 v1.0)",
             "strategy_b": "전략 B (실험용)",
             "strategy_c": "전략 C (11대 복합)",
-            "exploded_c": "전략 C-폭발형 (즉시 풀비중)"
+            "exploded_c": "전략 C-폭발형 (즉시 풀비중)",
+            "asqs": "ASQS 돌파 (ASQS Breakout)"
         }
         return name_map.get(strategy_type, f"단일 전략 ({strategy_type})")
 
@@ -84,6 +86,28 @@ class MultiStrategyManager:
                 },
                 "regime_switching": {
                     "weight": 0.50,
+                    "prefix": "RS_",
+                    "name": "마스터 레짐스위칭 V2",
+                    "strategy_key": "regime_switching"
+                }
+            }
+        elif strategy_type in ["three_slot", "multi_slot_3"]:
+            # 3슬롯 분할 모드 (EP 30% : ASQS 30% : RS 40%)
+            self.SLOTS = {
+                "episodic_pivot": {
+                    "weight": 0.30,
+                    "prefix": "EP_",
+                    "name": "에피소딕 피벗 (Episodic Pivot)",
+                    "strategy_key": "episodic_pivot"
+                },
+                "asqs": {
+                    "weight": 0.30,
+                    "prefix": "ASQS_",
+                    "name": "ASQS 돌파 (ASQS Breakout)",
+                    "strategy_key": "asqs"
+                },
+                "regime_switching": {
+                    "weight": 0.40,
                     "prefix": "RS_",
                     "name": "마스터 레짐스위칭 V2",
                     "strategy_key": "regime_switching"

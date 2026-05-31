@@ -218,9 +218,15 @@ export function AccountBalance({
               <div>
                 <h3 className="text-lg font-black text-white tracking-tight flex items-center gap-2.5">
                   <ShieldAlert size={20} className="text-indigo-400" />
-                  전략 격리 통합 자산 원장 (Unified Strategy Asset Ledger)
+                  {walletAllocations.length === 1 
+                    ? `${walletAllocations[0].name} 실시간 자산 원장 (Strategy Asset Ledger)` 
+                    : "전략 격리 통합 자산 원장 (Unified Strategy Asset Ledger)"}
                 </h3>
-                <p className="text-[11px] text-zinc-400 mt-0.5">대결에 가동 중인 각 전략의 실시간 예수금 및 주식 평가 지분 비율을 감시하는 자산 원장입니다.</p>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  {walletAllocations.length === 1 
+                    ? `가동 중인 ${walletAllocations[0].name} 전략의 실시간 예수금 및 주식 평가 지분 비율을 모니터링하는 자산 원장입니다.` 
+                    : "대결에 가동 중인 각 전략의 실시간 예수금 및 주식 평가 지분 비율을 감시하는 자산 원장입니다."}
+                </p>
               </div>
             </div>
 
