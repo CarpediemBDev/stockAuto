@@ -234,11 +234,11 @@ export function AccountBalance({
                   </div>
                 </div>
                 <div className="relative group/tooltip cursor-help">
-                  <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 uppercase tracking-wide">
-                    비중 50% 격리중 ℹ️
+                  <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 uppercase tracking-wide animate-pulse">
+                    비중 50% 가동중 ℹ️
                   </span>
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 bg-zinc-950 border border-zinc-800 text-[10px] text-zinc-300 rounded-xl opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity duration-200 z-50 shadow-2xl leading-normal text-left font-normal normal-case">
-                    총 자산의 50% 자금을 독점 분배받아 개별 변동성 돌파 매매전략(EP) 전용으로 격리 운용하며, 나머지 50% 비중은 RS 슬롯에 할당됩니다.
+                    총 자산의 50% 자금을 배정받아 개별 변동성 돌파 매매전략(EP)으로 상시 가동 중이며, 나머지 50% 비중은 RS 슬롯에 할당됩니다.
                   </div>
                 </div>
               </div>
@@ -360,15 +360,15 @@ export function AccountBalance({
                   <span className={cn(
                     "text-[9px] font-extrabold px-1.5 py-0.5 rounded border uppercase tracking-wide",
                     regime === "BULLISH" 
-                      ? "bg-purple-500/15 text-purple-400 border-purple-500/20" 
-                      : "bg-zinc-800 text-zinc-500 border-zinc-700/30"
+                      ? "bg-purple-500/15 text-purple-400 border-purple-500/20 animate-pulse" 
+                      : "bg-amber-500/15 text-amber-400 border-amber-500/20"
                   )}>
-                    {regime === "BULLISH" ? "비중 50% 가동중 ℹ️" : "비중 50% 차단됨 ℹ️"}
+                    {regime === "BULLISH" ? "비중 50% 가동중 ℹ️" : "비중 50% 격리중 🛡️"}
                   </span>
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 bg-zinc-950 border border-zinc-800 text-[10px] text-zinc-300 rounded-xl opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity duration-200 z-50 shadow-2xl leading-normal text-left font-normal normal-case">
                     {regime === "BULLISH" 
                       ? "총 자산의 50% 자금을 할당받아 상승장 전용 불타기 피라미딩 전략(RS V2)을 적극 가동 중입니다."
-                      : "상승장이 아닐 때는 손실 방지를 위해 자금 가동을 차단하고 100% 현금을 보존하며, 나머지 50% 비중은 EP 슬롯에서 단독 가동됩니다."}
+                      : "상승장이 아닐 때는 손실 방지를 위해 자금 가동을 중단하고 50% 자본을 100% 현금 상태로 금고에 안전하게 격리(Quarantine)하여 보호 중입니다."}
                   </div>
                 </div>
               </div>
