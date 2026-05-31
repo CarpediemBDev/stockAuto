@@ -1,28 +1,32 @@
-# 🔧 [작업 현황판] 모놀리식 전략 코드의 객체 지향 전략 패턴 (Strategy Pattern) 정밀 리팩토링
+# 🔧 [작업 현황판] 30대 차세대 트레이딩 전략 통합 배틀 시스템 구축 + 신규 13개 전략 추가 탑재
 
 ## 📋 진행 내역
 
-- `[x]` **1. `backend/app/strategies/` 패키지 신설 및 추상 베이스 설계**
-  - `[x]` `base_strategy.py` 정의 (공통 채점 및 자원 제어 추상화 수립)
-  - `[x]` `strategy_factory.py` 정의 (문자열 설정을 바탕으로 전략 인스턴스를 반환하는 팩토리 클래스 탑재)
-- `[x]` **2. 개별 격리 전략 구체 클래스 구현**
-  - `[x]` `regime_switching.py` (통합 1위 마스터 레짐스위칭 논리 격리)
-  - `[x]` `senior_simple.py` (시니어 단순화 직관 논리 격리)
-  - `[x]` `strategy_a.py` (태초의 방패 v1.0 논리 격리)
-  - `[x]` `strategy_b.py` / `strategy_c.py` / `exploded_c.py` (익절선, 비중 조절 분기 적용 격리)
-  - `[x]` `qullamaggie.py` 등 글로벌 단독 전략 격리
-- `[x]` **3. 백테스트 엔진 (`backtest_engine.py`) 팩토리 연동 및 Monolith 분기 삭제**
-  - `[x]` `_calculate_score` 내 500줄 가량의 거대한 분기 걷어내고 `self.strategy.calculate_score()` 주입
-  - `[x]` 손절선, 트레일링 스탑, 비중 설정, 피라미딩 변수들을 `self.strategy` 동적 필드로 전격 치환
-- `[x]` **4. 실시간 스캐너 및 청산 스케줄러 연동**
-  - `[x]` `scanner.py` 실시간 채점 시 `strategy.calculate_score()` 호출 연동 및 analyze_single_ticker 고도화 완료
-  - `[x]` `scheduler.py` 청산 및 스마트 익절 판독 시 `strategy.min_smart_exit_profit` 연동 및 동적 포지션 크기 제어 완료
-- `[x]` **5. 컴파일 무결성 검증 및 전 장세 백테스트 PnL 정합성 테스트**
-  - `[x]` `py_compile`을 사용한 백엔드 무결성 검증 통과 (오류 0개)
-  - `[x]` `run_tournament.py`를 실행하여 리팩토링 후의 PnL 성적 및 거래 횟수가 완벽하게 정립되었는지 확인하고 정합성 정밀 검증 성공.
-- `[x]` **6. 파이썬 실제 코드와 마크다운 문서 정합성 일치화**
-  - `[x]` `docs/strategy_specification.md`에 시니어 단순화 및 단독 전략들의 세부 아키텍처 및 로직 상세 명세 추가
-  - `[x]` `docs/strategy_map.md`에 전략 패턴에 기재된 모든 개별 전략들의 소스 매핑 및 핵심 요약 테이블 추가
-- `[x]` **7. 파이썬 실제 코드 내 전략 명칭 및 이모지의 금/은/동 배지 체계 싱크 정합성 일치화**
-  - `[x]` `run_tournament.py` 및 `run_backtest.py` 스크립트 내 전략 출력 이름과 이모지 정합성 조정
-  - `[x]` `backend/app/strategies/` 내 모든 14개 전략 클래스 생성자(`__init__`)의 전략 이름과 이모지 표준 정합성 100% 일치화
+- `[x]` **1. 백테스트 엔진 (`backtest_engine.py`) 1차 신규 지표 계산 로직 탑재**
+- `[x]` **2. 1차 신규 전략 구체 클래스 파일 19개 구현 및 탑재**
+- `[x]` **3. 전략 팩토리 (`strategy_factory.py`) 등록 및 연동**
+- `[x]` **4. 통합 토너먼트 배틀 스크립트 (`run_tournament.py`) 연동 및 기간 조정 (1월~5월)**
+- `[x]` **5. 전체 컴파일 무결성 검증 및 30대 전략 통합 토너먼트 실행**
+
+---
+
+### 🚨 [추가 미션] 신규 제미나이 추천 13개 차세대 전략 추가 탑재
+- `[ ]` **6. 백테스트 엔진 (`backtest_engine.py`) 2차 신규 지표 계산 로직 탑재**
+  - PDUFA 임상 캘린더 일수, 내부자 매수 거래량, 숏 스퀴즈 가속 조건, 다크풀 대량 거래, 감마 플립 레벨, 맥스 페인 가격 자석 지표 계산
+  - 와이코프 스프링 패턴, 장초반 갭 비율, 소셜 버즈 폭증율, 거시 달러/채널 금리 인덱스, 볼륨 델타, 월말 리밸런싱 일수 계산
+- `[ ]` **7. 2차 신규 전략 구체 클래스 파일 13개 구현 및 탑재**
+  - `pdufa_calendar.py` (바이오 임상 PDUFA)
+  - `insider_buying.py` (내부자 매수 추적)
+  - `short_squeeze.py` (공매도 숏스퀴즈)
+  - `dark_pool.py` (다크풀 블록딜)
+  - `gamma_flip.py` (감마 마켓메이커 헤지)
+  - `max_pain.py` (옵션 만기 맥스페인)
+  - `wyckoff_spring.py` (와이코프 스프링 트랩)
+  - `morning_gap_fade.py` (시초가 갭 페이드 숏)
+  - `social_buzz.py` (소셜 미디어 언급 모멘텀)
+  - `cross_asset.py` (자산간 DXY/TNX 모멘텀 필터)
+  - `order_flow.py` (볼륨 델타 매수/매도 불균형)
+  - `volume_profile.py` (매물대 프로파일 POC)
+  - `turn_of_month.py` (월말 리밸런싱 계절성 효과)
+- `[ ]` **8. 전략 팩토리 및 run_tournament.py 13개 추가 등록 (총 46대 대전 아레나 기동)**
+- `[ ]` **9. 빌드 컴파일 무결성 검증 및 1월~5월 통합 대전 2차 실행**

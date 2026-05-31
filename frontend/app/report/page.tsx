@@ -6,7 +6,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
 import { 
-  TrendingUp, Target, Activity, DollarSign, ArrowUpRight, ArrowDownRight
+  TrendingUp, Target, Activity, DollarSign
 } from 'lucide-react';
 import { reportAPI, tradeAPI } from '@/lib/api';
 import { TradeLogs, TradeLog } from '@/components/TradeLogs';

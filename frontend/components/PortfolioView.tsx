@@ -235,17 +235,37 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {holdings.map((h) => {
+          // Parse strategy prefix from ticker string
+          let cleanTicker = h.ticker;
+          let strategyLabel = "";
+          let strategyBadgeClass = "";
+          
+          if (h.ticker.startsWith("EP_")) {
+            cleanTicker = h.ticker.substring(3);
+            strategyLabel = "⚡ EP (에피소딕 피벗)";
+            strategyBadgeClass = "bg-blue-500/15 text-blue-400 border-blue-500/30";
+          } else if (h.ticker.startsWith("RS_")) {
+            cleanTicker = h.ticker.substring(3);
+            strategyLabel = "👑 RS V2 (레짐 스위칭)";
+            strategyBadgeClass = "bg-amber-500/15 text-amber-400 border-amber-500/30";
+          }
+
           const currentPrice = h.current_price !== undefined ? h.current_price : h.avg_price * 1.02;
           const profitRate = ((currentPrice - h.avg_price) / h.avg_price) * 100;
           const dropFromPeak = ((currentPrice - h.highest_price) / h.highest_price) * 100;
-          const news = newsMap[h.ticker];
+          const news = newsMap[cleanTicker];
 
           return (
             <div key={h.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-slate-700 transition-all group flex flex-col h-full">
               <div className="flex justify-between items-start mb-4">
                 <div className="min-w-0 flex-1 mr-3">
-                  <h4 className="text-xs font-bold text-slate-500 tracking-wider uppercase flex items-center gap-1.5">
-                    {h.ticker}
+                  <h4 className="text-xs font-bold text-slate-500 tracking-wider uppercase flex items-center gap-1.5 flex-wrap">
+                    {cleanTicker}
+                    {strategyLabel && (
+                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded border tracking-wider uppercase ${strategyBadgeClass}`}>
+                        {strategyLabel}
+                      </span>
+                    )}
                     <span className={`text-[8px] font-black px-1 py-0.5 rounded border tracking-wider uppercase ${
                       h.is_mock === false
                         ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
@@ -267,7 +287,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                   {/* 뉴스 마퀴 — 스캐너에서 뉴스 있을 때만 표시 */}
                   {news && (
                     <button
-                      onClick={() => setActiveNewsItem({ ticker: h.ticker, name: h.ticker_name, news })}
+                      onClick={() => setActiveNewsItem({ ticker: cleanTicker, name: h.ticker_name, news })}
                       className="mt-1.5 overflow-hidden w-full text-left"
                       title="클릭해서 AI 뉴스 분석 보기"
                     >

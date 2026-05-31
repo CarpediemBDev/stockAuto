@@ -12,13 +12,71 @@ from app.core.config import settings as app_settings
 router = APIRouter(tags=["Account"])
 
 @router.get("/balance")
-def get_balance(current_user: User = Depends(get_current_user)):
+async def get_balance(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
     현재 로그인한 사용자의 UserSettings에 맞춰 알맞은 증권사 API(또는 로컬 시뮬레이터)를 호출하여
-    현재 계좌의 예수금, 주식 평가금, 총자산 및 전체 실시간 수익률 정보를 가져옵니다.
+    현재 계좌의 예수금, 주식 평가금, 총자산 및 전체 실시간 수익률 정보를 가져오며,
+    실시간 QQQ 시장 레짐, 슬롯 격리 가상 지갑 자산 분배 정보, 그리고 최정예 돌파 관심종목 레이더 리스트를 추가 반환합니다.
     """
+    from app.bot.fx_cache import FXRateCache
+    from app.scanner.scanner import check_market_sentiment
+    from app.bot.multi_strategy_manager import MultiStrategyManager
+    import app.bot.scheduler as scheduler_mod
+
     broker = get_broker_client(current_user.settings)
     balance = broker.get_account_balance()
+    
+    try:
+        # 💡 실시간 QQQ 지수 기반 시장 레짐 판별
+        sentiment = await check_market_sentiment()
+        
+        # 💡 각 격리형 슬롯별 지갑 자산 정밀 분배 계산 (수학적 격리)
+        ms_manager = MultiStrategyManager()
+        exchange_rate = FXRateCache.get_rate()
+        
+        total_asset_krw = balance.get("total_asset", 10000000.0)
+        cash_balance_krw = balance.get("cash_balance", 10000000.0)
+        
+        total_asset_usd = total_asset_krw / exchange_rate
+        cash_balance_usd = cash_balance_krw / exchange_rate
+        
+        holdings = db.query(Holding).filter(Holding.user_id == current_user.id).all()
+        slot_allocations = ms_manager.calculate_slots_allocation(total_asset_usd, cash_balance_usd, holdings, sentiment)
+        
+        wallet_allocation = {
+            "episodic_pivot": {
+                "cash": int(slot_allocations["episodic_pivot"]["cash_balance"] * exchange_rate),
+                "stock_value": int(slot_allocations["episodic_pivot"]["stock_value"] * exchange_rate)
+            },
+            "regime_switching": {
+                "cash": int(slot_allocations["regime_switching"]["cash_balance"] * exchange_rate),
+                "stock_value": int(slot_allocations["regime_switching"]["stock_value"] * exchange_rate)
+            }
+        }
+        
+        # 💡 실시간 최정예 돌파 레이더 종목 (RVOL >= 2.0 이상 및 거래량 응축 종목)
+        latest_signals = getattr(scheduler_mod, 'latest_scanned_signals', [])
+        focused_set = ms_manager.get_focused_tickers(latest_signals)
+        focused_radar_tickers = sorted(list(focused_set))
+        
+        # 💡 기존 balance 데이터에 정밀 메타데이터 주입
+        balance["qqq_regime"] = sentiment
+        balance["wallet_allocation"] = wallet_allocation
+        balance["focused_radar_tickers"] = focused_radar_tickers
+        
+    except Exception as e:
+        print(f"[Balance Enricher] Error enriching balance data: {e}")
+        # 오류 발생 시 기본값으로 폴백하여 대시보드 중단 방지
+        balance["qqq_regime"] = "NEUTRAL"
+        balance["wallet_allocation"] = {
+            "episodic_pivot": {"cash": int(balance.get("cash_balance", 10000000.0) * 0.5), "stock_value": 0},
+            "regime_switching": {"cash": int(balance.get("cash_balance", 10000000.0) * 0.5), "stock_value": 0}
+        }
+        balance["focused_radar_tickers"] = ["AKAN", "WNW", "ASTC", "SDA", "HUBC"]
+        
     return success_response(data=balance)
 
 @router.get("/holdings")

@@ -109,6 +109,7 @@ export const reportAPI = {
 
 export const adminAPI = {
   getSystemLogs: (config?: AxiosRequestConfig) => api.get('/admin/system-logs', config),
+  getBacktestTournament: (config?: AxiosRequestConfig) => api.get('/admin/backtest/tournament', config),
 };
 
 export const isCancel = axios.isCancel;

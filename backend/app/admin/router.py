@@ -213,3 +213,37 @@ def get_system_logs(
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
         
     return db.query(ActionLog).order_by(ActionLog.created_at.desc()).limit(100).all()
+
+@router.get("/backtest/tournament")
+async def get_backtest_tournament_results(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """[슈퍼어드민 전용] 지정된 특정 기간(start_date ~ end_date)의 5대 전략 토너먼트 대항전 백테스트를 동적 실행 및 캐시 서빙합니다."""
+    if current_user.username != "admin":
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+        
+    # 날짜 파라미터가 없으면 기존의 1년치 기본 캐시 파일 로드하여 고속 서빙
+    if not start_date or not end_date:
+        import json
+        import os
+        results_path = r"C:\Users\Im\.gemini\antigravity\brain\3a7f1012-f111-46d8-8da9-7971ca6063b4\scratch\tournament_results.json"
+        if not os.path.exists(results_path):
+            return []
+        try:
+            with open(results_path, "r", encoding="utf-8") as f_in:
+                return json.load(f_in)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+            
+    # 날짜 파라미터가 있을 시 동적 토너먼트 가상 샌드박스 가동
+    try:
+        from app.admin.backtest_runner import run_dynamic_tournament
+        data = await run_dynamic_tournament(start_date, end_date)
+        return data
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"동적 백테스트 실행 중 에러가 발생했습니다: {str(e)}"
+        )

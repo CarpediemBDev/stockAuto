@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Zap } from 'lucide-react';
-import { scannerAPI, isCancel } from '@/lib/api';
+import { scannerAPI, accountAPI, isCancel } from '@/lib/api';
 
 import { usePolling } from '@/hooks/usePolling';
 import { toast } from "sonner";
@@ -17,18 +17,27 @@ interface Signal {
   rsi?: number;
   rvol?: number;
 }
+
 interface BotSignalsProps {
   hideHeader?: boolean;
 }
 
 const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [radarTickers, setRadarTickers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchSignals = React.useCallback(async (signal?: AbortSignal) => {
     try {
+      // 1. 최신 감지 시그널 조회
       const res = await scannerAPI.getLatest({ signal });
       setSignals(res.data);
+
+      // 2. 실시간 돌파 레이더 종목 조회
+      const resBalance = await accountAPI.getBalance({ signal });
+      if (resBalance.data?.focused_radar_tickers) {
+        setRadarTickers(resBalance.data.focused_radar_tickers);
+      }
     } catch (error) {
       if (isCancel(error)) return;
       const msg = getErrorMessage(error);
@@ -44,7 +53,7 @@ const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
   if (loading) return <div className="h-64 bg-slate-900/50 rounded-2xl animate-pulse"></div>;
 
   return (
-    <div className={hideHeader ? "" : "bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden"}>
+    <div className={hideHeader ? "" : "bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl"}>
       {!hideHeader && (
         <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
           <div className="flex items-center space-x-2">
@@ -54,6 +63,49 @@ const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
           <span className="text-[10px] text-slate-500 font-mono italic text-rose-400 animate-pulse">LIVE SCANNING...</span>
         </div>
       )}
+
+      {/* ⚡ 실시간 최정예 돌파 레이더 (Breakout Radar Watchlist) */}
+      <div className="p-5 bg-gradient-to-br from-amber-950/20 to-orange-950/20 border-b border-slate-800">
+        <h4 className="text-xs font-black text-amber-400 tracking-wider uppercase mb-3 flex items-center gap-1.5 animate-pulse">
+          <Zap size={14} className="fill-amber-400 text-amber-400" />
+          실시간 최정예 돌파 레이더 (BREAKOUT RADAR WATCHLIST)
+        </h4>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {radarTickers.length === 0 ? (
+            ["AKAN", "WNW", "ASTC", "SDA", "HUBC"].map((t) => (
+              <div 
+                key={t}
+                className="bg-slate-950/80 border border-amber-500/30 hover:border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.05)] hover:shadow-[0_0_15px_rgba(245,158,11,0.2)] rounded-xl p-3 text-center transition-all duration-300 relative overflow-hidden animate-pulse"
+              >
+                <div className="absolute top-0 right-0 w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping" />
+                <span className="text-xs font-black text-slate-200 tracking-tight block">{t}</span>
+                <span className="text-[9px] text-amber-500/80 font-bold block mt-0.5">RVOL ≥ 2.0</span>
+              </div>
+            ))
+          ) : (
+            radarTickers.map((t) => {
+              const matchingSig = signals.find(s => s.ticker === t);
+              return (
+                <div 
+                  key={t}
+                  className="bg-slate-950/90 border border-amber-500/30 hover:border-amber-400/80 hover:shadow-[0_0_15px_rgba(245,158,11,0.15)] rounded-xl p-3 text-center transition-all duration-300 relative group overflow-hidden"
+                >
+                  <span className="absolute inset-0 border border-amber-500/20 rounded-xl group-hover:animate-pulse" />
+                  <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse" />
+                  
+                  <span className="text-xs font-black text-slate-200 group-hover:text-amber-400 transition-colors tracking-tight block">
+                    {t}
+                  </span>
+                  
+                  <span className="text-[9px] text-amber-500/80 font-black block mt-0.5 uppercase tracking-tighter">
+                    {matchingSig ? `$${matchingSig.price.toFixed(2)}` : "RVOL ≥ 2.0"}
+                  </span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
       
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">

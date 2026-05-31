@@ -49,20 +49,21 @@ class LocalSimulatedBroker(BaseBroker):
         total_eval_krw = 0.0
 
         if holdings:
-            tickers = [h.ticker for h in holdings]
+            tickers = [h.ticker.split('_')[-1] for h in holdings]
             try:
                 data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
                 for h in holdings:
+                    clean_t = h.ticker.split('_')[-1]
                     current_price = h.avg_price  # 기본 폴백값
                     try:
                         if len(tickers) == 1:
                             if isinstance(data.columns, pd.MultiIndex):
-                                df = data[h.ticker].dropna() if h.ticker in data.columns.levels[0] else data.dropna()
+                                df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else data.dropna()
                             else:
                                 df = data.dropna()
                         else:
                             if isinstance(data.columns, pd.MultiIndex):
-                                df = data[h.ticker].dropna() if h.ticker in data.columns.levels[0] else pd.DataFrame()
+                                df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else pd.DataFrame()
                             else:
                                 df = data.dropna()
                         
@@ -114,21 +115,22 @@ class LocalSimulatedBroker(BaseBroker):
 
         exchange_rate = FXRateCache.get_rate()
 
-        tickers = [h.ticker for h in holdings]
+        tickers = [h.ticker.split('_')[-1] for h in holdings]
         try:
             data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
             result = []
             for h in holdings:
+                clean_t = h.ticker.split('_')[-1]
                 current_price = h.avg_price  # 기본 폴백값
                 try:
                     if len(tickers) == 1:
                         if isinstance(data.columns, pd.MultiIndex):
-                            df = data[h.ticker].dropna() if h.ticker in data.columns.levels[0] else data.dropna()
+                            df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else data.dropna()
                         else:
                             df = data.dropna()
                     else:
                         if isinstance(data.columns, pd.MultiIndex):
-                            df = data[h.ticker].dropna() if h.ticker in data.columns.levels[0] else pd.DataFrame()
+                            df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else pd.DataFrame()
                         else:
                             df = data.dropna()
                     

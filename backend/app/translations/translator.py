@@ -43,6 +43,8 @@ class Translator:
         if not ticker:
             return ""
             
+        if "_" in ticker:
+            ticker = ticker.split("_")[-1]
         ticker_clean = ticker.upper().strip()
         
         # 1. 1단계: 메모리 캐시 조회 (0ms 초고속 서빙)

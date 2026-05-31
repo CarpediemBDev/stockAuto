@@ -89,7 +89,8 @@ def log_action(db, user_id: int, message: str, level="INFO"):
 
 async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: list):
     """
-    개별 사용자별 독자적인 자동매매 시나리오 처리 함수 (멀티테넌시 격리) - ⭐ v2.0 레짐 스위칭 & 피라미딩 & 조기익절 탑재
+    개별 사용자별 독자적인 자동매매 시나리오 처리 함수 (멀티테넌시 격리)
+    ⭐ 격리형 3슬롯 멀티 전략 코어 (Modular Multi-Strategy Isolation) 실전 가동
     """
     db = SessionLocal()
     try:
@@ -105,41 +106,87 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         # 1. 사용자 맞춤형 브로커 인스턴스 획득
         broker = get_broker_client(user_settings)
 
-        # 💡 [전략 패턴] 전략 팩토리를 통해 실시간 전략 로드 및 채점
-        from app.strategies.strategy_factory import get_strategy
-        strategy_instance = get_strategy(settings.STRATEGY_TYPE)
+        # 💡 멀티 전략 매니저 로드
+        from app.bot.multi_strategy_manager import MultiStrategyManager
+        ms_manager = MultiStrategyManager()
 
         # 2. 보유 종목(Holdings) 모니터링 및 매도/탈출 판정 (조기 익절 & 트레일링 스탑)
         holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
+        
+        # 💡 레거시 마이그레이션 가드: 접두사 없는 기존 종목에 자동으로 마스터 레짐스위칭(RS_) 접두사 부여
+        for h in holdings:
+            if not ms_manager.get_slot_by_holding_ticker(h.ticker):
+                legacy_ticker = h.ticker
+                h.ticker = ms_manager.make_prefixed_ticker("regime_switching", legacy_ticker)
+                db.commit()
+                log_action(db, user_id, f"[Migration Guard] Legacy holding migrated: {legacy_ticker} -> {h.ticker}", "INFO")
+
+        # 💡 KIS 및 Simulated 잔고 실시간 조회 (Rate Limit 세마포어 적용)
+        balance_data = await safe_broker_call(broker.get_account_balance)
+        total_asset_krw = balance_data.get("total_asset", 10000000.0)
+        cash_balance_krw = balance_data.get("cash_balance", 10000000.0)
+
+        exchange_rate = FXRateCache.get_rate()
+        total_asset_usd = total_asset_krw / exchange_rate
+        cash_balance_usd = cash_balance_krw / exchange_rate
+
+        # 💡 각 슬롯별 실시간 격리 예수금(Cash Balance) 및 평가자산 분배
+        slot_allocations = ms_manager.calculate_slots_allocation(total_asset_usd, cash_balance_usd, holdings, sentiment)
+
+        # 3. 11대 정예 포트폴리오 종목 실시간 기술적 분석 및 신규 스캔 시그널 확보
+        target_signals = []
+        for ticker in ms_manager.TARGET_TICKERS:
+            # 스캐너 캐시에서 조회 시도
+            sig = signal_map.get(ticker)
+            if sig:
+                target_signals.append(sig)
+            else:
+                # 캐시에 없는 경우 백그라운드 단독 정밀 분석 수행 (Dynamic Fallback)
+                sig = await analyze_single_ticker(ticker)
+                if sig:
+                    target_signals.append(sig)
+
+        target_signal_map = {s['ticker']: s for s in target_signals}
+
+        # ------------------ (Part A) 보유 종목 실시간 감시 및 매도 주문 ------------------
         for h in holdings:
             try:
-                ticker = h.ticker
-                current_data = signal_map.get(ticker)
+                # 보유 종목의 접두사에서 슬롯과 순수 티커 파싱
+                parsed = ms_manager.get_slot_by_holding_ticker(h.ticker)
+                if not parsed:
+                    continue
+                slot_key, clean_ticker = parsed
                 
-                # 스캐너 후보군에 없더라도 보유 종목은 백그라운드 정밀 단독 기술 분석 수행
+                # 해당 슬롯의 전략 인스턴스 획득
+                strategy_instance = ms_manager.strategies[slot_key]
+                
+                # 실시간 가격 데이터 획득
+                current_data = target_signal_map.get(clean_ticker)
                 if not current_data:
-                    logger.info(f"[Scheduler User {user_id}] Owned ticker {ticker} not in top scanned signals. Running dedicated technical analysis...")
-                    current_data = await analyze_single_ticker(ticker)
+                    current_data = await analyze_single_ticker(clean_ticker)
                 
                 if not current_data:
-                    log_action(db, user_id, f"No technical data available for owned ticker {ticker}. Skipping monitoring in this cycle.", "WARNING")
+                    log_action(db, user_id, f"No technical data available for owned ticker {clean_ticker}. Skipping monitoring in this cycle.", "WARNING")
                     continue
                 
                 current_price = current_data['price']
+                # 평가가치 업데이트용 임시 보정
+                h.current_price = current_price
+                
                 profit_rate = ((current_price - h.avg_price) / h.avg_price) * 100
-                current_score = current_data['signal_score']
+                
+                # 보유 전략 인스턴스 기준 재계산된 실시간 스코어 및 익절 신호 판정
+                current_score = strategy_instance.calculate_score(current_data['details'] or current_data, sentiment, is_entry=False)
                 is_smart_exit = current_data.get('details', {}).get('is_smart_exit', False)
 
                 # 최고가(Peak) 갱신
                 if current_price > h.highest_price:
                     h.highest_price = current_price
-                    log_action(db, user_id, f"New Peak for {ticker}: ${current_price}", "SIGNAL")
+                    log_action(db, user_id, f"[{strategy_instance.name}] New Peak for {clean_ticker}: ${current_price}", "SIGNAL")
                     db.commit()
 
                 # ATR 기반 동적 익절/손절선 계산
                 atr = current_data.get('details', {}).get('atr', 0.0)
-                
-                # 💡 [전략 패턴] 동적 손절선 및 트레일링 스탑 비율 계산
                 stop_loss_pct = strategy_instance.get_stop_loss_pct(atr, current_price)
                 trailing_stop_pct = strategy_instance.get_trailing_stop_pct(atr, current_price)
 
@@ -155,41 +202,38 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     is_breached = True
                     breach_reason = f"동적 트레일링 스탑 이탈 (최고가 ${h.highest_price:.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)"
                 
-                # 💡 손절선/트레일링 스탑 이탈 감지 시, 연속 2회 확정식 가드 적용
+                # 휩쏘 방지 연속 2회 확정 가드
                 if is_breached:
-                    cache_key = (user_id, ticker)
+                    cache_key = (user_id, h.ticker)
                     BREACH_COUNT_CACHE[cache_key] = BREACH_COUNT_CACHE.get(cache_key, 0) + 1
                     count = BREACH_COUNT_CACHE[cache_key]
                     
                     if count >= 2:
                         sell_reason = breach_reason + " [2회 연속 이탈 확정]"
                     else:
-                        log_action(db, user_id, f"[Noise Buffer] {ticker} first breach detected ({breach_reason}). Delaying sell for noise protection (Count: {count}/2).", "INFO")
+                        log_action(db, user_id, f"[Noise Buffer] {h.ticker} first breach detected ({breach_reason}). Delaying sell for noise protection (Count: {count}/2).", "INFO")
                 else:
-                    # 이탈 상태가 아니면 연속 이탈 횟수를 0으로 리셋 (캐시 제거)
-                    BREACH_COUNT_CACHE.pop((user_id, ticker), None)
+                    BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
                 
-                # ⭐ 지표 1. 조기 스마트 익절 (RSI 하락 다이버전스 + MACD 데드크로스) - 스마트 익절은 버퍼 없이 즉시 실행
-                # 전략 A 등 스마트 익절이 없으면 min_smart_exit_profit이 999라 자연스럽게 통과
+                # 조기 스마트 익절
                 if not sell_reason and profit_rate >= strategy_instance.min_smart_exit_profit and is_smart_exit:
                     sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
                 
-                # 지표 4. 기술적 강세 시그널 붕괴 - 시그널 붕괴는 버퍼 없이 즉시 실행
+                # 기술적 강세 시그널 붕괴
                 elif not sell_reason and strategy_instance.is_signal_collapsed(current_score, sentiment):
                     sell_reason = f"강세 시그널 붕괴 ({current_score}점 도달)"
 
                 if sell_reason:
-                    log_action(db, user_id, f"EXIT SIGNAL: {ticker} | Reason: {sell_reason}", "SIGNAL")
+                    log_action(db, user_id, f"[{strategy_instance.name}] EXIT SIGNAL: {h.ticker} ({clean_ticker}) | Reason: {sell_reason}", "SIGNAL")
                     
-                    # 브로커를 통한 매도 주문 집행 (💡 safe_broker_call 세마포어 격리 가드 탑재)
-                    res = await safe_broker_call(broker.sell_order, ticker, h.quantity, price=current_price)
-
+                    # 브로커 주문 시에는 순수 티커(clean_ticker) 전달
+                    res = await safe_broker_call(broker.sell_order, clean_ticker, h.quantity, price=current_price)
 
                     if res["success"]:
                         filled_price = res["filled_price"]
                         filled_qty = res["filled_qty"]
                         
-                        # 💡 [Phase 30] 매수/매도 수수료 및 SEC Fee가 정밀 차감된 실수익(Net) 연산
+                        # 수수료 및 SEC Fee 차감 정밀 손익 계산
                         buy_gross = h.avg_price * filled_qty
                         buy_fee = buy_gross * settings.KIS_FEE_RATE
                         sell_gross = filled_price * filled_qty
@@ -201,7 +245,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
 
                         db.add(TradeLog(
                             user_id=user_id,
-                            ticker=ticker,
+                            ticker=h.ticker,  # DB 로그에는 접두사가 붙은 티커 기록
                             ticker_name=h.ticker_name,
                             trade_type="SELL",
                             price=filled_price,
@@ -214,8 +258,8 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         ))
                         db.delete(h)
                         db.commit()
-                        BREACH_COUNT_CACHE.pop((user_id, ticker), None) # 매도 완료 후 캐시 제거
-                        log_action(db, user_id, f"SUCCESS: {ticker} sold via {sell_reason} | Order: {res['order_no']}", "INFO")
+                        BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
+                        log_action(db, user_id, f"SUCCESS: {h.ticker} sold via {sell_reason} | Order: {res['order_no']}", "INFO")
                         
                         exchange_rate = FXRateCache.get_rate()
                         filled_price_krw = filled_price * exchange_rate
@@ -226,10 +270,10 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
                         realized_pnl_abs = abs(realized_pnl)
                         
-                        # 텔레그램 매도 알림 전송 (초경량 정화 및 실수익 기준 부호 교정 완비)
                         send_message_async(
                             user_id,
-                            f"🔴 *[자동매도 체결]* {ticker} ({h.ticker_name})\n"
+                            f"🔴 *[{strategy_instance.name} 자동매도 체결]*\n"
+                            f"종목: {clean_ticker} ({h.ticker_name})\n"
                             f"• *체결 단가:* `${filled_price:,.2f}` (약 {filled_price_krw:,.0f}원)\n"
                             f"• *체결 수량:* `{filled_qty}주`\n"
                             f"• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n"
@@ -239,42 +283,69 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                             f"• *주문 번호:* `{res['order_no']}`"
                         )
                     else:
-                        log_action(db, user_id, f"SELL FAILED: {ticker} | {res['message']}", "ERROR")
+                        log_action(db, user_id, f"SELL FAILED: {h.ticker} | {res['message']}", "ERROR")
             except Exception as item_err:
                 log_action(db, user_id, f"Error processing holding {h.ticker}: {item_err}", "ERROR")
 
-        # 3. 신규 매수 기회 탐색 및 1:2:6 피라미딩 자금 관리
+        # ------------------ (Part B) 3개 슬롯별 신규 매수 기회 검사 및 분할 매수 ------------------
         if not is_us_market_open():
             log_action(db, user_id, "[BUY SKIP] US market is currently closed. No new buy orders placed.", "INFO")
-        elif all_signals:
-            # 💡 [Phase 29] MAX_HOLDINGS 포트폴리오 안전 가드
-            current_holdings_count = db.query(Holding).filter(Holding.user_id == user_id).count()
-            if current_holdings_count >= settings.MAX_HOLDINGS:
-                log_action(db, user_id, f"[BUY SKIP] Max holdings limit reached ({current_holdings_count}/{settings.MAX_HOLDINGS}). Skipping new buy scans.", "INFO")
-                all_signals_to_process = []
-            else:
-                all_signals_to_process = all_signals
+            return
 
-            # 장세별 통과 커트라인 점수 분기 (상승장 85점, 하락/횡보장 95점 (수수료 절감 최적화 적용))
-            cutoff_score = strategy_instance.get_cutoff_score(sentiment)
-            cached_balance_data = None # 💡 사용자별 1분 루프 내 KIS 잔고 임시 캐싱 (DDoS급 중복 조회 제거)
+        # 💡 최정예 종목 Focusing 필터 적용 (RVOL >= 2.0 이상 대량 거래량 매집봉 포착 5~10개 엄선)
+        focused_tickers = ms_manager.get_focused_tickers(all_signals)
+        log_action(db, user_id, f"[Focusing Filter] Selected {len(focused_tickers)} elite tickers for compressed investment: {', '.join(focused_tickers)}", "INFO")
+
+        # 3개 슬롯을 완전히 순차적으로 루프 실행하여 상호 비간섭 격리 상태 유지
+        for slot_key, slot_info in slot_allocations.items():
+            # 💡 실시간 레짐 수위 조절 장치 (Regime Sluice) 작동
+            # QQQ가 BEARISH / NEUTRAL(약세/횡보장)일 때는 마스터 레짐스위칭 V2 슬롯(40% 비중) 매수를 전면 차단하여 현금 100% 보호!
+            if slot_key == "regime_switching" and sentiment != "BULLISH":
+                log_action(db, user_id, f"[Regime Sluice] Regime Switching V2 slot DEACTIVATED in {sentiment} market to protect 100% cash.", "INFO")
+                continue
+
+            strategy_instance = ms_manager.strategies[slot_key]
+            slot_cash_usd = slot_info["cash_balance"]
+            slot_total_asset_usd = slot_info["total_asset"]
+            slot_prefix = slot_info["prefix"]
             
-            for s in all_signals_to_process:
-                if s['signal_score'] >= cutoff_score:
-                    ticker = s['ticker']
+            # 슬롯별 최대 보유 종목 제한 가드 계산 (슬롯별 최대 3종목씩 균등)
+            slot_holdings_count = db.query(Holding).filter(
+                Holding.user_id == user_id,
+                Holding.ticker.like(f"{slot_prefix}%")
+            ).count()
+            
+            # 각 전략별 장세 레짐 커트라인 점수 획득
+            cutoff_score = strategy_instance.get_cutoff_score(sentiment)
+            
+            for s in target_signals:
+                clean_ticker = s['ticker']
+                
+                # 💡 Focusing 필터에 포함된 종목만 진입 허용 (자금 파편화 원천 방지)
+                if clean_ticker not in focused_tickers:
+                    continue
+                
+                # 💡 [핵심] 각 전략 기준으로 스코어를 실시간 정밀 재계산 (동적 100% 격리 채점!)
+                score = strategy_instance.calculate_score(s.get('details') or s, sentiment, is_entry=True)
+                
+                if score >= cutoff_score:
+                    # 슬롯별 종목 수 제한 안전 가드 (각 슬롯당 최대 3종목 가이드라인 준수)
+                    if slot_holdings_count >= 3:
+                        continue
+                        
+                    prefixed_ticker = ms_manager.make_prefixed_ticker(slot_key, clean_ticker)
                     
-                    # 동일 사용자가 이미 보유 중인지 확인 (피라미딩 여부 판별)
+                    # 해당 슬롯이 동일 종목을 이미 보유하고 있는지 판별 (피라미딩용)
                     existing_holding = db.query(Holding).filter(
                         Holding.user_id == user_id,
-                        Holding.ticker == ticker
+                        Holding.ticker == prefixed_ticker
                     ).first()
                     
-                    # 💡 v2.0 자금 관리 배분 팩터 및 피라미딩 단계 기본값 설정
-                    proposed_alloc_factor = 1.0 # 기본 전체 비중
-                    next_stage = 3             # 기본 최종 단계 (피라미딩 불허 시)
+                    proposed_alloc_factor = 1.0
+                    next_stage = 3
                     
                     if existing_holding:
-                        # 💡 기존 보유 중인 경우: 상승장(BULLISH) 모드에서만 피라미딩(불타기) 추가 매수 허용 (피라미딩 미지원 시 pyramid_trigger_1=999로 자동 탈출)
+                        # 상승장에서만 불타기 추가 매수 허용
                         pyramid_trigger_1 = strategy_instance.get_pyramid_trigger(1)
                         if pyramid_trigger_1 > 100.0 or sentiment != "BULLISH":
                             continue
@@ -286,174 +357,124 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
 
                         if buy_stage == 1:
                             if profit_rate >= pyramid_trigger_1:
-                                proposed_alloc_factor = 0.35  # 2차 추가 매수 비중: 35%
+                                proposed_alloc_factor = 0.35
                                 next_stage = 2
-                                log_action(db, user_id, f"[Pyramiding] {ticker} meets 2nd Buy Condition (+{profit_rate:.2f}% profit). Placing 35% confirm order.", "SIGNAL")
+                                log_action(db, user_id, f"[{strategy_instance.name}] [Pyramiding] {clean_ticker} meets 2nd Buy Condition (+{profit_rate:.2f}% profit). Placing 35% confirm order.", "SIGNAL")
                             else:
                                 continue
                         elif buy_stage == 2:
                             if profit_rate >= pyramid_trigger_2:
-                                proposed_alloc_factor = 0.50  # 3차 추가 매수 비중: 50%
+                                proposed_alloc_factor = 0.50
                                 next_stage = 3
-                                log_action(db, user_id, f"[Pyramiding] {ticker} meets 3rd Buy Condition (+{profit_rate:.2f}% profit). Placing 50% ultimate order.", "SIGNAL")
+                                log_action(db, user_id, f"[{strategy_instance.name}] [Pyramiding] {clean_ticker} meets 3rd Buy Condition (+{profit_rate:.2f}% profit). Placing 50% ultimate order.", "SIGNAL")
                             else:
                                 continue
                         else:
-                            continue  # 이미 3단계 풀배팅 완료 상태
+                            continue
                     else:
-                        # 💡 신규 포지션 진입 분기
+                        # 신규 진입 분기
                         proposed_alloc_factor = strategy_instance.get_initial_entry_factor(sentiment)
                         if sentiment == "BULLISH" and proposed_alloc_factor < 1.0:
                             next_stage = 1  # 정찰병 15% 진입
-                            log_action(db, user_id, f"[New Entry] {ticker} scanned in BULLISH market. Placing 15% scout order.", "INFO")
+                            log_action(db, user_id, f"[{strategy_instance.name}] [New Entry] {clean_ticker} scanned. Placing 15% scout order.", "INFO")
                         else:
                             next_stage = 3  # 즉시 풀비중 진입
-                            if sentiment == "BEARISH":
-                                log_action(db, user_id, f"[New Entry] {ticker} scanned in BEARISH market. Placing {proposed_alloc_factor*100:.0f}% single defensive order.", "INFO")
-                            else:
-                                log_action(db, user_id, f"[New Entry] {ticker} scanned in NEUTRAL market. Placing {proposed_alloc_factor*100:.0f}% single defensive order.", "INFO")
+                            log_action(db, user_id, f"[{strategy_instance.name}] [New Entry] {clean_ticker} scanned. Placing {proposed_alloc_factor*100:.0f}% single defensive order.", "INFO")
 
-                    # ① 동적 쿨다운: 동일 종목 매도 후 일정 시간 재매수 금지 (Whipsaw 방지)
+                    # ① 동적 쿨다운 검사 (Whipsaw 페이크 가드)
                     cooldown_cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.REENTRY_COOLDOWN_MINUTES)
                     recent_sell = db.query(TradeLog).filter(
                         TradeLog.user_id == user_id,
-                        TradeLog.ticker == ticker,
+                        TradeLog.ticker == prefixed_ticker,
                         TradeLog.trade_type == "SELL",
                         TradeLog.executed_at >= cooldown_cutoff
                     ).first()
+                    
                     if recent_sell:
-                        log_action(db, user_id,
-                            f"[BUY SKIP] {ticker} cooldown active — sold at {recent_sell.executed_at.strftime('%H:%M')} ({settings.REENTRY_COOLDOWN_MINUTES}min cooldown).",
-                            "INFO")
                         continue
 
-                    # ② 매수 직전 실시간 현재가 재확인 (캐시 데이터 Staleness 방지)
-                    realtime_price = await get_realtime_price(ticker)
+                    # ② 매수 직전 실시간 현재가 재조회
+                    realtime_price = await get_realtime_price(clean_ticker)
                     if realtime_price is None:
-                        log_action(db, user_id, f"[BUY SKIP] Could not fetch realtime price for {ticker}. Skipping.", "WARNING")
                         continue
 
-                    # ③ 급등 필터: 캐시 가격 대비 20% 이상 급등 시 추격매수 차단
+                    # ③ 급등 차단 필터 (+20% 초과 추격 매입 억제)
                     cached_price = s['price']
                     price_drift_pct = (realtime_price - cached_price) / cached_price * 100 if cached_price > 0 else 0
                     if price_drift_pct > 20.0:
-                        log_action(db, user_id,
-                            f"[BUY SKIP] {ticker} has surged +{price_drift_pct:.1f}% since signal cached (${cached_price:.2f} → ${realtime_price:.2f}). Chasing aborted.",
-                            "WARNING")
+                        log_action(db, user_id, f"[Surge Guard] {clean_ticker} has surged +{price_drift_pct:.1f}% since signal cached. Aborting purchase.", "WARNING")
                         continue
 
-                    current_price = realtime_price  # 실시간 가격으로 교체
+                    current_price = realtime_price
 
-                    # ④ 잔고 조회 및 달러 환산 (💡 safe_broker_call 세마포어 및 사용자별 로컬 캐시 적용)
-                    if cached_balance_data is None:
-                        balance_data = await safe_broker_call(broker.get_account_balance)
-                        cached_balance_data = balance_data
-                    else:
-                        balance_data = cached_balance_data
-                        
-                    total_asset_krw = balance_data.get("total_asset", 10000000.0)
-                    cash_balance_krw = balance_data.get("cash_balance", 10000000.0)
-
-                    exchange_rate = FXRateCache.get_rate()
-
-                    total_asset_usd = total_asset_krw / exchange_rate
-                    cash_balance_usd = cash_balance_krw / exchange_rate
-
-                    # 💡 [Phase 29] 예수금 안전장치: MIN_CASH_BALANCE_USD 미만 시 조기 차단
-                    if cash_balance_usd < settings.MIN_CASH_BALANCE_USD:
-                        log_action(db, user_id, f"[BUY SKIP] Insufficient cash balance (${cash_balance_usd:.2f} < ${settings.MIN_CASH_BALANCE_USD:.2f}). Skipping {ticker}.", "WARNING")
+                    # ④ 슬롯 격리 예수금 안전 조건 검증
+                    if slot_cash_usd < settings.MIN_CASH_BALANCE_USD:
                         continue
 
-                    # 기준 투자금 (총 달러 자산 대비 전략 설정 비중, 최소/최대 가이드라인 완비)
-                    base_alloc_usd = total_asset_usd * strategy_instance.base_allocation_pct
+                    # 해당 슬롯의 총 자산 크기를 기준으로 투자 비중 배분
+                    base_alloc_usd = slot_total_asset_usd * strategy_instance.base_allocation_pct
                     if strategy_instance.min_allocation_usd > 0.0:
                         base_alloc_usd = max(strategy_instance.min_allocation_usd, base_alloc_usd)
 
                     # ATR 변동성 조절 비율
                     atr = s.get('details', {}).get('atr', 0.0)
                     vol_factor = 1.0
-                    atr_pct = 0.0
                     if atr > 0:
                         atr_pct = (atr / current_price) * 100
                         if atr_pct > 0:
                             vol_factor = max(0.5, min(1.5, 2.0 / atr_pct))
                     
-                    # 시그널 스코어 가중치 배수
-                    score = s['signal_score']
+                    # 시그널 스코어 승수
                     score_factor = 1.0 + (score - cutoff_score) * 0.05
                     
-                    # 💡 희망 달러 투자금 및 주수 계산 (Proposed 비중 팩터 곱해 분할 매수 금액 결정)
+                    # 슬롯 현금 한도 내 최적 주문 수량 계산
                     proposed_value_usd = base_alloc_usd * vol_factor * score_factor * proposed_alloc_factor
                     proposed_qty = proposed_value_usd / current_price
                     
-                    # 예수금 안전장치
-                    max_order_budget_usd = cash_balance_usd * 0.95
-                    
-                    # 최종 수량 산출 (소수점 거래 불가능으로 1주 미만 시 예수금이 충분하면 최소 1주 매수 보장)
+                    max_order_budget_usd = slot_cash_usd * 0.95
                     final_qty = int(min(proposed_qty, max_order_budget_usd / current_price))
+                    
                     if final_qty == 0 and max_order_budget_usd >= current_price:
                         final_qty = 1
                     
-                    log_action(db, user_id, (
-                        f"ENTRY SIGNAL: {ticker} ({score} pts) | Price: ${current_price:.2f} | "
-                        f"Alloc Factor: {proposed_alloc_factor:.2f} (Stage: {next_stage}) | "
-                        f"Proposed Qty: {proposed_qty:.1f} -> Final Safe Qty: {final_qty} shares"
-                    ), "SIGNAL")
-                    
                     if final_qty < 1:
-                        # 💡 스킵 원인 정밀 판별 (단가 초과 vs 진짜 예수금 부족)
+                        # 예수금 부족 / 단가 초과 스킵 알림 쿨다운 처리
                         is_budget_exceeded = proposed_qty < 1.0
+                        reason_title = "단가 초과 - 최소 수량 미달" if is_budget_exceeded else "예수금 부족"
+                        reason_desc = "💡 슬롯 내 주문 가능 현금이 부족합니다." if not is_budget_exceeded else "💡 1주 단가가 슬롯 가용 한도보다 높습니다."
                         
-                        if is_budget_exceeded:
-                            reason_title = "단가 초과 - 최소 수량 미달"
-                            reason_desc = (
-                                f"💡 해당 종목의 1주 단가가 이번 매수 시도 금액보다 높습니다.\n"
-                                f"1주 미만(소수점 매매 미지원)으로 산출되어 매수가 안전하게 스킵되었습니다.\n"
-                                f"포트폴리오 비중을 늘리거나 정찰병 비중을 넓혀보세요."
-                            )
-                        else:
-                            reason_title = "예수금 부족"
-                            reason_desc = "💡 계좌의 주문 가능 금액이 한 주를 매수하기에 부족합니다. 계좌 예수금을 충전해 주세요."
-
-                        log_action(db, user_id, (
-                            f"SKIP PURCHASE ({reason_title}): {ticker}. "
-                            f"Required Price: ${current_price:.2f} > Safe Budget Limit: ${max_order_budget_usd:.2f} | "
-                            f"Proposed Qty: {proposed_qty:.2f}"
-                        ), "WARNING")
+                        log_action(db, user_id, f"[{strategy_instance.name}] SKIP PURCHASE ({reason_title}): {clean_ticker}.", "WARNING")
                         
-                        # 💡 1시간 동안 중복 실패 경고 스팸 발송 차단 가드 적용
-                        if reason_title == "예수금 부족":
-                            cache_key = (user_id, "SYSTEM_INSUFFICIENT_CASH")
-                        else:
-                            cache_key = (user_id, ticker, reason_title)
+                        cache_key = (user_id, prefixed_ticker, reason_title)
                         now = time.time()
                         last_sent = WARNING_COOLDOWN_CACHE.get(cache_key, 0.0)
                         
-                        if now - last_sent >= 3600.0:  # 1시간 쿨타임
+                        if now - last_sent >= 3600.0:
                             current_price_krw = current_price * exchange_rate
                             send_message_async(
                                 user_id,
-                                f"⚠️ *[자동매수 실패 - {reason_title}]*\n"
-                                f"종목: {ticker} ({s['name']})\n\n"
+                                f"⚠️ *[{strategy_instance.name} 자동매수 실패 - {reason_title}]*\n"
+                                f"종목: {clean_ticker} ({s['name']})\n\n"
                                 f"• *현재가:* `${current_price:,.2f}` (약 {current_price_krw:,.0f}원)\n"
                                 f"• *매수 시도 금액:* `${proposed_value_usd:,.2f}`\n"
-                                f"• *주문 가능 금액:* `${cash_balance_usd:,.2f}`\n\n"
+                                f"• *슬롯 예수금:* `${slot_cash_usd:,.2f}`\n\n"
                                 f"{reason_desc}"
                             )
                             WARNING_COOLDOWN_CACHE[cache_key] = now
                         continue
                     
-                    # 격리 매수 호출 (💡 safe_broker_call 세마포어 격리 가드 탑재)
-                    res = await safe_broker_call(broker.buy_order, ticker, final_qty, price=current_price)
+                    # 브로커에 실제 순수 티커로 주문 전송
+                    res = await safe_broker_call(broker.buy_order, clean_ticker, final_qty, price=current_price)
 
                     if res["success"]:
-                        # 💡 주문 성공 시 잔고 상태가 변경되었으므로 다음 루프 시 새로 잔고를 조회하도록 임시 캐시 초기화
-                        cached_balance_data = None
                         filled_price = res["filled_price"]
                         filled_qty = res["filled_qty"]
                         
+                        # 슬롯 예수금 차감 반영
+                        slot_cash_usd -= (filled_price * filled_qty) * (1 + settings.KIS_FEE_RATE)
+                        
                         if existing_holding:
-                            # 💡 기존 보유에 피라미딩 추가 매수인 경우: 평단가 가중 평균 계산 및 수량 증가 업데이트
+                            # 추가 매수 평단가 가중 평균 계산
                             old_qty = existing_holding.quantity
                             old_avg = existing_holding.avg_price
                             
@@ -465,12 +486,12 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                             existing_holding.buy_stage = next_stage
                             existing_holding.highest_price = max(existing_holding.highest_price, filled_price)
                             db.commit()
-                            log_action(db, user_id, f"SUCCESS: {ticker} Pyramiding Stage {next_stage} Add-on. New Avg: ${new_avg:.2f}, Total Qty: {new_qty} shares", "INFO")
+                            log_action(db, user_id, f"SUCCESS: {prefixed_ticker} Pyramiding Stage {next_stage} Add-on. New Avg: ${new_avg:.2f}", "INFO")
                         else:
-                            # 💡 신규 진입인 경우: Holding 레코드 생성
+                            # 신규 접두사 결합 티커로 Holding 저장
                             db.add(Holding(
                                 user_id=user_id,
-                                ticker=ticker,
+                                ticker=prefixed_ticker,
                                 ticker_name=s['name'],
                                 avg_price=filled_price,
                                 quantity=filled_qty,
@@ -479,11 +500,29 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                                 buy_stage=next_stage
                             ))
                             db.commit()
-                            log_action(db, user_id, f"SUCCESS: {ticker} purchased ({filled_qty} shares) | Order: {res['order_no']}", "INFO")
+                            log_action(db, user_id, f"SUCCESS: {prefixed_ticker} purchased ({filled_qty} shares)", "INFO")
+                            
+                            # 슬롯 내 종목수 증가 반영
+                            slot_holdings_count += 1
+                        
+                        # 텔레그램 매수 알림 발송
+                        current_price_krw = filled_price * exchange_rate
+                        total_amount_usd = filled_price * filled_qty
+                        total_amount_krw = total_amount_usd * exchange_rate
+                        
+                        send_message_async(
+                            user_id,
+                            f"🟢 *[{strategy_instance.name} 자동매수 체결]*\n"
+                            f"종목: {clean_ticker} ({s['name']})\n\n"
+                            f"• *체결 단가:* `${filled_price:,.2f}` (약 {current_price_krw:,.0f}원)\n"
+                            f"• *체결 수량:* `{filled_qty}주` (피라미딩 {next_stage}단계)\n"
+                            f"• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n"
+                            f"• *진입 레짐:* `{sentiment}`\n"
+                            f"• *주문 번호:* `{res['order_no']}`"
+                        )
                     else:
-                        log_action(db, user_id, f"BUY FAILED: {ticker} | {res['message']}", "ERROR")
+                        log_action(db, user_id, f"BUY FAILED: {prefixed_ticker} | {res['message']}", "ERROR")
 
-        # 성공적으로 자동매매 루프가 수행되었으므로 장애 알림 기록 초기화 (자가 복구 완료)
         _user_network_alert_sent.pop(user_id, None)
 
     except (RequestsRequestException, httpx.RequestError, ConnectionError, socket.gaierror, socket.timeout, TimeoutError, OSError) as ne:
@@ -505,6 +544,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         logger.exception(f"[run_user_trading_flow] Error for user {user_id}")
     finally:
         db.close()
+
 
 async def refresh_scanner_cache():
     """

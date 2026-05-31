@@ -1,0 +1,318 @@
+[
+  {
+    "ticker": "AAL",
+    "name": "아메리칸 항공"
+  },
+  {
+    "ticker": "ABEV",
+    "name": "암베브 S.A."
+  },
+  {
+    "ticker": "AEHL",
+    "name": "앤텔로프 엔터프라이즈"
+  },
+  {
+    "ticker": "AMPX",
+    "name": "앰프리우스 테크"
+  },
+  {
+    "ticker": "AMZN",
+    "name": "아마존닷컴"
+  },
+  {
+    "ticker": "ASTS",
+    "name": "AST 스페이스모바일"
+  },
+  {
+    "ticker": "BB",
+    "name": "블랙베리"
+  },
+  {
+    "ticker": "BBD",
+    "name": "방코 브라데스코"
+  },
+  {
+    "ticker": "BIYA",
+    "name": "비야 인터내셔널"
+  },
+  {
+    "ticker": "BTDR",
+    "name": "비트디어 테크놀로지"
+  },
+  {
+    "ticker": "BTG",
+    "name": "B2Gold"
+  },
+  {
+    "ticker": "BULL",
+    "name": "불스"
+  },
+  {
+    "ticker": "CCL",
+    "name": "카니발 크루즈"
+  },
+  {
+    "ticker": "CIFR",
+    "name": "사이퍼 마이닝"
+  },
+  {
+    "ticker": "CLF",
+    "name": "클리블랜드-클리프스"
+  },
+  {
+    "ticker": "CLSK",
+    "name": "클린스파크"
+  },
+  {
+    "ticker": "CSCO",
+    "name": "시스코 시스템즈"
+  },
+  {
+    "ticker": "CZR",
+    "name": "시저스 엔터테인먼트"
+  },
+  {
+    "ticker": "DNN",
+    "name": "데니슨 마인스"
+  },
+  {
+    "ticker": "EOSE",
+    "name": "이오스 에너지"
+  },
+  {
+    "ticker": "F",
+    "name": "포드 모터"
+  },
+  {
+    "ticker": "FABC",
+    "name": "FABC"
+  },
+  {
+    "ticker": "FIG",
+    "name": "포트리스 인베스트먼트"
+  },
+  {
+    "ticker": "FPS",
+    "name": "플루이드 프레스"
+  },
+  {
+    "ticker": "FRMI",
+    "name": "페르미"
+  },
+  {
+    "ticker": "GAMB",
+    "name": "갬블링닷컴 그룹"
+  },
+  {
+    "ticker": "GGB",
+    "name": "게르다우"
+  },
+  {
+    "ticker": "GRAB",
+    "name": "그랩 링깃"
+  },
+  {
+    "ticker": "HBAN",
+    "name": "헌팅턴 뱅크셰어스"
+  },
+  {
+    "ticker": "HL",
+    "name": "헤클라 마이닝"
+  },
+  {
+    "ticker": "HOOD",
+    "name": "로빈후드 마켓"
+  },
+  {
+    "ticker": "HPE",
+    "name": "휴렛팩커드 엔터프라이즈"
+  },
+  {
+    "ticker": "HPQ",
+    "name": "HP"
+  },
+  {
+    "ticker": "IBM",
+    "name": "IBM"
+  },
+  {
+    "ticker": "INHD",
+    "name": "이노 홀딩스"
+  },
+  {
+    "ticker": "IREN",
+    "name": "아이리스 에너지"
+  },
+  {
+    "ticker": "ITP",
+    "name": "IT 테크 패키징"
+  },
+  {
+    "ticker": "ITUB",
+    "name": "이타우 우니반코"
+  },
+  {
+    "ticker": "KEEL",
+    "name": "용골 인프라"
+  },
+  {
+    "ticker": "KVUE",
+    "name": "켄뷰"
+  },
+  {
+    "ticker": "LFS",
+    "name": "루팩스 홀딩"
+  },
+  {
+    "ticker": "LUMN",
+    "name": "루멘 테크놀로지"
+  },
+  {
+    "ticker": "LUNR",
+    "name": "인튜이티브 머신스"
+  },
+  {
+    "ticker": "LYFT",
+    "name": "리프트"
+  },
+  {
+    "ticker": "LYG",
+    "name": "로이드 뱅킹"
+  },
+  {
+    "ticker": "MSFT",
+    "name": "마이크로소프트"
+  },
+  {
+    "ticker": "NCLH",
+    "name": "노르웨이 크루즈"
+  },
+  {
+    "ticker": "NKE",
+    "name": "나이키"
+  },
+  {
+    "ticker": "NLY",
+    "name": "애널리 캐피탈"
+  },
+  {
+    "ticker": "NOW",
+    "name": "서비스나우"
+  },
+  {
+    "ticker": "NU",
+    "name": "누홀딩스"
+  },
+  {
+    "ticker": "ONDS",
+    "name": "온디맨드"
+  },
+  {
+    "ticker": "OPEN",
+    "name": "오픈도어 테크놀로지"
+  },
+  {
+    "ticker": "ORCL",
+    "name": "오라클"
+  },
+  {
+    "ticker": "OWL",
+    "name": "블루아울 캐피탈"
+  },
+  {
+    "ticker": "PATH",
+    "name": "유아이패스"
+  },
+  {
+    "ticker": "PFE",
+    "name": "화이자"
+  },
+  {
+    "ticker": "PINS",
+    "name": "핀터레스트"
+  },
+  {
+    "ticker": "PLTR",
+    "name": "팔란티어 테크놀로지"
+  },
+  {
+    "ticker": "PLUG",
+    "name": "플러그파워"
+  },
+  {
+    "ticker": "QS",
+    "name": "퀀텀스케이프"
+  },
+  {
+    "ticker": "RIVN",
+    "name": "리비안 오토모티브"
+  },
+  {
+    "ticker": "RKT",
+    "name": "로켓 컴퍼니"
+  },
+  {
+    "ticker": "SAN",
+    "name": "산탄데르 은행"
+  },
+  {
+    "ticker": "SES",
+    "name": "SES AI 코퍼레이션"
+  },
+  {
+    "ticker": "SMCI",
+    "name": "슈퍼마이크로컴퓨터"
+  },
+  {
+    "ticker": "SNAP",
+    "name": "스냅챗"
+  },
+  {
+    "ticker": "SNOW",
+    "name": "스노우플레이크"
+  },
+  {
+    "ticker": "SOFI",
+    "name": "소파이 테크놀로지"
+  },
+  {
+    "ticker": "SOUN",
+    "name": "사운드하운드 AI"
+  },
+  {
+    "ticker": "STAK",
+    "name": "스탁 에너지"
+  },
+  {
+    "ticker": "TE",
+    "name": "T1에너지"
+  },
+  {
+    "ticker": "UMC",
+    "name": "유나이티드 마이크로"
+  },
+  {
+    "ticker": "VALE",
+    "name": "발레 S.A."
+  },
+  {
+    "ticker": "VSME",
+    "name": "VS 미디어"
+  },
+  {
+    "ticker": "WBD",
+    "name": "워너브러더스 디스커버리"
+  },
+  {
+    "ticker": "WIT",
+    "name": "위프로"
+  },
+  {
+    "ticker": "WNW",
+    "name": "메이우 테크놀로지"
+  },
+  {
+    "ticker": "YMM",
+    "name": "풀 트럭 얼라이언스"
+  }
+]

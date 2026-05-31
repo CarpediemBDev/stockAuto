@@ -344,6 +344,381 @@ class BacktestSimulator:
                     metrics['relative_strength'] = metrics['relative_strength'].fillna(0.0)
                 else:
                     metrics['relative_strength'] = 0.0
+
+                # -------------------------------------------------------------
+                # 🚀 17개 차세대 신규 전략용 지표 사전 연산 탑재 (Pure Pandas/NumPy)
+                # -------------------------------------------------------------
+                
+                # [1] Episodic Pivot (갭상승 비율)
+                prev_close = df['Close'].shift(1)
+                metrics['gap_pct'] = ((df['Open'] / prev_close - 1) * 100).fillna(0.0)
+                
+                # [2] Volatility Contraction Pattern (VCP)
+                high_low_ratio_20 = (df['High'].rolling(20).max() - df['Low'].rolling(20).min()) / df['Close']
+                high_low_ratio_10 = (df['High'].rolling(10).max() - df['Low'].rolling(10).min()) / df['Close']
+                high_low_ratio_5 = (df['High'].rolling(5).max() - df['Low'].rolling(5).min()) / df['Close']
+                is_contracting = (high_low_ratio_20 > high_low_ratio_10) & (high_low_ratio_10 > high_low_ratio_5)
+                is_tight = high_low_ratio_5 < 0.08
+                is_vcp_breakout = is_contracting & is_tight & (df['Close'] > df['High'].shift(1).rolling(5).max())
+                metrics['is_vcp_breakout'] = is_vcp_breakout.fillna(False)
+                
+                # [3] Pairs Trading (QQQ 대비 상대가치 Z-Score)
+                if self.qqq_data is not None and not self.qqq_data.empty:
+                    qqq_close_aligned = self.qqq_data['Close'].reindex(df.index).ffill()
+                    spread = df['Close'] / qqq_close_aligned
+                    spread_mean = spread.rolling(20).mean()
+                    spread_std = spread.rolling(20).std()
+                    metrics['spread_zscore'] = ((spread - spread_mean) / spread_std).fillna(0.0)
+                else:
+                    metrics['spread_zscore'] = 0.0
+
+                # [4] Darvas Box (20일 다바스 박스 고가/저가선)
+                metrics['darvas_high'] = df['High'].rolling(20).max().fillna(df['High'])
+                metrics['darvas_low'] = df['Low'].rolling(20).min().fillna(df['Low'])
+                
+                # [5] Z-Score Mean Reversion (일반 주가 Z-Score)
+                ma20_p = df['Close'].rolling(20).mean()
+                std20_p = df['Close'].rolling(20).std()
+                metrics['zscore'] = ((df['Close'] - ma20_p) / std20_p).fillna(0.0)
+                
+                # [6] Heikin-Ashi (하이킨아시 캔들 계산)
+                ha_close = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
+                ha_open = np.zeros(len(df))
+                ha_open[0] = df['Open'].iloc[0]
+                ha_close_vals = ha_close.values
+                for i in range(1, len(df)):
+                    ha_open[i] = (ha_open[i-1] + ha_close_vals[i-1]) / 2
+                metrics['HA_Close'] = ha_close
+                metrics['HA_Open'] = ha_open
+                metrics['HA_Low'] = np.minimum(df['Low'].values, np.minimum(ha_open, ha_close))
+                
+                # [7] Ichimoku (일목균형표 전환선, 기준선, 선행스팬 A/B)
+                high_9 = df['High'].rolling(9).max()
+                low_9 = df['Low'].rolling(9).min()
+                metrics['tenkan_sen'] = (high_9 + low_9) / 2
+                
+                high_26 = df['High'].rolling(26).max()
+                low_26 = df['Low'].rolling(26).min()
+                metrics['kijun_sen'] = (high_26 + low_26) / 2
+                
+                metrics['senkou_span_a'] = ((metrics['tenkan_sen'] + metrics['kijun_sen']) / 2).shift(26)
+                high_52 = df['High'].rolling(52).max()
+                low_52 = df['Low'].rolling(52).min()
+                metrics['senkou_span_b'] = ((high_52 + low_52) / 2).shift(26)
+                
+                # [8] Parabolic SAR (가속변수 기반 SAR 계산)
+                high_vals = df['High'].values
+                low_vals = df['Low'].values
+                close_vals = df['Close'].values
+                sar = np.zeros(len(df))
+                sar_direction = np.ones(len(df))
+                sar[0] = low_vals[0]
+                ep = high_vals[0]
+                af = 0.02
+                for i in range(1, len(df)):
+                    if sar_direction[i-1] == 1:
+                        sar[i] = sar[i-1] + af * (ep - sar[i-1])
+                        sar[i] = min(sar[i], low_vals[i-1], low_vals[max(0, i-2)])
+                        if low_vals[i] < sar[i]:
+                            sar_direction[i] = -1
+                            sar[i] = ep
+                            ep = low_vals[i]
+                            af = 0.02
+                        else:
+                            sar_direction[i] = 1
+                            if high_vals[i] > ep:
+                                ep = high_vals[i]
+                                af = min(0.2, af + 0.02)
+                    else:
+                        sar[i] = sar[i-1] + af * (ep - sar[i-1])
+                        sar[i] = max(sar[i], high_vals[i-1], high_vals[max(0, i-2)])
+                        if high_vals[i] > sar[i]:
+                            sar_direction[i] = 1
+                            sar[i] = ep
+                            ep = high_vals[i]
+                            af = 0.02
+                        else:
+                            sar_direction[i] = -1
+                            if low_vals[i] < ep:
+                                ep = low_vals[i]
+                                af = min(0.2, af + 0.02)
+                metrics['sar'] = sar
+                metrics['sar_direction'] = sar_direction
+                
+                # [9] SuperTrend (ATR 기반 3배 변동성 밴드)
+                hl2 = (df['High'] + df['Low']) / 2
+                basic_ub = hl2 + 3 * metrics['ATR']
+                basic_lb = hl2 - 3 * metrics['ATR']
+                final_ub = basic_ub.copy()
+                final_lb = basic_lb.copy()
+                for i in range(1, len(df)):
+                    if basic_ub.iloc[i] < final_ub.iloc[i-1] or close_vals[i-1] > final_ub.iloc[i-1]:
+                        final_ub.iloc[i] = basic_ub.iloc[i]
+                    else:
+                        final_ub.iloc[i] = final_ub.iloc[i-1]
+                    if basic_lb.iloc[i] > final_lb.iloc[i-1] or close_vals[i-1] < final_lb.iloc[i-1]:
+                        final_lb.iloc[i] = basic_lb.iloc[i]
+                    else:
+                        final_lb.iloc[i] = final_lb.iloc[i-1]
+                supertrend = pd.Series(0.0, index=df.index)
+                st_direction = np.ones(len(df))
+                for i in range(1, len(df)):
+                    if st_direction[i-1] == 1:
+                        if close_vals[i] < final_lb.iloc[i]:
+                            st_direction[i] = -1
+                            supertrend.iloc[i] = final_ub.iloc[i]
+                        else:
+                            st_direction[i] = 1
+                            supertrend.iloc[i] = final_lb.iloc[i]
+                    else:
+                        if close_vals[i] > final_ub.iloc[i]:
+                            st_direction[i] = 1
+                            supertrend.iloc[i] = final_lb.iloc[i]
+                        else:
+                            st_direction[i] = -1
+                            supertrend.iloc[i] = final_ub.iloc[i]
+                metrics['supertrend'] = supertrend
+                metrics['supertrend_direction'] = st_direction
+                
+                # [10] HMA (Hull Moving Average)
+                def _wma(series, period):
+                    w = np.arange(1, period + 1)
+                    return series.rolling(period).apply(lambda x: np.dot(x, w) / w.sum(), raw=True)
+                wma_half = _wma(df['Close'], 10)
+                wma_full = _wma(df['Close'], 20)
+                hma_raw = 2 * wma_half - wma_full
+                metrics['hma'] = _wma(hma_raw, 4).fillna(df['Close'])
+                
+                # [11] Coppock Curve
+                roc_14 = (df['Close'] / df['Close'].shift(14) - 1) * 100
+                roc_11 = (df['Close'] / df['Close'].shift(11) - 1) * 100
+                metrics['coppock'] = _wma(roc_14 + roc_11, 10).fillna(0.0)
+                
+                # [12] Elder Ray Index
+                metrics['elder_ray_bull'] = df['High'] - metrics['EMA20']
+                metrics['elder_ray_bear'] = df['Low'] - metrics['EMA20']
+                
+                # [13] Woodies CCI
+                tp = (df['High'] + df['Low'] + df['Close']) / 3
+                tp_ma = tp.rolling(14).mean()
+                tp_md = tp.rolling(14).apply(lambda x: np.abs(x - x.mean()).mean(), raw=True)
+                metrics['cci'] = ((tp - tp_ma) / (0.015 * tp_md)).fillna(0.0)
+                
+                # [14] Pivot Point (Floor Trader)
+                prev_high_val = df['High'].shift(1)
+                prev_low_val = df['Low'].shift(1)
+                prev_close_val = df['Close'].shift(1)
+                p_val = (prev_high_val + prev_low_val + prev_close_val) / 3
+                metrics['pivot_p'] = p_val
+                metrics['pivot_s1'] = 2 * p_val - prev_high_val
+                metrics['pivot_r1'] = 2 * p_val - prev_low_val
+                metrics['pivot_s2'] = p_val - (prev_high_val - prev_low_val)
+                metrics['pivot_r2'] = p_val + (prev_high_val - prev_low_val)
+                
+                # [15] Fisher Transform
+                high_10 = df['High'].rolling(10).max()
+                low_10 = df['Low'].rolling(10).min()
+                f_val = np.zeros(len(df))
+                fisher = np.zeros(len(df))
+                for i in range(1, len(df)):
+                    h_10 = high_10.iloc[i]
+                    l_10 = low_10.iloc[i]
+                    c = close_vals[i]
+                    if h_10 - l_10 > 0:
+                        v = 0.66 * ((c - l_10) / (h_10 - l_10) - 0.5) + 0.67 * f_val[i-1]
+                    else:
+                        v = 0.0
+                    f_val[i] = max(-0.99, min(0.99, v))
+                    fisher[i] = 0.5 * np.log((1 + f_val[i]) / (1 - f_val[i])) + 0.5 * fisher[i-1]
+                metrics['fisher'] = fisher
+                metrics['fisher_signal'] = pd.Series(fisher, index=df.index).shift(1).fillna(0.0)
+                
+                # [16] Keltner Channel Reversion
+                metrics['keltner_upper'] = metrics['EMA20'] + 2 * metrics['ATR']
+                metrics['keltner_lower'] = metrics['EMA20'] - 2 * metrics['ATR']
+                
+                # [17] 추가 방향성 헬퍼 지표 계산
+                metrics['hma_up'] = (metrics['hma'] > metrics['hma'].shift(1)).astype(float)
+                metrics['coppock_up'] = (metrics['coppock'] > metrics['coppock'].shift(1)).astype(float)
+                metrics['elder_ray_bear_up'] = (metrics['elder_ray_bear'] > metrics['elder_ray_bear'].shift(1)).astype(float)
+                
+                keltner_lower_prev = metrics['keltner_lower'].shift(1)
+                metrics['keltner_reentry'] = ((df['Close'] > metrics['keltner_lower']) & (prev_close <= keltner_lower_prev)).astype(float)
+                
+                # [18] Larry Williams %R 및 NR7 보완 계산
+                high_14_max = df['High'].rolling(14).max()
+                low_14_min = df['Low'].rolling(14).min()
+                metrics['williams_r'] = (((high_14_max - df['Close']) / (high_14_max - low_14_min)) * -100).fillna(-50.0)
+                
+                candle_range = df['High'] - df['Low']
+                metrics['nr7'] = (candle_range == candle_range.rolling(7).min()).astype(float)
+                
+                # -------------------------------------------------------------
+                # 🚀 2차 신규 제미나이 추천 13개 차세대 전략용 지표 사전 연산 탑재
+                # -------------------------------------------------------------
+                
+                # [2-1] PDUFA 임상 스윙 (임상 예정일 기대감 일수 시뮬레이션)
+                metrics['days_to_pdufa'] = (df.index.dayofyear % 90).astype(float)
+                
+                # [2-2] 내부자 매수 추적 (60일 최저점권에서 대량 RVOL 1.5배 이상 동반 지지선 형성)
+                metrics['insider_signal'] = ((df['Low'] == df['Low'].rolling(60).min()) & (metrics['RVOL'] >= 1.5)).astype(float)
+                
+                # [2-3] 공매도 숏 스퀴즈 가속 (RVOL 2.0배 이상 & 10일 고가 돌파)
+                metrics['is_squeeze_setup'] = ((metrics['RVOL'] >= 2.0) & (df['Close'] > df['High'].shift(1).rolling(10).max())).astype(float)
+                
+                # [2-4] 다바스/다크풀 블록딜 가격 추적 (최근 60일 내 최대 거래량 터진 캔들의 종가선 유지)
+                block_print = df['Close'].where(df['Volume'] == df['Volume'].rolling(60).max()).ffill()
+                metrics['dark_pool_price'] = block_print.fillna(df['Close'])
+                
+                # [2-5] 감마 플립 (EMA20 상방 안착 여부)
+                metrics['gamma_flip'] = np.where(df['Close'] > metrics['EMA20'], 1.0, -1.0)
+                
+                # [2-6] 맥스 페인 반전 (옵션 만기일 주간 판정 및 목표 POC)
+                is_exp_wk = (df.index.day >= 15) & (df.index.day <= 21) & (df.index.dayofweek == 4)
+                metrics['is_expiry_week'] = is_exp_wk.astype(float)
+                metrics['max_pain_price'] = metrics['VWAP']
+                
+                # [2-7] 와이코프 스프링 트랩 (전저점 20일 최저가를 이탈했다가 당일 즉시 말아올리며 회복)
+                prev_low_20 = df['Low'].shift(1).rolling(20).min()
+                metrics['is_wyckoff_spring'] = ((df['Low'] < prev_low_20) & (df['Close'] > prev_low_20) & (metrics['RVOL'] >= 1.2)).astype(float)
+                
+                # [2-8] 시초가 갭 페이드 (갭하락 -3% 이하에서 양봉 회복 돌파)
+                metrics['is_gap_fade'] = ((metrics['gap_pct'] <= -3.0) & (df['Close'] > df['Open'])).astype(float)
+                
+                # [2-9] 소셜 버즈 폭증 (RVOL 3.0배 이상 & 3일 연속 누적 상승 5% 이상)
+                buzz_condition = (metrics['RVOL'] >= 3.0) & (((df['Close'] / df['Close'].shift(3) - 1) * 100) >= 5.0)
+                metrics['social_buzz_surge'] = buzz_condition.astype(float)
+                
+                # [2-10] 자산간 DXY/TNX 금리 필터 (QQQ 장세 레짐이 BEARISH가 아닐 때 1.0)
+                if self.qqq_metrics is not None and 'regime' in self.qqq_metrics.columns:
+                    aligned_regime = self.qqq_metrics['regime'].reindex(df.index).ffill()
+                    metrics['cross_asset_ok'] = np.where(aligned_regime != "BEARISH", 1.0, 0.0)
+                else:
+                    metrics['cross_asset_ok'] = 1.0
+                    
+                # [2-11] 볼륨 델타 체결 불균형 (양봉 volume 매수 우위 vs 음봉 volume 매도 우위 프록시)
+                body_ratio = (df['Close'] - df['Low']) / (df['High'] - df['Low']).replace(0, 1)
+                delta = df['Volume'] * (body_ratio - 0.5) * 2
+                metrics['order_flow_delta'] = delta.rolling(5).sum().fillna(0.0)
+                
+                # [2-12] 매물대 프로파일 POC
+                metrics['volume_poc'] = metrics['dark_pool_price']
+                
+                # [2-13] 월말 효과 계절성 매매 (월말 28일부터 다음 달 3일까지의 계절성 리밸런싱 기간)
+                metrics['is_tom'] = ((df.index.day >= 28) | (df.index.day <= 3)).astype(float)
+                
+                # -------------------------------------------------------------
+                # 🚀 3차 신규 동전주 & 폭등주 및 계량 특화 24개 전략 지표 탑재 (Pure Pandas/NumPy)
+                # -------------------------------------------------------------
+                
+                # 동전주 판정 프록시 (가격 10달러 이하)
+                metrics['is_penny'] = (df['Close'] <= 10.0).astype(float)
+                
+                # [3-1] 슈퍼노바 (RVOL 5배 이상 폭증 & 시가 대비 15% 이상 장대양봉)
+                metrics['is_supernova_setup'] = ((metrics['RVOL'] >= 5.0) & ((df['Close'] / df['Open'] - 1) >= 0.15)).astype(float)
+                
+                # [3-2] 모닝 패닉 딥 바잉 (갭하락 포함 장초반 -10% 이상 수직 급락 & RSI 25 이하 과매도 극점)
+                metrics['is_panic_drop'] = (((df['Open'] / df['Close'].shift(1) - 1) <= -0.10) & (metrics['RSI'] <= 25.0)).astype(float)
+                
+                # [3-3] 퍼스트 레드 데이 숏 (5일 누적 +30% 이상 폭등 후 고점 첫 음봉 마감)
+                cum_ret_5 = df['Close'] / df['Close'].shift(5) - 1
+                metrics['is_first_red_day'] = ((cum_ret_5 >= 0.30) & (df['Close'] < df['Open']) & (df['Close'] < df['Close'].shift(1))).astype(float)
+                
+                # [3-4] 펌프 앤 런 눌림목 (최근 20일 내 고가 40% 이상 폭등 후 거래량 급감하며 EMA20 지지선 근처)
+                pump_20 = (df['High'].rolling(20).max() / df['Low'].rolling(20).min() - 1) >= 0.40
+                pullback_ema20 = (df['Close'] >= metrics['EMA20'] * 0.97) & (df['Close'] <= metrics['EMA20'] * 1.03)
+                metrics['is_pump_run_pullback'] = (pump_20 & pullback_ema20 & (metrics['RVOL'] < 0.80)).astype(float)
+                
+                # [3-5] 프리마켓 갭 돌파 (장전 갭상승 7% 이상 & RVOL 2배 이상 거래량 동반)
+                metrics['is_pre_gapper_setup'] = ((metrics['gap_pct'] >= 7.0) & (metrics['RVOL'] >= 2.0)).astype(float)
+                
+                # [3-6] 유통주 회전율 돌파 (회전율 100% 돌파 프록시 - RVOL 8배 폭증)
+                metrics['is_float_rotation'] = (metrics['RVOL'] >= 8.0).astype(float)
+                
+                # [3-7] 테마 2등주 짝짓기 (RVOL 2배 이상 거래량 급증 & RSI 65 이상 강세)
+                metrics['is_sympathy_setup'] = ((metrics['RVOL'] >= 2.0) & (metrics['RSI'] >= 65.0)).astype(float)
+                
+                # [3-8] 워런트 괴리 매수 (60일 최저점 부근 지지 형성 및 최근 변동폭 극소화 안정)
+                low_60 = df['Low'].rolling(60).min()
+                metrics['is_warrant_support'] = ((df['Close'] <= low_60 * 1.05) & (df['Close'].rolling(3).std() / df['Close'] < 0.015)).astype(float)
+                
+                # [3-9] 실적 서프라이즈 갭 앤 드리프트 (갭상승 8% 이상 출발 후 양봉 지지 유지)
+                metrics['is_earnings_gap_drift'] = ((metrics['gap_pct'] >= 8.0) & (df['Close'] >= df['Open'])).astype(float)
+                
+                # [3-10] 유증 악재 소멸 반등 (최근 5일간 -30% 이상 폭락 후 거래대금 실린 종가 양봉)
+                drop_5 = (df['Close'] / df['Close'].shift(5) - 1) <= -0.30
+                metrics['is_offering_rebound'] = (drop_5 & (metrics['RVOL'] >= 3.0) & (df['Close'] > df['Open'])).astype(float)
+                
+                # [3-11] 파라볼릭 폭발 청산 (5일 누적 +50% 폭등 각도 & RVOL 3배 이상 위꼬리 긴 음봉 클라이맥스)
+                slope_5 = (df['Close'] / df['Close'].shift(5) - 1) >= 0.50
+                upper_tail = df['High'] - np.maximum(df['Close'], df['Open'])
+                body = np.abs(df['Close'] - df['Open'])
+                metrics['is_parabolic_climax'] = (slope_5 & (metrics['RVOL'] >= 3.0) & (upper_tail > body)).astype(float)
+                
+                # [3-12] 이중바닥 W 돌파 (60일 최저 지지구간 다중 확인 후 20일 고가선 상방 탈출)
+                is_w = (df['Low'] <= low_60 * 1.05).rolling(20).sum() >= 2
+                metrics['is_double_bottom_break'] = (is_w & (df['Close'] > df['High'].shift(1).rolling(20).max())).astype(float)
+                
+                # [3-13] 오버나이트 갭 사냥 (거래량 3배 이상 & HOD 당일 최고가 99% 부근 마감 양봉)
+                metrics['is_overnight_setup'] = ((metrics['RVOL'] >= 3.0) & (df['Close'] >= df['High'] * 0.99) & (df['Close'] > df['Open'])).astype(float)
+                
+                # [3-14] 역배열 극점 평균회귀 (EMA120선 대비 -40% 하방 이탈 후 EMA20선 위로 상향 복귀)
+                metrics['is_death_rebound'] = ((df['Close'] <= metrics['EMA120'] * 0.60) & (df['Close'] > metrics['EMA20'])).astype(float)
+                
+                # [3-15] 지수 대비 상대강도 주도주 (최근 20일 수익률이 QQQ 인덱스 대비 5일 연속 아웃퍼폼)
+                if self.qqq_data is not None and not self.qqq_data.empty:
+                    qqq_aligned = self.qqq_data['Close'].reindex(df.index).ffill()
+                    stock_ret_20 = df['Close'] / df['Close'].shift(20) - 1
+                    qqq_ret_20 = qqq_aligned / qqq_aligned.shift(20) - 1
+                    rs_20 = stock_ret_20 - qqq_ret_20
+                    metrics['is_relative_strong'] = (rs_20.rolling(5).min() > 0.0).astype(float)
+                else:
+                    metrics['is_relative_strong'] = 0.0
+                    
+                # [3-16] 볼밴 상단 돌파 추세 (볼린저 밴드 상단 돌파 및 대세 밴드 폭 확장)
+                bb_width = std20_p / ma20_p
+                bb_width_expanding = bb_width > bb_width.shift(1)
+                metrics['is_bollinger_trend_up'] = ((df['Close'] > metrics['upper_bb']) & bb_width_expanding).astype(float)
+                
+                # [3-17] MACD 다이버전스 (주가는 신저점을 경신하나 MACD 히스토그램 저점은 높아지는 바닥 신호)
+                price_new_low = df['Close'] <= df['Close'].shift(1).rolling(20).min()
+                macd_not_new_low = metrics['MACD_line'] > metrics['MACD_line'].shift(1).rolling(20).min()
+                metrics['is_macd_divergence_buy'] = (price_new_low & macd_not_new_low).astype(float)
+                
+                # [3-18] 스토캐스틱 극점 반전 (14일 Stochastic Slow %K가 %D를 20 이하 과매도 극점에서 골든크로스)
+                low_14 = df['Low'].rolling(14).min()
+                high_14 = df['High'].rolling(14).max()
+                fast_k = ((df['Close'] - low_14) / (high_14 - low_14) * 100).fillna(50.0)
+                slow_k = fast_k.rolling(3).mean()
+                slow_d = slow_k.rolling(3).mean()
+                metrics['slow_k'] = slow_k
+                metrics['slow_d'] = slow_d
+                metrics['is_stoch_extreme_buy'] = ((slow_k <= 20.0) & (slow_k > slow_d) & (slow_k.shift(1) <= slow_d.shift(1))).astype(float)
+                
+                # [3-19] 켈트너 채널 추세추종 (켈트너 채널 상단 돌파 안착)
+                metrics['is_keltner_trend_up'] = (df['Close'] > metrics['keltner_upper']).astype(float)
+                
+                # [3-20] 삼중 EMA 정배열 교차 (EMA 9 > 20 > 120 정배열 확산 개시)
+                metrics['is_triple_ema_up'] = ((metrics['EMA9'] > metrics['EMA20']) & (metrics['EMA20'] > metrics['EMA120'])).astype(float)
+                
+                # [3-21] 변동성 캔들 수축 돌파 (3일 연속 캔들 고저 편차 진폭 수축 후 저항 돌파)
+                range_pct = (df['High'] - df['Low']) / df['Close']
+                range_contracting = (range_pct < range_pct.shift(1)) & (range_pct.shift(1) < range_pct.shift(2))
+                metrics['is_range_contraction_break'] = (range_contracting & (df['Close'] > df['High'].shift(1))).astype(float)
+                
+                # [3-22] 10배 거래량 장대양봉 돌파 (RVOL 10.0배 초과 스파이크 발생)
+                metrics['is_vol_10x_spike'] = ((metrics['RVOL'] >= 10.0) & (df['Close'] > df['Open'])).astype(float)
+                
+                # [3-23] 피봇 저항/지지 반등 (피봇 S2 지지 반등 또는 R2 상방 돌파)
+                metrics['is_pivot_rebound_buy'] = ((df['Low'] <= metrics['pivot_s2'] * 1.01) & (df['Close'] > metrics['pivot_s2']) | (df['Close'] > metrics['pivot_r2'])).astype(float)
+                
+                # [3-24] VIX 변동성 연계 헷지 (QQQ 지수 변동성 표준편차 상승 억제)
+                if self.qqq_data is not None and not self.qqq_data.empty:
+                    qqq_close_aligned = self.qqq_data['Close'].reindex(df.index).ffill()
+                    qqq_vol = qqq_close_aligned.rolling(20).std() / qqq_close_aligned.rolling(20).mean()
+                    metrics['is_vix_ok'] = (qqq_vol < qqq_vol.rolling(60).mean() * 1.2).astype(float)
+                else:
+                    metrics['is_vix_ok'] = 1.0
                 
                 self.processed_metrics[ticker] = metrics
                 
