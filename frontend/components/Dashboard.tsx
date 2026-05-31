@@ -7,7 +7,7 @@ import PortfolioView from "./PortfolioView";
 import { AssetTrendChart } from "./AssetTrendChart";
 import { LiveTradeTicker } from "./LiveTradeTicker";
 
-import { botAPI, tradeAPI, isCancel } from "@/lib/api";
+import { botAPI, tradeAPI, reportAPI, isCancel } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
 import { getErrorMessage } from "@/lib/utils";
 import { toast } from "sonner";
@@ -18,6 +18,21 @@ export function Dashboard() {
   const [logs, setLogs] = useState<TradeLog[]>([]);
   const [isChartOpen, setIsChartOpen] = useState(false);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
+  const [isReportSending, setIsReportSending] = useState(false);
+
+  const handleTriggerManualReport = async () => {
+    try {
+      setIsReportSending(true);
+      await reportAPI.triggerManualReport();
+      toast.success("텔레그램 일일 결산 리포트 발송에 성공했습니다.");
+    } catch (error) {
+      const msg = getErrorMessage(error);
+      console.error("Failed to trigger manual report:", msg);
+      toast.error(`리포트 발송 실패: ${msg}`);
+    } finally {
+      setIsReportSending(false);
+    }
+  };
 
   const fetchStatus = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -98,28 +113,53 @@ export function Dashboard() {
             기본계좌 현황
           </h1>
           
-          {/* Premium Segmented Control for Currency Selector */}
-          <div className="flex bg-zinc-900 border border-zinc-800 p-0.5 rounded-lg shadow-inner">
+          <div className="flex items-center gap-3">
+            {/* 텔레그램 일일 리포트 수동 기동 버튼 */}
             <button
-              onClick={() => setDisplayCurrency("USD")}
-              className={`px-3 py-1 rounded-md text-xs font-bold transition-all duration-300 ${
-                displayCurrency === "USD"
-                  ? "bg-zinc-800 text-white shadow"
-                  : "text-zinc-500 hover:text-zinc-300"
+              onClick={handleTriggerManualReport}
+              disabled={isReportSending}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-300 border flex items-center gap-1.5 ${
+                isReportSending
+                  ? "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed"
+                  : "bg-indigo-950/40 text-indigo-300 border-indigo-900/60 hover:bg-indigo-900/60 hover:text-white active:scale-95 shadow-lg shadow-indigo-950/20"
               }`}
             >
-              $ USD
+              {isReportSending ? (
+                <>
+                  <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-ping" />
+                  정산 중...
+                </>
+              ) : (
+                <>
+                  <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
+                  📨 리포트 즉시 발송
+                </>
+              )}
             </button>
-            <button
-              onClick={() => setDisplayCurrency("KRW")}
-              className={`px-3 py-1 rounded-md text-xs font-bold transition-all duration-300 ${
-                displayCurrency === "KRW"
-                  ? "bg-zinc-800 text-white shadow"
-                  : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              원 KRW
-            </button>
+
+            {/* Premium Segmented Control for Currency Selector */}
+            <div className="flex bg-zinc-900 border border-zinc-800 p-0.5 rounded-lg shadow-inner">
+              <button
+                onClick={() => setDisplayCurrency("USD")}
+                className={`px-3 py-1 rounded-md text-xs font-bold transition-all duration-300 ${
+                  displayCurrency === "USD"
+                    ? "bg-zinc-800 text-white shadow"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                $ USD
+              </button>
+              <button
+                onClick={() => setDisplayCurrency("KRW")}
+                className={`px-3 py-1 rounded-md text-xs font-bold transition-all duration-300 ${
+                  displayCurrency === "KRW"
+                    ? "bg-zinc-800 text-white shadow"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                원 KRW
+              </button>
+            </div>
           </div>
         </div>
 

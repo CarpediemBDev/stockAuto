@@ -72,3 +72,16 @@ def get_report_stats(current_user: User = Depends(get_current_user), db: Session
         },
         "chart_data": chart_data
     })
+
+@router.post("/trigger-manual-report")
+def trigger_manual_report(current_user: User = Depends(get_current_user)):
+    """
+    사용자가 대시보드 화면에서 원할 때 수동으로 텔레그램 일일 리포트를 강제 기동합니다.
+    """
+    from app.core.telegram import send_daily_report_to_all_users_sync
+    try:
+        send_daily_report_to_all_users_sync()
+        return success_response(message="텔레그램 일일 결산 리포트 발송에 성공했습니다.")
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"수동 결산 리포트 발송 중 장애 발생: {str(e)}")
