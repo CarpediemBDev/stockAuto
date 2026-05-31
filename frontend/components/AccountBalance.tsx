@@ -10,6 +10,8 @@ import { toast } from "sonner";
 interface WalletSlot {
   cash: number;
   stock_value: number;
+  name?: string;
+  weight?: number;
 }
 
 interface BalanceData {
@@ -22,10 +24,7 @@ interface BalanceData {
   profit_loss?: number;
   fx_rate?: number;
   qqq_regime?: "BULLISH" | "BEARISH" | "NEUTRAL";
-  wallet_allocation?: {
-    episodic_pivot: WalletSlot;
-    regime_switching: WalletSlot;
-  };
+  wallet_allocation?: Record<string, WalletSlot>;
   focused_radar_tickers?: string[];
 }
 
@@ -98,30 +97,23 @@ export function AccountBalance({
   const isProfit = balance.profit_rate >= 0;
   const regime = balance.qqq_regime || "NEUTRAL";
 
-  // 격리형 지갑 기본 분배 폴백 처리
-  const defaultWalletAlloc = {
-    episodic_pivot: { cash: balance.cash_balance * 0.5, stock_value: balance.stock_balance * 0.5 },
-    regime_switching: { cash: balance.cash_balance * 0.5, stock_value: balance.stock_balance * 0.5 }
-  };
-  const epAllocation = balance.wallet_allocation?.episodic_pivot || defaultWalletAlloc.episodic_pivot;
-  const rsAllocation = balance.wallet_allocation?.regime_switching || defaultWalletAlloc.regime_switching;
+  // 격리형 지갑 동적 분배 리스트 획득 및 폴백 처리
+  const walletAllocations = balance.wallet_allocation
+    ? Object.entries(balance.wallet_allocation).map(([key, value]) => ({
+        key,
+        cash: value.cash,
+        stock_value: value.stock_value,
+        total: value.cash + value.stock_value,
+        name: value.name || (key === "episodic_pivot" ? "에피소딕 피벗 (Episodic Pivot)" : key === "regime_switching" ? "마스터 레짐스위칭 V2" : key),
+        weight: value.weight || 0.5
+      }))
+    : [
+        { key: "episodic_pivot", cash: balance.cash_balance * 0.5, stock_value: balance.stock_balance * 0.5, total: (balance.cash_balance + balance.stock_balance) * 0.5, name: "에피소딕 피벗 (Episodic Pivot)", weight: 0.5 },
+        { key: "regime_switching", cash: balance.cash_balance * 0.5, stock_value: balance.stock_balance * 0.5, total: (balance.cash_balance + balance.stock_balance) * 0.5, name: "마스터 레짐스위칭 V2", weight: 0.5 }
+      ];
 
-  const epTotal = epAllocation.cash + epAllocation.stock_value;
-  const rsTotal = rsAllocation.cash + rsAllocation.stock_value;
-  const totalCalculated = epTotal + rsTotal;
+  const totalCalculated = walletAllocations.reduce((sum, item) => sum + item.total, 0);
   const denom = totalCalculated > 0 ? totalCalculated : 1;
-
-  // 계좌 전체 대비 4분할 비율 (상단 100% 게이지용)
-  const epStockPctOfTotal = (epAllocation.stock_value / denom) * 100;
-  const epCashPctOfTotal = (epAllocation.cash / denom) * 100;
-  const rsStockPctOfTotal = (rsAllocation.stock_value / denom) * 100;
-  const rsCashPctOfTotal = (rsAllocation.cash / denom) * 100;
-
-  // 슬롯 내부 개별 비율 (카드 안 게이지용)
-  const epInternalCashPct = epTotal > 0 ? (epAllocation.cash / epTotal) * 100 : 100;
-  const epInternalStockPct = epTotal > 0 ? (epAllocation.stock_value / epTotal) * 100 : 0;
-  const rsInternalCashPct = rsTotal > 0 ? (rsAllocation.cash / rsTotal) * 100 : 100;
-  const rsInternalStockPct = rsTotal > 0 ? (rsAllocation.stock_value / rsTotal) * 100 : 0;
 
   return (
     <div className="flex flex-col gap-6 mb-6">
@@ -226,9 +218,9 @@ export function AccountBalance({
               <div>
                 <h3 className="text-lg font-black text-white tracking-tight flex items-center gap-2.5">
                   <ShieldAlert size={20} className="text-indigo-400" />
-                  격리형 2슬롯 통합 자산 원장 (Unified Slot Asset Ledger)
+                  전략 격리 통합 자산 원장 (Unified Strategy Asset Ledger)
                 </h3>
-                <p className="text-[11px] text-zinc-400 mt-0.5">EP(50%) 및 RS V2(50%) 슬롯의 자본 격리 비율과 실시간 수급 투자 현황을 직관적으로 감시하는 연동 원장입니다.</p>
+                <p className="text-[11px] text-zinc-400 mt-0.5">대결에 가동 중인 각 전략의 실시간 예수금 및 주식 평가 지분 비율을 감시하는 자산 원장입니다.</p>
               </div>
             </div>
 
@@ -239,209 +231,186 @@ export function AccountBalance({
                   Total Capital Allocation Gauge (통합 자산 지분 게이지)
                 </span>
                 <span className="text-[10px] text-zinc-400 font-bold font-mono">
-                  가동: {formatMoney(epTotal + (regime === "BULLISH" ? rsTotal : epAllocation.stock_value))} / 현금격리: {formatMoney(regime === "BULLISH" ? 0 : rsAllocation.cash)}
+                  총 자산 평가: {formatMoney(balance.total_asset)}
                 </span>
               </div>
               
-              {/* 4-Segment Progress Bar */}
+              {/* Dynamic Segments Progress Bar */}
               <div className="h-4 bg-zinc-900/60 rounded-full overflow-hidden flex shadow-inner border border-zinc-800/50 relative">
-                {/* 1. EP Stock (Green) */}
-                {epStockPctOfTotal > 0 && (
-                  <div 
-                    className="h-full bg-gradient-to-r from-emerald-600 to-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)] transition-all duration-500 shrink-0"
-                    style={{ width: `${epStockPctOfTotal}%` }}
-                    title={`EP 주식 평가금: ${formatMoney(epAllocation.stock_value)} (${epStockPctOfTotal.toFixed(1)}%)`}
-                  />
-                )}
-                {/* 2. EP Cash (Blue) */}
-                {epCashPctOfTotal > 0 && (
-                  <div 
-                    className="h-full bg-gradient-to-r from-blue-600 to-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.3)] transition-all duration-500 shrink-0"
-                    style={{ width: `${epCashPctOfTotal}%` }}
-                    title={`EP 가용 예수금: ${formatMoney(epAllocation.cash)} (${epCashPctOfTotal.toFixed(1)}%)`}
-                  />
-                )}
-                {/* 3. RS Stock (Purple) */}
-                {rsStockPctOfTotal > 0 && (
-                  <div 
-                    className="h-full bg-gradient-to-r from-purple-600 to-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.3)] transition-all duration-500 shrink-0"
-                    style={{ width: `${rsStockPctOfTotal}%` }}
-                    title={`RS 주식 평가금: ${formatMoney(rsAllocation.stock_value)} (${rsStockPctOfTotal.toFixed(1)}%)`}
-                  />
-                )}
-                {/* 4. RS Cash (Dark Blue/Gray) */}
-                {rsCashPctOfTotal > 0 && (
-                  <div 
-                    className={cn(
-                      "h-full transition-all duration-500 shrink-0",
-                      regime === "BULLISH"
-                        ? "bg-gradient-to-r from-indigo-700 to-indigo-600 shadow-[0_0_10px_rgba(99,102,241,0.3)]"
-                        : "bg-zinc-800"
-                    )}
-                    style={{ width: `${rsCashPctOfTotal}%` }}
-                    title={regime === "BULLISH" 
-                      ? `RS 가용 예수금: ${formatMoney(rsAllocation.cash)} (${rsCashPctOfTotal.toFixed(1)}%)`
-                      : `RS 현금 격리 보호: ${formatMoney(rsAllocation.cash)} (${rsCashPctOfTotal.toFixed(1)}%)`
-                    }
-                  />
-                )}
+                {walletAllocations.map((item, idx) => {
+                  const stockPct = (item.stock_value / denom) * 100;
+                  const cashPct = (item.cash / denom) * 100;
+                  
+                  // Dynamic HSL colors for up to 5 strategies
+                  const colors = [
+                    { stock: "from-emerald-600 to-emerald-500", cash: "from-blue-600 to-blue-500" },
+                    { stock: "from-purple-600 to-purple-500", cash: "from-indigo-750 to-indigo-650" },
+                    { stock: "from-amber-600 to-amber-500", cash: "from-yellow-700 to-yellow-600" },
+                    { stock: "from-rose-600 to-rose-500", cash: "from-pink-700 to-pink-600" },
+                    { stock: "from-cyan-600 to-cyan-500", cash: "from-teal-700 to-teal-600" }
+                  ];
+                  const color = colors[idx % colors.length];
+                  
+                  return (
+                    <React.Fragment key={item.key}>
+                      {stockPct > 0 && (
+                        <div 
+                          className={cn("h-full bg-gradient-to-r transition-all duration-500 shrink-0", color.stock)}
+                          style={{ width: `${stockPct}%` }}
+                          title={`${item.name} 주식: ${formatMoney(item.stock_value)} (${stockPct.toFixed(1)}%)`}
+                        />
+                      )}
+                      {cashPct > 0 && (
+                        <div 
+                          className={cn(
+                            "h-full bg-gradient-to-r transition-all duration-500 shrink-0", 
+                            (item.key === "regime_switching" && regime !== "BULLISH") ? "bg-zinc-800" : color.cash
+                          )}
+                          style={{ width: `${cashPct}%` }}
+                          title={item.key === "regime_switching" && regime !== "BULLISH"
+                            ? `${item.name} 격리현금 보호: ${formatMoney(item.cash)} (${cashPct.toFixed(1)}%)`
+                            : `${item.name} 예수금: ${formatMoney(item.cash)} (${cashPct.toFixed(1)}%)`
+                          }
+                        />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </div>
               
               {/* Legend Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-[10px] font-bold text-zinc-400">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_6px_#10b981]" />
-                  <span>EP 주식 ({epStockPctOfTotal.toFixed(1)}%)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-[0_0_6px_#3b82f6]" />
-                  <span>EP 현금 ({epCashPctOfTotal.toFixed(1)}%)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-purple-500 shadow-[0_0_6px_#a855f7]" />
-                  <span>RS 주식 ({rsStockPctOfTotal.toFixed(1)}%)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={cn(
-                    "w-2.5 h-2.5 rounded-full",
-                    regime === "BULLISH" ? "bg-indigo-500 shadow-[0_0_6px_#6366f1]" : "bg-zinc-700"
-                  )} />
-                  <span>
-                    {regime === "BULLISH" ? `RS 가동현금 (${rsCashPctOfTotal.toFixed(1)}%)` : `RS 격리현금 (${rsCashPctOfTotal.toFixed(1)}%)`}
-                  </span>
-                </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-2 mt-4 text-[10px] font-bold text-zinc-400">
+                {walletAllocations.map((item, idx) => {
+                  const colors = [
+                    { stock: "bg-emerald-500 shadow-[0_0_6px_#10b981]", cash: "bg-blue-500 shadow-[0_0_6px_#3b82f6]" },
+                    { stock: "bg-purple-500 shadow-[0_0_6px_#a855f7]", cash: "bg-indigo-500 shadow-[0_0_6px_#6366f1]" },
+                    { stock: "bg-amber-500 shadow-[0_0_6px_#f59e0b]", cash: "bg-yellow-500 shadow-[0_0_6px_#eab308]" },
+                    { stock: "bg-rose-500 shadow-[0_0_6px_#f43f5e]", cash: "bg-pink-500 shadow-[0_0_6px_#ec4899]" },
+                    { stock: "bg-cyan-500 shadow-[0_0_6px_#06b6d4]", cash: "bg-teal-500 shadow-[0_0_6px_#14b8a6]" }
+                  ];
+                  const color = colors[idx % colors.length];
+                  const stockPct = (item.stock_value / denom) * 100;
+                  const cashPct = (item.cash / denom) * 100;
+                  
+                  return (
+                    <React.Fragment key={item.key}>
+                      <div className="flex items-center gap-1.5">
+                        <span className={cn("w-2 h-2 rounded-full", color.stock)} />
+                        <span>{item.name} 주식 ({stockPct.toFixed(1)}%)</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className={cn(
+                          "w-2 h-2 rounded-full", 
+                          (item.key === "regime_switching" && regime !== "BULLISH") ? "bg-zinc-750" : color.cash
+                        )} />
+                        <span>
+                          {item.key === "regime_switching" && regime !== "BULLISH"
+                            ? `${item.name} 격리현금`
+                            : `${item.name} 예수금`
+                          } ({cashPct.toFixed(1)}%)
+                        </span>
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
               </div>
             </div>
 
-            {/* 듀얼 슬롯 1대1 비교 카드 그리드 */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {/* 1. EP Slot */}
-              <div className="bg-zinc-900/30 border border-zinc-800/80 hover:border-emerald-500/20 transition-all duration-300 rounded-2xl p-5 flex flex-col justify-between group">
-                <div>
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 bg-emerald-500/10 rounded-lg text-emerald-400 group-hover:scale-110 transition-transform">
-                        <Zap size={16} className="animate-pulse" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold text-white tracking-tight">EP 에피소딕 피벗 슬롯</h4>
-                        <p className="text-[10px] text-zinc-500">Episodic Pivot Strategy</p>
-                      </div>
-                    </div>
-                    <div className="relative group/tooltip cursor-help">
-                      <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 uppercase tracking-wide animate-pulse">
-                        가동중 ℹ️
-                      </span>
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 bg-zinc-950 border border-zinc-800 text-[10px] text-zinc-300 rounded-xl opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity duration-200 z-50 shadow-2xl leading-normal text-left font-normal normal-case">
-                        총 자산의 50% 자금을 배정받아 개별 변동성 돌파 매매전략(EP)으로 상시 가동 중이며, 나머지 50% 비중은 RS 슬롯에 할당됩니다.
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-3 mt-4">
+            {/* 듀얼/단일 슬롯 전략 비교 카드 그리드 */}
+            <div className={cn(
+              "grid gap-5",
+              walletAllocations.length === 1 ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"
+            )}>
+              {walletAllocations.map((item, idx) => {
+                const total = item.cash + item.stock_value;
+                const internalCashPct = total > 0 ? (item.cash / total) * 100 : 100;
+                const internalStockPct = total > 0 ? (item.stock_value / total) * 100 : 0;
+                
+                // Color variants for cards
+                const cardColors = [
+                  { border: "hover:border-emerald-500/20", iconBg: "bg-emerald-500/10 text-emerald-400", progress: "bg-emerald-500/90 shadow-[0_0_10px_#10b981]" },
+                  { border: "hover:border-purple-500/20", iconBg: "bg-purple-500/10 text-purple-400", progress: "bg-purple-500/90 shadow-[0_0_10px_#a855f7]" },
+                  { border: "hover:border-amber-500/20", iconBg: "bg-amber-500/10 text-amber-400", progress: "bg-amber-500/90 shadow-[0_0_10px_#f59e0b]" },
+                  { border: "hover:border-rose-500/20", iconBg: "bg-rose-500/10 text-rose-400", progress: "bg-rose-500/90 shadow-[0_0_10px_#f43f5e]" },
+                  { border: "hover:border-cyan-500/20", iconBg: "bg-cyan-500/10 text-cyan-400", progress: "bg-cyan-500/90 shadow-[0_0_10px_#06b6d4]" }
+                ];
+                const cardColor = cardColors[idx % cardColors.length];
+                const textHighlight = idx === 0 ? "text-emerald-400" : "text-purple-400";
+                
+                return (
+                  <div key={item.key} className={cn(
+                    "bg-zinc-900/30 border border-zinc-800/80 transition-all duration-300 rounded-2xl p-5 flex flex-col justify-between group",
+                    cardColor.border
+                  )}>
                     <div>
-                      <div className="flex justify-between text-xs text-zinc-400 mb-1">
-                        <span>가용 예수금 (Cash)</span>
-                        <span className="font-bold text-white">{formatMoney(epAllocation.cash)}</span>
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className={cn("p-1.5 rounded-lg group-hover:scale-110 transition-transform", cardColor.iconBg)}>
+                            {item.key === "regime_switching" ? <Crown size={16} /> : <Zap size={16} />}
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-white tracking-tight">{item.name}</h4>
+                            <p className="text-[10px] text-zinc-500">{item.key.toUpperCase()} PORTFOLIO</p>
+                          </div>
+                        </div>
+                        <div className="relative group/tooltip cursor-help">
+                          <span className={cn(
+                            "text-[9px] font-extrabold px-1.5 py-0.5 rounded border uppercase tracking-wide",
+                            (item.key === "regime_switching" && regime !== "BULLISH")
+                              ? "bg-amber-500/15 text-amber-400 border-amber-500/20"
+                              : "bg-emerald-500/15 text-emerald-400 border-emerald-500/20 animate-pulse"
+                          )}>
+                            {(item.key === "regime_switching" && regime !== "BULLISH") ? "격리중 🛡️" : "가동중 ℹ️"}
+                          </span>
+                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 bg-zinc-950 border border-zinc-800 text-[10px] text-zinc-300 rounded-xl opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity duration-200 z-50 shadow-2xl leading-normal text-left font-normal normal-case">
+                            {item.key === "regime_switching" && regime !== "BULLISH"
+                              ? "상승장이 아닐 때는 리스크 보호를 위해 봇 매수를 차단하고 지분 자산을 100% 현금 상태로 금고에 안전하게 격리 보호 중입니다."
+                              : `계좌 총 자산의 ${(item.weight * 100).toFixed(0)}% 비중을 할당받아 ${item.name} 전략에 입각하여 안전하게 실시간 기동 중입니다.`}
+                          </div>
+                        </div>
                       </div>
-                      <div className="h-2 bg-zinc-800/60 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-blue-500/90 shadow-[0_0_10px_#3b82f6] transition-all duration-500" 
-                          style={{ width: `${epInternalCashPct}%` }}
-                        />
+                      
+                      <div className="space-y-3 mt-4">
+                        <div>
+                          <div className="flex justify-between text-xs text-zinc-400 mb-1">
+                            <span>가용 예수금 (Cash)</span>
+                            <span className="font-bold text-white">{formatMoney(item.cash)}</span>
+                          </div>
+                          <div className="h-2 bg-zinc-800/60 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-blue-500/90 shadow-[0_0_10px_#3b82f6] transition-all duration-500" 
+                              style={{ width: `${internalCashPct}%` }}
+                            />
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <div className="flex justify-between text-xs text-zinc-400 mb-1">
+                            <span>주식 평가금 (Stock)</span>
+                            <span className="font-bold text-white">{formatMoney(item.stock_value)}</span>
+                          </div>
+                          <div className="h-2 bg-zinc-800/60 rounded-full overflow-hidden">
+                            <div 
+                              className={cn("h-full transition-all duration-500", cardColor.progress)}
+                              style={{ width: `${internalStockPct}%` }}
+                            />
+                          </div>
+                        </div>
                       </div>
                     </div>
                     
-                    <div>
-                      <div className="flex justify-between text-xs text-zinc-400 mb-1">
-                        <span>주식 평가금 (Stock)</span>
-                        <span className="font-bold text-white">{formatMoney(epAllocation.stock_value)}</span>
-                      </div>
-                      <div className="h-2 bg-zinc-800/60 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-emerald-500/90 shadow-[0_0_10px_#10b981] transition-all duration-500" 
-                          style={{ width: `${epInternalStockPct}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="mt-4 pt-3 border-t border-zinc-800/50 flex justify-between items-center text-xs">
-                  <span className="text-zinc-500 font-medium">EP 슬롯 총자산 (지분 50%)</span>
-                  <span className="font-black text-emerald-400">{formatMoney(epTotal)}</span>
-                </div>
-              </div>
-
-              {/* 2. RS Slot */}
-              <div className="bg-zinc-900/30 border border-zinc-800/80 hover:border-purple-500/20 transition-all duration-300 rounded-2xl p-5 flex flex-col justify-between group">
-                <div>
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 bg-purple-500/10 rounded-lg text-purple-400 group-hover:scale-110 transition-transform">
-                        <Crown size={16} />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold text-white tracking-tight">RS 마스터 레짐스위칭 V2</h4>
-                        <p className="text-[10px] text-zinc-500">Regime Switching Strategy</p>
-                      </div>
-                    </div>
-                    <div className="relative group/tooltip cursor-help">
-                      <span className={cn(
-                        "text-[9px] font-extrabold px-1.5 py-0.5 rounded border uppercase tracking-wide",
-                        regime === "BULLISH" 
-                          ? "bg-purple-500/15 text-purple-400 border-purple-500/20 animate-pulse" 
-                          : "bg-amber-500/15 text-amber-400 border-amber-500/20"
-                      )}>
-                        {regime === "BULLISH" ? "가동중 ℹ️" : "격리중 🛡️"}
+                    <div className="mt-4 pt-3 border-t border-zinc-800/50 flex justify-between items-center text-xs">
+                      <span className="text-zinc-500 font-medium flex items-center gap-1">
+                        전략 총자산 (지분 {(item.weight * 100).toFixed(0)}%)
+                        {item.key === "regime_switching" && regime !== "BULLISH" && (
+                          <span className="text-amber-500 text-[8px] font-black bg-amber-500/10 px-1 rounded border border-amber-500/20">🛡️ 100% 현금 격리</span>
+                        )}
                       </span>
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 bg-zinc-950 border border-zinc-800 text-[10px] text-zinc-300 rounded-xl opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity duration-200 z-50 shadow-2xl leading-normal text-left font-normal normal-case">
-                        {regime === "BULLISH" 
-                          ? "총 자산의 50% 자금을 할당받아 상승장 전용 불타기 피라미딩 전략(RS V2)을 적극 가동 중입니다."
-                          : "상승장이 아닐 때는 손실 방지를 위해 자금 가동을 중단하고 50% 자본을 100% 현금 상태로 금고에 안전하게 격리(Quarantine)하여 보호 중입니다."}
-                      </div>
+                      <span className={cn("font-black", textHighlight)}>{formatMoney(total)}</span>
                     </div>
                   </div>
-                  
-                  <div className="space-y-3 mt-4">
-                    <div>
-                      <div className="flex justify-between text-xs text-zinc-400 mb-1">
-                        <span>가용 예수금 (Cash)</span>
-                        <span className="font-bold text-white">{formatMoney(rsAllocation.cash)}</span>
-                      </div>
-                      <div className="h-2 bg-zinc-800/60 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-blue-500/90 shadow-[0_0_10px_#3b82f6] transition-all duration-500" 
-                          style={{ width: `${rsInternalCashPct}%` }}
-                        />
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <div className="flex justify-between text-xs text-zinc-400 mb-1">
-                        <span>주식 평가금 (Stock)</span>
-                        <span className="font-bold text-white">{formatMoney(rsAllocation.stock_value)}</span>
-                      </div>
-                      <div className="h-2 bg-zinc-800/60 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-purple-500/90 shadow-[0_0_10px_#a855f7] transition-all duration-500" 
-                          style={{ width: `${rsInternalStockPct}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="mt-4 pt-3 border-t border-zinc-800/50 flex justify-between items-center text-xs">
-                  <span className="text-zinc-500 font-medium flex items-center gap-1">
-                    RS 슬롯 총자산 (지분 50%)
-                    {regime !== "BULLISH" && (
-                      <span className="text-amber-500 text-[8px] font-black bg-amber-500/10 px-1 rounded border border-amber-500/20">🛡️ 100% 현금 격리</span>
-                    )}
-                  </span>
-                  <span className="font-black text-purple-400">{formatMoney(rsTotal)}</span>
-                </div>
-              </div>
+                );
+              })}
             </div>
           </div>
         </div>

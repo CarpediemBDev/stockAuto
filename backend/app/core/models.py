@@ -40,6 +40,8 @@ class UserSettings(Base):
     is_running = Column(Boolean, default=False)
     is_real_enabled = Column(Boolean, default=False)
     
+    strategy_type = Column(String, default="regime_switching", nullable=False)
+    
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships

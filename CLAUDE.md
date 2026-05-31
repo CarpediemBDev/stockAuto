@@ -5,7 +5,6 @@
 # 1. 협업 및 프로젝트 수칙 (반드시 준수)
 
 @docs/RULES.md
-@docs/AGENTS.md
 
 
 # 2. 시스템 아키텍처 및 파일 맵
@@ -22,4 +21,4 @@
 # 4. 설계 및 작업 현황
 
 @docs/implementation_plan.md
-@docs/task.md
+@docs/tasks/ (일자별 일일 작업 현황판 YYYY-MM-DD.md 형식으로 저장 및 관리)

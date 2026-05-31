@@ -34,7 +34,8 @@ async def get_balance(
         sentiment = await check_market_sentiment()
         
         # 💡 각 격리형 슬롯별 지갑 자산 정밀 분배 계산 (수학적 격리)
-        ms_manager = MultiStrategyManager()
+        strategy_type = current_user.settings.strategy_type if current_user.settings else "regime_switching"
+        ms_manager = MultiStrategyManager(strategy_type=strategy_type)
         exchange_rate = FXRateCache.get_rate()
         
         total_asset_krw = balance.get("total_asset", 10000000.0)
@@ -47,14 +48,13 @@ async def get_balance(
         slot_allocations = ms_manager.calculate_slots_allocation(total_asset_usd, cash_balance_usd, holdings, sentiment)
         
         wallet_allocation = {
-            "episodic_pivot": {
-                "cash": int(slot_allocations["episodic_pivot"]["cash_balance"] * exchange_rate),
-                "stock_value": int(slot_allocations["episodic_pivot"]["stock_value"] * exchange_rate)
-            },
-            "regime_switching": {
-                "cash": int(slot_allocations["regime_switching"]["cash_balance"] * exchange_rate),
-                "stock_value": int(slot_allocations["regime_switching"]["stock_value"] * exchange_rate)
+            slot_key: {
+                "cash": int(alloc_info["cash_balance"] * exchange_rate),
+                "stock_value": int(alloc_info["stock_value"] * exchange_rate),
+                "name": alloc_info.get("name", slot_key),
+                "weight": alloc_info.get("weight", 1.0)
             }
+            for slot_key, alloc_info in slot_allocations.items()
         }
         
         # 💡 실시간 최정예 돌파 레이더 종목 (RVOL >= 2.0 이상 및 거래량 응축 종목)
@@ -71,10 +71,22 @@ async def get_balance(
         print(f"[Balance Enricher] Error enriching balance data: {e}")
         # 오류 발생 시 기본값으로 폴백하여 대시보드 중단 방지
         balance["qqq_regime"] = "NEUTRAL"
-        balance["wallet_allocation"] = {
-            "episodic_pivot": {"cash": int(balance.get("cash_balance", 10000000.0) * 0.5), "stock_value": 0},
-            "regime_switching": {"cash": int(balance.get("cash_balance", 10000000.0) * 0.5), "stock_value": 0}
-        }
+        try:
+            ms_manager = MultiStrategyManager(strategy_type=current_user.settings.strategy_type if current_user.settings else "regime_switching")
+            balance["wallet_allocation"] = {
+                slot_key: {
+                    "cash": int(balance.get("cash_balance", 10000000.0) * slot_info["weight"]), 
+                    "stock_value": 0,
+                    "name": slot_info.get("name", slot_key),
+                    "weight": slot_info.get("weight", 1.0)
+                }
+                for slot_key, slot_info in ms_manager.SLOTS.items()
+            }
+        except Exception:
+            balance["wallet_allocation"] = {
+                "regime_switching": {"cash": int(balance.get("cash_balance", 10000000.0) * 0.5), "stock_value": 0, "name": "마스터 레짐스위칭 V2", "weight": 0.5},
+                "episodic_pivot": {"cash": int(balance.get("cash_balance", 10000000.0) * 0.5), "stock_value": 0, "name": "에피소딕 피벗 (Episodic Pivot)", "weight": 0.5}
+            }
         balance["focused_radar_tickers"] = ["AKAN", "WNW", "ASTC", "SDA", "HUBC"]
         
     return success_response(data=balance)

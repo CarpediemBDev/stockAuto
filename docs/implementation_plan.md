@@ -1,142 +1,135 @@
-# 🏆 [구현 계획서] StockAuto 고가용성 운영을 위한 모니터링 및 로그 관리 시스템 구축 계획
+# 🏆 [구현 계획서] 사용자별 백테스트 아레나 전략 대결 시스템 (Strategy Battle Arena)
 
-본 계획서는 StockAuto를 로컬 시뮬레이션 환경에서 24/7 실전 운영 환경(Production)으로 안전하게 이관하기 위해, **예기치 못한 장애(네트워크 단절, KIS API 제한, DB 교착, 메모리 누수 등)를 선제적으로 감지하고 신속하게 트러블슈팅할 수 있는 고가용성 모니터링 및 구조화된 로그 관리 체계**를 구축하는 엔지니어링 설계 도안입니다.
+본 계획서는 단일 계좌 내에서 슬롯을 나누어 돌리던 기존 방식을 확장하여, **여러 명의 경쟁 사용자(admin, admin2, admin3 등)가 각각 자신만의 고유한 전략을 배정받아 가상 모의투자 환경에서 실시간 수익률 대결을 펼칠 수 있는 멀티테넌시 전략 경쟁(Battle) 아키텍처**로 고도화하기 위한 설계 도안입니다.
 
 ---
 
 ## 🚨 사용자 검토 요구사항 (User Review Required)
 
 > [!IMPORTANT]
-> **1. 모니터링 및 알림 채널의 이원화 (Admin vs User)**
-> * 현재 StockAuto는 `telegram.py`를 통해 매매 체결 내용과 자산 변동 사항을 사용자에게 전송하고 있습니다.
-> * 시스템 장애(SQLite DB Lock, 디스크 용량 초과, 429 API 한도 제한, 백그라운드 스레드 사망 등)는 일반 투자 알림과 섞이지 않도록 **Admin 전용 Telegram 채널 또는 Discord Webhook**으로 이원화하여 전송하도록 설계합니다.
+> **1. 모의투자 가동 및 시드머니 공정성**
+> * 대결에 참가하는 모든 사용자(`admin`, `admin2`, `admin3`, `admin4`, `admin5`)는 최초 생성 시 **가상 예수금 1,000만 원 (10,000,000 KRW)**과 **시뮬레이션 가동 플래그(`is_running = True`, `trade_mode = 'SIMULATED'`)**가 활성화된 채 부트스트래핑됩니다.
+> * 각 유저별로 배정된 고유 전략은 미국 정규 주식 시장이 시작되면 완전히 병렬적이고 격리된 환경에서 동시에 매매를 시작하게 됩니다.
 > 
-> **2. 클라우드 서버리스(GCP Cloud Run) vs 단일 가상 서버(VPS) 호스팅 환경 결정**
-> * 배포 환경에 따라 로그 수집 방식과 모니터링 스택이 달라집니다:
->   * **GCP Cloud Run (서버리스)**: Google Cloud Logging 및 Cloud Monitoring을 기본 연동하여 로그 수집 및 메트릭 경고를 서버리스 형태로 비용 효율적으로 처리합니다.
->   * **단일 VPS (Ubuntu 등)**: **PLG Stack (Prometheus + Loki + Grafana)** 을 도커 컴포즈로 가볍게 띄워 중앙 집중형 실시간 대시보드와 로그 탐색 환경을 자체 구축합니다.
+> **2. 슬롯 분할 vs 단일 100% 매매 모드 통합**
+> * 사용자가 단일 전략(예: 쿨라매기 돌파)을 선택한 경우, 계좌 예수금의 100%를 해당 단일 전략에 풀-배팅하여 대결이 진행됩니다.
+> * 기존 `MultiStrategyManager`를 업그레이드하여, 단일 전략을 돌릴 때는 **1-슬롯 (지분 100% 가용)**으로 자동 구성되게 하여 기존 매매 핵심 스케줄러 루프를 단 한 줄도 손대지 않고 깔끔하게 소화하도록 설계합니다.
 
 ---
 
 ## 💬 오픈 질문 (Open Questions)
 
-> [!WARNING]
-> 1. **Sentry(센트리) 연동 여부**: 실시간 실전 매매에서 발생하는 예외(Exception)와 에러 콜스택을 가장 강력하고 신속하게 추적할 수 있는 Sentry 연동을 추가할까요? (무료 플랜으로도 충분히 운영 가능합니다.)
-> 2. **알림 전송 타겟**: 시스템 장애 발생 시 알림을 받을 채널로 **Admin 전용 신규 텔레그램 봇**을 개설하는 방식과, 기존 **개인 텔레그램 메신저 브릿지**로 통합해서 받는 방식 중 어느 것을 선호하시나요?
+> [!NOTE]
+> * **대결 참가용 경쟁 유저 라인업**:
+>   * `admin` (ID: 1): 🥇 **마스터 레짐스위칭 V2** (Regime Switching V2)
+>   * `admin2` (ID: 2): 🥈 **시니어 단순화** (Senior Simple)
+>   * `admin3` (ID: 3): 🥉 **에피소딕 피벗** (Episodic Pivot)
+>   * `admin4` (ID: 4): 📡 **쿨라매기 돌파** (Qullamaggie)
+>   * `admin5` (ID: 5): 🛡️ **차트픽 OBV 매집** (OBV Only)
+>   * 이 외에 다른 전략 조합이나 추가 경쟁자를 투입하고 싶으시다면, DB 시드 목록만 확장하여 즉시 추가 가능합니다.
 
 ---
 
-## 📐 시스템 모니터링 및 로그 관리 아키텍처
+## 📐 멀티테넌시 전략 대결 아키텍처
 
 ```mermaid
 graph TD
-    subgraph StockAuto_App ["⚙️ StockAuto FastAPI Application"]
-        Log_JSON["structlog / JSON Logger"]
-        Err_Handler["Global Exception Handler"]
-        Metrics_Exp["Prometheus Metrics Exporter"]
-        Admin_Alert["Admin Notifier (Discord/TG)"]
+    subgraph Database ["🗄️ SQLite Database"]
+        Users_Table["users Table<br>(admin, admin2, admin3...)"]
+        Settings_Table["user_settings Table<br>(strategy_type, is_running, trade_mode)"]
+        Holdings_Table["holdings Table<br>(Isolated by user_id & Ticker Prefix)"]
+        Logs_Table["trade_logs Table<br>(Isolated by user_id)"]
     end
 
-    subgraph Error_Tracking ["🚨 에러 실시간 추적"]
-        Sentry["Sentry Server (APM & Stacktrace)"]
+    subgraph Scheduler_Engine ["⚙️ Background Auto-Trading Scheduler"]
+        Scheduler["Background Scheduler (1 min loop)"]
+        User_Flow_A["run_user_trading_flow (User 1: admin)<br>➔ Runs Regime Switching (100% weight)"]
+        User_Flow_B["run_user_trading_flow (User 2: admin2)<br>➔ Runs Senior Simple (100% weight)"]
+        User_Flow_C["run_user_trading_flow (User 3: admin3)<br>➔ Runs Episodic Pivot (100% weight)"]
     end
 
-    subgraph Log_Aggregator ["💾 로그 중앙 집약 (PLG Stack)"]
-        Promtail["Promtail (Log Shipper)"]
-        Loki["Grafana Loki (Log Database)"]
-    end
-
-    subgraph Metrics_Collector ["📊 시스템 메트릭 수집"]
-        Prometheus["Prometheus Server (TSDB)"]
-    end
-
-    subgraph Visualization_Alert ["🖥️ 모니터링 및 시각화"]
-        Grafana["Grafana Dashboard"]
-        Slack_TG["Admin Telegram / Discord Webhook"]
+    subgraph UI_Console ["🖥️ React Next.js Dashboard"]
+        Dashboard["Admin Leaderboard Console"]
+        User_Selector["Strategy Switcher / Switch User Account"]
     end
 
     %% Flow Connections
-    Log_JSON -->|1. Write JSON file| Promtail
-    Promtail -->|2. Ship logs| Loki
-    Metrics_Exp -->|3. Scrape metrics| Prometheus
-    Err_Handler -->|4. Catch & report| Sentry
-    Err_Handler -.->|5. Critical Alert| Admin_Alert
-    Admin_Alert -->|6. Direct alarm| Slack_TG
+    Scheduler -->|1. Loops active users| User_Flow_A
+    Scheduler -->|1. Loops active users| User_Flow_B
+    Scheduler -->|1. Loops active users| User_Flow_C
 
-    Loki --> Grafana
-    Prometheus --> Grafana
-    Sentry --> Grafana
+    User_Flow_A -->|Query & Update| Database
+    User_Flow_B -->|Query & Update| Database
+    User_Flow_C -->|Query & Update| Database
+
+    Database -->|API Response| UI_Console
 ```
 
 ---
 
 ## 📋 핵심 설계 및 구현 명세
 
-### 1. 모니터링 시스템 구축 (Monitoring System)
+### 1. 사용자 설정 테이블 확장 (Schema Upgrade)
+* `user_settings` 테이블에 `strategy_type` 컬럼을 신설하여, 각 사용자별로 구동할 핵심 전략 식별자 상수를 부여합니다.
+* Alembic 자동 버전 스크립트를 신설하여 서버 재시작 시 컬럼 추가가 자동으로 처리되도록 지원합니다.
 
-* **Prometheus 메트릭 노출 (`/metrics`)**:
-  * `prometheus-fastapi-instrumentator` 라이브러리를 적용하여 API 요청 수, HTTP 응답 속도 분포(Latency), 5xx 에러율 등을 자동 계측합니다.
-  * **APScheduler 모니터링**: 1분 주기 자동매매 루프와 10분 주기 스캐너 캐시 루프의 **마지막 실행 시각 및 성공/실패 여부**를 커스텀 메트릭으로 노출하여 스케줄러가 죽는 현상을 실시간 모니터링합니다.
-  * **KIS API 헬스 체킹**: KIS API 호출 시의 평균 지연시간(Latency)과 초당 호출 수, 그리고 `HTTP 429 Too Many Requests` 발생 빈도를 추적합니다.
-* **Admin 전용 알림 시스템 (`admin_notifier.py`) 신설**:
-  * 시스템 치명적 장애(예: 디스크 용량 90% 돌파, SQLite DB 잠김 에러 5회 연속 발생, 실전 주문 통신 장애 등)가 발생하면 `lifespan` 혹은 `scheduler` 레벨에서 관리자 단독 채널(Telegram Admin Bot 혹은 Discord Webhook)로 마크다운 형식의 알림을 발송합니다.
-* **Grafana 대시보드 설계**:
-  * **시스템 대시보드**: CPU, Memory, Disk I/O, SQLite 파일 크기.
-  * **트레이딩 대시보드**: 실시간 KIS 잔고 상태, 실전 주문 체결 속도(Latency), 오늘 하루 주문 성공/실패 비율, API 429 차단 지표.
+### 2. 가용 5대 경쟁 유저 자동 시딩 (Auto Seeding)
+* `migrator.py` 또는 `main.py` 부트스트랩 단계에서 `admin`, `admin2`, `admin3`, `admin4`, `admin5` 계정의 존재 여부를 자동 검사하고, 미존재 시 비밀번호 해싱을 적용하여 전용 User 및 UserSettings 레코드를 자동 시딩합니다.
+* 각 유저는 기본 **가용 예수금 1,000만 원 (Simulated)** 상태로 공정하게 출발합니다.
 
-### 2. 구조화된 로그 관리 (Log Management)
+### 3. `MultiStrategyManager`를 1-Slot & N-Slot 공용 엔진으로 업그레이드
+* 단일 전략 식별자가 전달되면, 지분 **1.0 (100%)**의 단일 슬롯과 해당 전략 고유 접두사(예: `SS_`, `EP_`, `QM_`, `OB_`)를 할당하는 가상 단일 슬롯 배분 구조로 자동 적응하게 업그레이드합니다.
+* 이 설계 덕분에 스케줄러의 자금 관리, 매수 판단, 피라미딩 검사, 자가 치유(Self-Healing) 코드가 완전히 동일한 규격 하에 100% 호환 동작합니다.
 
-* **구조화된 JSON 로깅 도입 (Structured Logging)**:
-  * 기존의 일반 텍스트 포맷 로그는 대형 로그 수집기에서 필터링하거나 검색하기 어렵습니다.
-  * `python-json-logger`를 도입하여 모든 로그 파일(`logs/stockauto.log`)과 콘솔 출력을 **정제된 단일 행 JSON 포맷**으로 통일합니다.
-  * 로그에 콘텍스트 필드(`user_id`, `ticker`, `event_type`, `elapsed_ms`, `order_no`, `regime_mode`)를 구조적으로 내장하여 Grafana Loki에서 특정 사용자의 특정 종목 매매 이력만 `0.1초` 내로 쿼리할 수 있게 만듭니다.
-* **PLG Stack (Prometheus + Loki + Grafana) 연동**:
-  * 로컬 또는 VPS 구동 환경 시 매우 경량화된 **Loki**와 **Promtail**을 도커 기반으로 구동합니다.
-  * Promtail이 `backend/logs/stockauto.log` 파일의 JSON 라인을 실시간 파싱하여 Loki 서버로 스트리밍합니다.
-* **로그 로테이션 및 압축 보존 정책 (Log Retention)**:
-  * 로컬 디스크 보호를 위해 기존 `RotatingFileHandler` 구성을 확장하여 최대 10MB 크기 단위로 회전하며, 최대 10개의 백업 파일을 유지합니다.
-  * 중앙 Loki/GCP Cloud Logging 서버의 보존 기한(Retention Policy)은 개발용 7일, 운영용 30일로 지정하여 비용을 최적화합니다.
+### 4. 프론트엔드 대시보드 일반화 및 고속 갱신
+* `/balance` API가 슬롯 배분 정보를 줄 때 하드코딩된 두 개 키가 아닌, 동적으로 설정된 지분 맵을 그대로 배열 직렬화해서 반환하게 변경합니다.
+* 프론트엔드 `AccountBalance.tsx`는 객체 순회를 통해 설정된 전략의 개수만큼 슬롯 카드와 원장을 자동 매핑하여 실시간 시각화합니다.
 
 ---
 
 ## 🛠️ 제안된 변경 사항 (Proposed Changes)
 
-### [Component 1] 백엔드 설정 및 로깅 모듈 전면 개편
-#### [MODIFY] [config.py](file:///d:/dev/workspace/stockAuto/backend/app/core/config.py)
-* Admin 알림을 위한 `ADMIN_TELEGRAM_BOT_TOKEN`, `ADMIN_TELEGRAM_CHAT_ID`, `DISCORD_WEBHOOK_URL` 옵션을 `.env.prod`에 추가하고 Pydantic 설정 클래스에 바인딩합니다.
-* Sentry 연동을 위한 `Sentry_DSN` 설정 파라미터를 탑재합니다.
+### [Component 1] 데이터베이스 모델 및 스키마 업데이트
+#### [MODIFY] [models.py](file:///d:/dev/workspace/stockAuto/backend/app/core/models.py)
+* `UserSettings` 클래스에 `strategy_type = Column(String, default="regime_switching", nullable=False)` 필드를 추가합니다.
 
-#### [MODIFY] [logging.py](file:///d:/dev/workspace/stockAuto/backend/app/core/logging.py)
-* `python-json-logger` 라이브러리를 적용하여 프로덕션 프로필(`prod`)일 때 로그 포맷을 JSON 형식으로 자동 변환하는 `JsonFormatter` 필터를 장착합니다.
-* 로그 레벨에 따른 콘텍스트 전파 로직을 추가합니다.
+#### [NEW] [add_strategy_type_migration.py](file:///d:/dev/workspace/stockAuto/backend/alembic/versions/add_strategy_type_to_user_settings.py)
+* `user_settings` 테이블에 `strategy_type` 컬럼을 추가하고 기본값 `"regime_switching"`을 매핑하는 Alembic 리비전 스크립트를 생성합니다.
 
 ---
 
-### [Component 2] 모니터링 메트릭 수집 및 관리자 알림 모듈 추가
-#### [NEW] [admin_notifier.py](file:///d:/dev/workspace/stockAuto/backend/app/core/admin_notifier.py)
-* 시스템 관리자에게 직접 닿는 실시간 경고 전송 클래스를 신설합니다.
-* 백그라운드 스레드 예외 발생 시 비동기로 Admin Telegram/Discord 웹훅으로 긴급 마크다운 메시지를 발송하는 헬퍼 기능을 탑재합니다.
-
-#### [MODIFY] [main.py](file:///d:/dev/workspace/stockAuto/backend/app/main.py)
-* `FastAPI` 시작 시 `prometheus-fastapi-instrumentator`를 미들웨어로 등록하고 `/metrics` 엔드포인트를 노출시킵니다.
-* Sentry 라이브러리(`sentry-sdk`)를 프로덕션 모드일 때 초기화하여 전역 예외가 자동으로 센트리 대시보드로 수집되도록 바인딩합니다.
+### [Component 2] 아레나 참가용 5대 어드민 유저 부트스트랩 시딩
+#### [MODIFY] [migrator.py](file:///d:/dev/workspace/stockAuto/backend/app/core/migrator.py)
+* `run_migrations_programmatically()` 완료 후, `users` 테이블에 경쟁자 `admin`, `admin2`, `admin3`, `admin4`, `admin5`와 그에 맞는 `user_settings` 전략 레코드가 있는지 확인하고 강제 Seeding 및 시뮬레이터 구동 상태로 활성화해 두는 Seeder 메서드를 탑재합니다.
 
 ---
 
-### [Component 3] 시스템 복구 및 스케줄러 안정성 보강
+### [Component 3] 다이내믹 멀티 전략 격리 엔진 개편
+#### [MODIFY] [multi_strategy_manager.py](file:///d:/dev/workspace/stockAuto/backend/app/bot/multi_strategy_manager.py)
+* `MultiStrategyManager`가 생성 시 `strategy_type`을 인자로 받도록 수정합니다.
+* `"multi_slot"` 일 때는 기존 2슬롯 분할, 그 외 특정 전략 상수일 때는 지분 100%의 단일 슬롯(`weight = 1.0`) 및 맞춤형 접두사(`SS_`, `EP_` 등)를 생성하게 런타임 빌더를 추가합니다.
+
+---
+
+### [Component 4] 스케줄러 및 라우터 일반화
 #### [MODIFY] [scheduler.py](file:///d:/dev/workspace/stockAuto/backend/app/bot/scheduler.py)
-* 자동매매 1분 루프의 핵심 에러 캐치문(`except Exception`) 내부에 `admin_notifier` 알림을 결합하여, 루프 도중 치명적 장애로 봇이 정지될 위험 처리를 실시간으로 감지하고 관리자에게 신속 통보합니다.
-* 스케줄러의 수행 주기 및 잡 성공 여부를 기록하는 Prometheus 게이지 메트릭을 동적으로 업데이트합니다.
+* `run_user_trading_flow`에서 사용자의 `user_settings.strategy_type`을 로드하여 `MultiStrategyManager(strategy_type=user_settings.strategy_type)`로 전달하고, 접두사 마이그레이션 가드 및 자가치유 시 첫 번째 슬롯 키를 활용하도록 일반화합니다.
+
+#### [MODIFY] [router_account.py](file:///d:/dev/workspace/stockAuto/backend/app/trades/router_account.py)
+* `get_balance` API가 슬롯 배분을 고정된 형태가 아닌, 설정된 임의의 슬롯 구조를 동적 루프 형태로 직렬화해서 프론트엔드로 전달하도록 개편합니다.
+
+#### [MODIFY] [AccountBalance.tsx](file:///d:/dev/workspace/stockAuto/frontend/components/AccountBalance.tsx)
+* 프론트엔드 계좌 뷰에서 `wallet_allocation` 필드를 2슬롯으로 하드코딩해서 읽던 로직을 제거하고, 전달받은 전략 맵 수에 맞게 게이지와 카드를 자동 매핑 루프로 그려내도록 리팩토링합니다.
 
 ---
 
 ## 🧪 검증 계획 (Verification Plan)
 
-### 1. JSON 로그 정밀도 및 출력 검사 (JSON Log Verification)
-* 백엔드를 프로덕션 프로필(`python run.py prod`)로 구동하여 `backend/logs/stockauto.log`에 쌓이는 로그가 유효한 JSON 포맷인지 검증하고, 필수 메타데이터(`level`, `asctime`, `message`, `name`)가 올바르게 내장되는지 검사합니다.
+### 1. 데이터베이스 시딩 및 스키마 검증
+* 서버를 재부팅(`python run.py local`)하여 alembic 마이그레이션이 무결하게 통과되고, SQLite DB 내 `users` 테이블에 `admin` ~ `admin5`까지 계정이 완벽히 정렬되는지 SQLite 뷰어로 검증합니다.
 
-### 2. 가상 시스템 장애 상황 유도 및 관리자 알림 테스트 (Alert Trigger Test)
-* 로컬 DB 연결을 일시적으로 강제 차단하거나, KIS API 모의 통신에 타임아웃을 강제로 유도하여 `admin_notifier`가 지정된 텔레그램 관리자 채널 혹은 디스코드 웹훅으로 경보 마크다운을 신속하게 쏘는지 모니터링합니다.
+### 2. 가상 5대 어드민 자동 매매 병렬 검증
+* 5명의 가입자가 모두 `is_running = True` 상태로 세팅된 상태에서, scheduler 1분 루프 기동 시 5개 유저의 백그라운드 트레이딩 플로우(`run_user_trading_flow`)가 5대 개별 전략 조건 하에 에러 없이 안전하게 다중 구동되는지 로그를 통해 확인합니다.
 
-### 3. Prometheus `/metrics` 엔드포인트 수집 검사 (Metrics Scrape Test)
-* `curl http://localhost:8000/metrics` 명령을 실행하여 FastAPI 표준 라우팅 메트릭 및 커스텀 스케줄러 메트릭들이 정상적으로 노출되는지 확인합니다.
+### 3. API 및 대시보드 동적 렌더링 확인
+* 각 경쟁 계정으로 로그인(`admin`, `admin2` 등)하여 대시보드 접속 시, 자신이 맡은 단일 전략(예: 에피소딕 피벗 지분 100%) 혹은 마스터 전략의 자산 비중과 지분 게이지가 찌그러짐 없이 화면에 아름답게 표현되는지 검증합니다.

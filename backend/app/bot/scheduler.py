@@ -108,16 +108,18 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
 
         # 💡 멀티 전략 매니저 로드
         from app.bot.multi_strategy_manager import MultiStrategyManager
-        ms_manager = MultiStrategyManager()
+        strategy_type = getattr(user_settings, "strategy_type", "regime_switching")
+        ms_manager = MultiStrategyManager(strategy_type=strategy_type)
+        first_slot_key = list(ms_manager.SLOTS.keys())[0]
 
         # 2. 보유 종목(Holdings) 모니터링 및 매도/탈출 판정 (조기 익절 & 트레일링 스탑)
         holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
         
-        # 💡 레거시 마이그레이션 가드: 접두사 없는 기존 종목에 자동으로 마스터 레짐스위칭(RS_) 접두사 부여
+        # 💡 레거시 마이그레이션 가드: 접두사 없는 기존 종목에 자동으로 첫 번째 슬롯 접두사 부여
         for h in holdings:
             if not ms_manager.get_slot_by_holding_ticker(h.ticker):
                 legacy_ticker = h.ticker
-                h.ticker = ms_manager.make_prefixed_ticker("regime_switching", legacy_ticker)
+                h.ticker = ms_manager.make_prefixed_ticker(first_slot_key, legacy_ticker)
                 db.commit()
                 log_action(db, user_id, f"[Migration Guard] Legacy holding migrated: {legacy_ticker} -> {h.ticker}", "INFO")
 
@@ -165,7 +167,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     if last_buy:
                         target_prefixed_ticker = last_buy.ticker
                     else:
-                        target_prefixed_ticker = ms_manager.make_prefixed_ticker("regime_switching", r_ticker)
+                        target_prefixed_ticker = ms_manager.make_prefixed_ticker(first_slot_key, r_ticker)
                         
                     log_action(db, user_id, f"[Self-Healing] Phantom holding detected in account: {r_ticker} (Qty: {r_qty}). Restoring DB record as {target_prefixed_ticker}!", "ERROR")
                     

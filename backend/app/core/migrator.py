@@ -56,6 +56,84 @@ def run_migrations_programmatically():
             # 이미 Alembic으로 관리되고 있는 경우 새로운 마이그레이션이 있으면 자동 업데이트 적용
             command.upgrade(alembic_cfg, "head")
             logger.info("[Migration] 데이터베이스 변경사항 체크 및 업그레이드 완료.")
+            
+        # 💡 경쟁 유저 시딩 실행
+        seed_competitive_users()
+        
     except Exception as e:
         logger.error(f"[Migration] 마이그레이션 중 오류 발생: {e}", exc_info=True)
         raise e
+
+def seed_competitive_users():
+    """대결 참가용 5대 경쟁 어드민 유저 자동 Seeding"""
+    from app.core.database import SessionLocal
+    from app.core.models import User, UserSettings
+    from app.core.security import get_password_hash
+    
+    db = SessionLocal()
+    try:
+        competitors = [
+            {"username": "admin", "strategy": "regime_switching"},
+            {"username": "admin2", "strategy": "senior_simple"},
+            {"username": "admin3", "strategy": "episodic_pivot"},
+            {"username": "admin4", "strategy": "qullamaggie"},
+            {"username": "admin5", "strategy": "obv_only"},
+        ]
+        
+        for comp in competitors:
+            # 유저 존재 여부 검사
+            existing_user = db.query(User).filter(User.username == comp["username"]).first()
+            if not existing_user:
+                logger.info(f"[Seeder] 신규 경쟁 유저 생성 중: {comp['username']} (전략: {comp['strategy']})")
+                hashed_pw = get_password_hash("admin123") # 기본 공용 비밀번호
+                new_user = User(username=comp["username"], hashed_password=hashed_pw)
+                db.add(new_user)
+                db.commit()
+                db.refresh(new_user)
+                
+                # 유저 설정 생성 및 시뮬레이션 가동 설정
+                new_settings = UserSettings(
+                    user_id=new_user.id,
+                    strategy_type=comp["strategy"],
+                    trade_mode="SIMULATED",
+                    is_running=True, # 자동매매 봇 바로 가동!
+                    is_real_enabled=False
+                )
+                db.add(new_settings)
+                db.commit()
+                logger.info(f"[Seeder] 경쟁 유저 {comp['username']} 세팅 완료.")
+            else:
+                # 이미 존재하더라도 설정 확인 및 업데이트
+                settings = existing_user.settings
+                if not settings:
+                    settings = UserSettings(
+                        user_id=existing_user.id,
+                        strategy_type=comp["strategy"],
+                        trade_mode="SIMULATED",
+                        is_running=True,
+                        is_real_enabled=False
+                    )
+                    db.add(settings)
+                    db.commit()
+                else:
+                    # 기존 유저의 전략 및 시뮬레이션 상태 보정 (대결을 위해 강제 활성화)
+                    updated = False
+                    if settings.strategy_type != comp["strategy"]:
+                        settings.strategy_type = comp["strategy"]
+                        updated = True
+                    if settings.trade_mode != "SIMULATED":
+                        settings.trade_mode = "SIMULATED"
+                        updated = True
+                    if not settings.is_running:
+                        settings.is_running = True
+                        updated = True
+                    
+                    if updated:
+                        db.commit()
+                        logger.info(f"[Seeder] 기존 경쟁 유저 {comp['username']} 설정 보정 완료.")
+                        
+    except Exception as seed_err:
+        logger.error(f"[Seeder] 데이터베이스 시딩 실패: {seed_err}")
+        db.rollback()
+    finally:
+        db.close()

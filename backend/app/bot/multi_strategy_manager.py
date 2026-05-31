@@ -27,13 +27,87 @@ class MultiStrategyManager:
     # 🎯 타겟팅할 11대 최정예 급등주/변동성 포트폴리오 (낚시용 종목 포함 완벽 방어 검증용)
     TARGET_TICKERS = {"AKAN", "WNW", "ASTC", "SDA", "HUBC", "MNTS", "ITP", "SES", "AEHL", "ODYS", "PRFX"}
 
-    def __init__(self):
+    def _get_prefix_for_strategy(self, strategy_type: str) -> str:
+        prefix_map = {
+            "regime_switching": "RS_",
+            "episodic_pivot": "EP_",
+            "senior_simple": "SS_",
+            "qullamaggie": "QM_",
+            "obv_only": "OB_",
+            "rsi_bb_only": "RB_",
+            "ema_only": "EM_",
+            "vwap_only": "VW_",
+            "orb_only": "OR_",
+            "rsi2_connors": "RC_",
+            "bb_squeeze": "BS_",
+            "strategy_a": "SA_",
+            "strategy_b": "SB_",
+            "strategy_c": "SC_",
+            "exploded_c": "XC_"
+        }
+        return prefix_map.get(strategy_type, "ST_")
+
+    def _get_name_for_strategy(self, strategy_type: str) -> str:
+        name_map = {
+            "regime_switching": "마스터 레짐스위칭 V2",
+            "episodic_pivot": "에피소딕 피벗 (Episodic Pivot)",
+            "senior_simple": "시니어 단순화 (Strategy S)",
+            "qullamaggie": "쿨라매기 돌파 (Qullamaggie)",
+            "obv_only": "차트픽 OBV 매집 (OBV Only)",
+            "rsi_bb_only": "RSI 볼린저밴드 (RSI BB Only)",
+            "ema_only": "EMA 이평정배열 (EMA Only)",
+            "vwap_only": "VWAP 세력지지선 (VWAP Only)",
+            "orb_only": "토비크라벨 ORB (ORB Only)",
+            "rsi2_connors": "래리코너스 RSI 2",
+            "bb_squeeze": "존카터 BB스퀴즈 (TTM Squeeze)",
+            "strategy_a": "전략 A (태초 v1.0)",
+            "strategy_b": "전략 B (실험용)",
+            "strategy_c": "전략 C (11대 복합)",
+            "exploded_c": "전략 C-폭발형 (즉시 풀비중)"
+        }
+        return name_map.get(strategy_type, f"단일 전략 ({strategy_type})")
+
+    def __init__(self, strategy_type: str = "multi_slot"):
+        if not strategy_type:
+            strategy_type = "multi_slot"
+            
+        strategy_type = strategy_type.lower()
+        
+        if strategy_type == "multi_slot":
+            # 2슬롯 분할 모드 (기본값)
+            self.SLOTS = {
+                "episodic_pivot": {
+                    "weight": 0.50,
+                    "prefix": "EP_",
+                    "name": "에피소딕 피벗 (Episodic Pivot)",
+                    "strategy_key": "episodic_pivot"
+                },
+                "regime_switching": {
+                    "weight": 0.50,
+                    "prefix": "RS_",
+                    "name": "마스터 레짐스위칭 V2",
+                    "strategy_key": "regime_switching"
+                }
+            }
+        else:
+            # 단일 전략 100% 모드
+            prefix = self._get_prefix_for_strategy(strategy_type)
+            name = self._get_name_for_strategy(strategy_type)
+            self.SLOTS = {
+                strategy_type: {
+                    "weight": 1.0,
+                    "prefix": prefix,
+                    "name": name,
+                    "strategy_key": strategy_type
+                }
+            }
+            
         # 각 슬롯별 전략 인스턴스를 메모리에 지연 적재(Lazy Load) 및 캐싱
         self.strategies = {
             slot_key: get_strategy(cfg["strategy_key"])
             for slot_key, cfg in self.SLOTS.items()
         }
-        logger.info("[MultiStrategyManager] Segmented 2-Slot Modular Core Engine initialized successfully.")
+        logger.info(f"[MultiStrategyManager] Segmented {len(self.SLOTS)}-Slot Modular Core Engine initialized successfully for strategy_type: {strategy_type}")
 
     def get_slot_by_holding_ticker(self, holding_ticker: str) -> tuple[str, str] | None:
         """
@@ -65,7 +139,7 @@ class MultiStrategyManager:
         각 슬롯별로 현재의 주식 평가액과 격리된 예수금을 수학적 보존 법칙 하에 정밀 계산합니다.
         
         - total_asset_usd: 계좌의 총 자산 가치 (현금 + 주식 평가금)
-        - cash_balance_usd: 계좌의 총 실제 가용 현금(예수금)
+         - cash_balance_usd: 계좌의 총 실제 가용 현금(예수금)
         - holdings: 데이터베이스의 Holdings 레코드 리스트
         - sentiment: 현재 시장 레짐 (BULLISH, BEARISH, NEUTRAL)
         """
@@ -84,17 +158,19 @@ class MultiStrategyManager:
                 if slot_key in slot_stock_values:
                     slot_stock_values[slot_key] += qty * price
             else:
-                # 레거시 일반 종목의 경우 기본적으로 마스터 레짐스위칭 슬롯에 가산
-                slot_stock_values["regime_switching"] += qty * price
+                # 레거시 일반 종목의 경우 기본적으로 첫번째 슬롯에 가산
+                first_slot_key = list(self.SLOTS.keys())[0]
+                if first_slot_key in slot_stock_values:
+                    slot_stock_values[first_slot_key] += qty * price
                 
-        # 2. 50:50 엄격 격리 지분에 기반한 수학적 보존 분배 공식 적용
+        # 2. 엄격 격리 지분에 기반한 수학적 보존 분배 공식 적용
         slot_allocations = {}
         
-        # 각 슬롯별 자본 배정(Allocation) 지분 가중치 설정 (언제나 50:50 격리)
-        # 하락장이라고 해서 지분 자체가 증발하지 않도록 weight는 항상 0.50 고정
+        # 각 슬롯별 자본 배정(Allocation) 지분 가중치 설정
+        # 하락장이라고 해서 지분 자체가 증발하지 않도록 weight는 항상 고정
         slot_weights = {
-            "episodic_pivot": 0.50,
-            "regime_switching": 0.50
+            slot_key: cfg["weight"]
+            for slot_key, cfg in self.SLOTS.items()
         }
         
         # 총 가중치 합산 (무오류 처리를 위해 분모 계산)
@@ -104,8 +180,7 @@ class MultiStrategyManager:
         for slot_key, cfg in self.SLOTS.items():
             weight = slot_weights[slot_key]
             
-            # 💡 [보존의 법칙 가드] 실제 전체 예수금을 가중치 지분 비율에 따라 정확히 1대1 비례 분배
-            # 이 공식을 통해 EP_cash + RS_cash는 항상 실제 cash_balance_usd와 100% 완벽 일치합니다!
+            # 💡 [보존의 법칙 가드] 실제 전체 예수금을 가중치 지분 비율에 따라 정확히 비례 분배
             slot_cash = cash_balance_usd * (weight / denom_weight)
             
             # 해당 슬롯의 주식 평가 가치
