@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { Terminal, Clock, Loader2, Server } from 'lucide-react';
-import { adminAPI, isCancel } from '@/lib/api';
+import { adminAPI, reportAPI, isCancel } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
 import { toast } from "sonner";
 import { getErrorMessage } from '@/lib/utils';
@@ -18,6 +18,21 @@ interface ActionLog {
 export function SystemHealth() {
   const [logs, setLogs] = useState<ActionLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isReportSending, setIsReportSending] = useState(false);
+
+  const handleTriggerManualReport = async () => {
+    try {
+      setIsReportSending(true);
+      await reportAPI.triggerManualReport();
+      toast.success("텔레그램 일일 결산 리포트 발송에 성공했습니다.");
+    } catch (error) {
+      const msg = getErrorMessage(error);
+      console.error("Failed to trigger manual report:", msg);
+      toast.error(`리포트 발송 실패: ${msg}`);
+    } finally {
+      setIsReportSending(false);
+    }
+  };
 
   const fetchLogs = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -57,6 +72,63 @@ export function SystemHealth() {
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
             REALTIME POLLING
           </span>
+        </div>
+
+        {/* 시스템 관리 수동 제어 센터 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-2">
+          <div className="bg-slate-950/50 border border-zinc-800/60 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
+                수동 결산 및 리포트 즉시 발송
+              </h3>
+              <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
+                모든 활성 사용자(admin~admin10)에 대해 현재까지의 손익 및 거래 현황을 즉시 집계하여 등록된 모든 텔레그램 채널로 일일 결산 보고서를 즉시 발송합니다.
+              </p>
+            </div>
+            <div className="flex items-center justify-end">
+              <button
+                onClick={handleTriggerManualReport}
+                disabled={isReportSending}
+                className={cn(
+                  "px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 border flex items-center gap-2 shadow-lg",
+                  isReportSending
+                    ? "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed"
+                    : "bg-indigo-950/60 text-indigo-300 border-indigo-900/60 hover:bg-indigo-900/60 hover:text-white active:scale-95 shadow-indigo-950/20"
+                )}
+              >
+                {isReportSending ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin text-zinc-500" />
+                    정산 및 리포트 발송 중...
+                  </>
+                ) : (
+                  <>
+                    <span>📨 리포트 즉시 발송</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-slate-950/50 border border-zinc-800/60 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                시스템 데이터 동기화
+              </h3>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <div className="bg-zinc-900/40 p-2 rounded-lg border border-zinc-800/40 text-center">
+                  <span className="text-[10px] text-zinc-500 block">시스템 로그 수신</span>
+                  <span className="text-xs font-bold text-slate-300">{logs.length}개 갱신됨</span>
+                </div>
+                <div className="bg-zinc-900/40 p-2 rounded-lg border border-zinc-800/40 text-center">
+                  <span className="text-[10px] text-zinc-500 block">통신 감도</span>
+                  <span className="text-xs font-bold text-emerald-400">네트워크 정상</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
         
         <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[500px]">
