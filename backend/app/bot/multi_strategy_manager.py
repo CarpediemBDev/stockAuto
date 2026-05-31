@@ -91,8 +91,8 @@ class MultiStrategyManager:
         slot_allocations = {}
         for slot_key, cfg in self.SLOTS.items():
             if sentiment == "BULLISH":
-                # 💡 불장(BULLISH)일 때는 모든 슬롯의 한도를 100% 오픈하여 레짐 V2 피라미딩 잭팟 극대화!
-                weight = 1.0
+                # 💡 상승장(BULLISH)일 때는 두 슬롯 모두 적극 가동하되, 엄격한 50% 격리 장벽을 사수하기 위해 한도를 각각 50%(0.50)로 제한!
+                weight = 0.50
             else:
                 # 🛡️ 하락/횡보장(BEARISH/NEUTRAL)일 때는 철저한 방어 비중으로 차단 및 축소
                 if slot_key == "regime_switching":
