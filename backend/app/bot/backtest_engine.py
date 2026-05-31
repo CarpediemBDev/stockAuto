@@ -167,13 +167,18 @@ class BacktestSimulator:
     과거 역사적 데이터를 로드하여 StockAuto v2.0 트레이딩 규칙과 자금 관리 모듈을 정밀 시뮬레이션하는 엔진.
     데이터 프로바이더를 연동하며 미래 데이터를 참조하지 않는 완벽한 Event-driven 방식으로 작동합니다.
     """
-    def __init__(self, tickers: list, start_date: str, end_date: str, interval: str = "1h", initial_cash: float = 10000.0, csv_path: str = None):
+    def __init__(self, tickers: list, start_date: str, end_date: str, interval: str = "1h", initial_cash: float = 10000.0, csv_path: str = None, strategy_type: str = "complex"):
         self.tickers = list(set(tickers))
         self.start_date = start_date
         self.end_date = end_date
         self.interval = interval
         self.csv_path = csv_path
         self.broker = BacktestBroker(initial_cash)
+        self.strategy_type = strategy_type
+        
+        # 💡 [전략 패턴] 전략 팩토리를 통해 해당 전략 객체 로드 및 장착
+        from app.strategies.strategy_factory import get_strategy
+        self.strategy = get_strategy(strategy_type)
         
         # 💡 이탈 연속 횟수 추적 캐시 (2회 연속 이탈 확정용)
         self.breach_counts = {}  # {ticker: count}
@@ -311,6 +316,35 @@ class BacktestSimulator:
                 metrics['momentum_candles'] = (c_up & c_up.shift(1) & c_up.shift(2) & 
                                                v_up & v_up.shift(1) & v_up.shift(2))
                 
+                # 💡 [세계적인 유명 전략용 신규 지표 탑재]
+                # 1. 래리 코너스(Larry Connors) RSI 2 및 EMA 5
+                metrics['RSI2'] = calculate_rsi(df['Close'], 2)
+                metrics['EMA5'] = calculate_ema(df['Close'], 5)
+                
+                # 2. 존 카터(John Carter) 볼린저 밴드 스퀴즈 (BB Squeeze)
+                ma20 = df['Close'].rolling(window=20).mean()
+                std20 = df['Close'].rolling(window=20).std()
+                metrics['upper_bb'] = ma20 + 2 * std20
+                metrics['lower_bb'] = ma20 - 2 * std20
+                
+                atr20 = calculate_atr(df, 20)
+                metrics['upper_kc'] = ma20 + 1.5 * atr20
+                metrics['lower_kc'] = ma20 - 1.5 * atr20
+                
+                is_squeeze = (metrics['upper_bb'] < metrics['upper_kc']) & (metrics['lower_bb'] > metrics['lower_kc'])
+                metrics['was_squeeze'] = is_squeeze.rolling(window=5).max() > 0
+                metrics['bb_breakout'] = df['Close'] > metrics['upper_bb']
+                metrics['is_squeeze_breakout'] = metrics['was_squeeze'] & metrics['bb_breakout']
+                
+                # 💡 [전략 패턴] 지수 대비 강세 (Relative Strength) 사전 연산 및 저장
+                if self.qqq_metrics is not None and not self.qqq_metrics.empty:
+                    qqq_returns = self.qqq_metrics['Close'] / self.qqq_metrics['Close'].iloc[0] - 1
+                    stock_returns = df['Close'] / df['Close'].iloc[0] - 1
+                    metrics['relative_strength'] = stock_returns - qqq_returns
+                    metrics['relative_strength'] = metrics['relative_strength'].fillna(0.0)
+                else:
+                    metrics['relative_strength'] = 0.0
+                
                 self.processed_metrics[ticker] = metrics
                 
             except Exception as e:
@@ -321,80 +355,14 @@ class BacktestSimulator:
         self.timeline = sorted(list(self.qqq_data.index))
         logger.info(f"[Backtest prepare_data] Complete. Timeline established: {len(self.timeline)} timestamps. Tickers: {list(self.tickers_data.keys())}")
 
-    def _calculate_score(self, ticker: str, timestamp: datetime, regime: str) -> float:
-        """가상 시점 t 기준, 개별 종목의 지표들을 2-Stage scorecard 공식에 따라 실시간 채점합니다."""
+    def _calculate_score(self, ticker: str, timestamp: datetime, regime: str, is_entry: bool = True) -> float:
+        """가상 시점 t 기준, 개별 종목의 지표들을 장착된 전략 클래스를 통해 채점합니다."""
         metrics = self.processed_metrics[ticker]
         if timestamp not in metrics.index:
             return 0.0
             
         row = metrics.loc[timestamp]
-        
-        # 1. 필수 관문 필터 (단 하나라도 충족되지 않으면 즉시 0점 탈락)
-        # 필수 거래대금 필터: 당일 거래대금 최소 1억 원 이상 (여기서는 백테스트 데이터의 유효성 보장을 위해 volume * close 검증, 10x 완화하여 1천만 원 상당인 $7,400 적용)
-        dollar_volume = row['Close'] * row['Volume']
-        if dollar_volume < 7400.0:  # 백테스트 종목 필터 완화 (유동성 부족에 따른 백테스트 먹통 방지)
-            return 0.0
-            
-        # 세력선 지지 필터: 주가가 VWAP 위인지 확인 (VWAP 계산이 nan인 경우 통과시킴)
-        if not pd.isna(row['VWAP']) and row['Close'] < row['VWAP']:
-            return 0.0
-            
-        # 수급 활성 필터: 상대 거래량(RVOL) >= 1.2
-        if row['RVOL'] < 1.1:  # 백테스트 감도 고려하여 미세 조정 (RVOL 필터 기본 1.1 완화)
-            return 0.0
-
-        score = 0
-        
-        # 💡 [Stage 1] 가점 요인 산출
-        # RVOL 가점
-        if row['RVOL'] >= 2.0: score += 30
-        elif row['RVOL'] >= 1.2: score += 15
-        
-        # 신고가 저항 돌파 가점
-        if not pd.isna(row['dist_to_high']) and row['dist_to_high'] > -1.5: score += 20
-        # 지수 대비 강세 (Relative Strength)
-        qqq_row = self.qqq_metrics.loc[timestamp]
-        qqq_return = (qqq_row['Close'] / self.qqq_metrics['Close'].iloc[0] - 1)
-        stock_return = (row['Close'] / metrics['Close'].iloc[0] - 1)
-        if stock_return > qqq_return: score += 10
-        
-        # EMA 이평선 정배열 정방향 가점
-        if row['EMA9'] > row['EMA20']: score += 10
-        # 52주 역사적 신고가 인접 가점
-        if row['is_near_52w_high']: score += 25
-        # 3연속 모멘텀 양봉 가점
-        if row['momentum_candles']: score += 15
-
-        # 💡 [Stage 2] 장세 레짐 보너스/페널티 분기 채점
-        if regime == "BULLISH":
-            score += 5  # 상승장 보너스
-            
-            # VWAP 상방 가산점
-            if not pd.isna(row['VWAP']) and row['Close'] > row['VWAP']: score += 10
-            
-            # 윗꼬리 매물 저항 없음 가점 (wick_ratio < 0.3)
-            if row['Wick'] < 0.3: score += 10
-            elif row['Wick'] > 0.5: score -= 20  # 윗꼬리 저항 패널티
-            
-        else:
-            # BEARISH / NEUTRAL 장세
-            # OBV 매집 골든크로스 가점 (divergence score 0~100점 기반 가중)
-            if row['OBV_divergence'] > 0: score += 30
-            else: score -= 20
-            
-            # 장기 일봉 120선 상방 안착 가점
-            if row['Close'] > row['EMA120']: score += 30
-            
-            # RSI 볼밴 하단 극점 과매도 반발 가점
-            if row['is_rsi_bb_extreme']: score += 30
-            
-            # 하락장 레짐 패널티
-            if regime == "BEARISH": score -= 30
-            
-            if row['Wick'] < 0.3: score += 10
-            elif row['Wick'] > 0.5: score -= 20
-
-        return max(0, min(score, 100))
+        return self.strategy.calculate_score(row, regime, is_entry)
 
     def run(self):
         """정렬된 시간축을 순차적으로 흘려보내며 매수실패/체결/익절/손절 시나리오를 구동합니다."""
@@ -414,7 +382,7 @@ class BacktestSimulator:
             # 2. 포트폴리오 평가가치 기록 및 누적 그래프 업데이트
             self.broker.update_equity(t, current_prices)
 
-            # 3. 보유 포종목 모니터링 및 매도/탈출 판정 (Trailing Stop, Stop Loss, Smart Exit)
+            # 3. 보유 종목 모니터링 및 매도/탈출 판정 (Trailing Stop, Stop Loss, Smart Exit)
             holdings_to_check = list(self.broker.holdings.keys())
             for ticker in holdings_to_check:
                 if ticker not in current_prices:
@@ -430,16 +398,14 @@ class BacktestSimulator:
                     h["highest_price"] = price
 
                 profit_rate = ((price - h["avg_price"]) / h["avg_price"]) * 100
-                score = self._calculate_score(ticker, t, regime)
+                score = self._calculate_score(ticker, t, regime, is_entry=False)
                 
                 # ATR 기반 동적 익절/손절선 가중 계산
                 atr = row['ATR']
-                stop_loss_pct = 3.0  # 기본 최소 손절선 3.0%
-                trailing_stop_pct = 2.0  # 기본 최소 트레일링 2.0%
-                if atr > 0:
-                    atr_pct = (atr / price) * 100
-                    stop_loss_pct = max(3.0, atr_pct * 1.5)
-                    trailing_stop_pct = max(2.0, atr_pct * 1.0)
+                
+                # 💡 [전략 패턴] 동적 손절선 및 트레일링 스탑 비율 계산
+                stop_loss_pct = self.strategy.get_stop_loss_pct(atr, price)
+                trailing_stop_pct = self.strategy.get_trailing_stop_pct(atr, price)
 
                 sell_reason = None
                 is_breached = False
@@ -465,13 +431,15 @@ class BacktestSimulator:
                 else:
                     self.breach_counts.pop(ticker, None)
 
-                # ⭐ [지표 1] 조기 스마트 익절 (RSI 다이버전스/MACD 크로스 조건) - 스마트 익절은 버퍼 없이 바로 집행
-                if not sell_reason and profit_rate >= 1.0 and row['is_smart_exit']:
+                # ⭐ [지표 1] 조기 스마트 익절 (RSI 다이버전스/MACD 크로스 조건)
+                # 전략 A 등 스마트 익절이 없으면 min_smart_exit_profit이 999라 자연스럽게 통과
+                if not sell_reason and profit_rate >= self.strategy.min_smart_exit_profit and row['is_smart_exit']:
                     sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
                     
                 # [지표 4] 기술적 강세 시그널 붕괴 - 시그널 붕괴는 버퍼 없이 바로 집행
-                elif not sell_reason and ((regime == "BULLISH" and score < 40) or (regime != "BULLISH" and score < 50)):
-                    sell_reason = f"강세 시그널 붕괴 ({score}점 도달)"
+                elif not sell_reason:
+                    if self.strategy.is_signal_collapsed(score, regime):
+                        sell_reason = f"강세 시그널 붕괴 ({score}점 도달)"
 
                 if sell_reason:
                     # 매도 체결
@@ -479,15 +447,14 @@ class BacktestSimulator:
                     self.breach_counts.pop(ticker, None)  # 매도 성공 시 캐시 비우기
 
             # 4. 신규 매수 기회 채점 및 1:2:6 피라미딩 자금 관리 집행
-            # 상승장 컷오프 85점, 하락/횡보장 컷오프 95점 (수수료 절감 최적화 적용)
-            cutoff_score = 85 if regime == "BULLISH" else 95
+            cutoff_score = self.strategy.get_cutoff_score(regime)
             
             # 매 타임스탬프마다 컷오프 점수를 충족하는 종목 후보군 수집
             scored_candidates = []
             for ticker in self.tickers_data:
                 if ticker not in current_prices:
                     continue
-                score = self._calculate_score(ticker, t, regime)
+                score = self._calculate_score(ticker, t, regime, is_entry=True)
                 if score >= cutoff_score:
                     scored_candidates.append((ticker, score))
             
@@ -513,23 +480,23 @@ class BacktestSimulator:
                 next_stage = 3
                 
                 if existing_holding:
-                    # 💡 기존 보유 중인 경우: 상승장(BULLISH) 모드에서만 피라미딩(불타기) 추가 매수 허용
-                    if regime != "BULLISH":
+                    # 💡 기존 보유 중인 경우: 상승장(BULLISH) 모드에서만 피라미딩(불타기) 추가 매수 허용 (전략 A 등 피라미딩 미지원 시 pyramid_trigger_1=999로 자동 탈출)
+                    pyramid_trigger_1 = self.strategy.get_pyramid_trigger(1)
+                    if pyramid_trigger_1 > 100.0 or regime != "BULLISH":
                         continue
                         
                     buy_stage = existing_holding["buy_stage"]
                     profit_rate = ((price - existing_holding["avg_price"]) / existing_holding["avg_price"]) * 100
-                    
+                    pyramid_trigger_2 = self.strategy.get_pyramid_trigger(2)
+
                     if buy_stage == 1:
-                        # 1단계 -> 2단계 피라미딩 조건: 평단 대비 +3.0% 이상 수익권
-                        if profit_rate >= 3.0:
+                        if profit_rate >= pyramid_trigger_1:
                             proposed_alloc_factor = 0.35  # 2차 추가 매수 비중: 35%
                             next_stage = 2
                         else:
                             continue
                     elif buy_stage == 2:
-                        # 2단계 -> 3단계 피라미딩 조건: 평단 대비 +6.0% 이상 수익권
-                        if profit_rate >= 6.0:
+                        if profit_rate >= pyramid_trigger_2:
                             proposed_alloc_factor = 0.50  # 3차 추가 매수 비중: 50%
                             next_stage = 3
                         else:
@@ -538,19 +505,16 @@ class BacktestSimulator:
                         continue  # 이미 3단계 풀배팅 상태
                 else:
                     # 💡 신규 포지션 진입 분기
-                    if regime == "BULLISH":
-                        proposed_alloc_factor = 0.15  # 정찰병 15% 진입
-                        next_stage = 1
+                    proposed_alloc_factor = self.strategy.get_initial_entry_factor(regime)
+                    if regime == "BULLISH" and proposed_alloc_factor < 1.0:
+                        next_stage = 1  # 정찰병 15% 진입
                     else:
-                        next_stage = 3  # 추가 불타기 불허 격리
-                        if regime == "BEARISH":
-                            proposed_alloc_factor = 0.30  # 하락장 비중 30% 제한
-                        else:
-                            proposed_alloc_factor = 0.50  # 횡보장 비중 50% 제한
+                        next_stage = 3  # 즉시 풀비중 진입
 
                 # ② 포지션 크기 (Position Sizing) 수학 공식 적용
-                # 총자산의 10%를 기본 유닛으로 설정 (최소 $500 보장)
-                base_alloc_usd = max(500.0, self.broker.portfolio_value * 0.10)
+                base_alloc_usd = self.broker.portfolio_value * self.strategy.base_allocation_pct
+                if self.strategy.min_allocation_usd > 0.0:
+                    base_alloc_usd = max(self.strategy.min_allocation_usd, base_alloc_usd)
                 
                 # ATR 변동성 팩터
                 atr = row['ATR']

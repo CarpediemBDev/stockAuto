@@ -105,6 +105,9 @@ class Settings:
     API_TITLE = "StockAuto API"
     VERSION = "2.0.0" # 3-Mode Architecture
     
+    # [Phase 36] 실시간 라이브 트레이딩 적용 마스터 전략 타입 설정 (기본값: regime_switching)
+    STRATEGY_TYPE = "regime_switching"
+
     # [Phase 29] 안전 거래 가드 상수 (Safety & Cost Optimization)
     MAX_HOLDINGS = 5
     MIN_CASH_BALANCE_USD = 200.0

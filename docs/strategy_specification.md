@@ -16,7 +16,7 @@
 | **매도 / 익절 로직** | ATR 트레일링 스탑 | RSI-MACD 조기 익절 | **RSI-MACD 조기 익절 + 2회 연속 이탈 버퍼** | 1분봉 꼬리 노이즈로 인한 잦은 털림(휩쏘) 방지, 수수료 낭비 완벽 차단 |
 | **종목 재무 필터** | 고려 없음 | 증수·증익 우량주 필터 | **증수·증익 우량주 필터** (동일) | - |
 
-*   *과거 v1.0 전략의 세부 사양은 **[TRADING_STRATEGY_V1.md](file:///d:/dev/workspace/stockAuto/docs/TRADING_STRATEGY_V1.md)**에서 역사적 기록으로 확인하실 수 있습니다.*
+*   *과거 v1.0 전략의 세부 사양은 **[strategy_specification_V1.md](file:///d:/dev/workspace/stockAuto/docs/history/strategy_specification_V1.md)**에서 역사적 기록으로 확인하실 수 있습니다.*
 
 ---
 
@@ -51,7 +51,7 @@
     *   하락장에서는 슈퍼개미 차트픽의 OBV 세력 매집 다이버전스, 추세선 리테스트 지지, RSI 자체 볼밴 극점 반등에 최대 가점을 부여하며 돌파 지표는 감점 및 배제합니다.
 
 > [!NOTE]
-> 세부 지표별 배점 매트릭스와 실전 채점 시나리오(테슬라, 엔비디아, 코카콜라)는 개별 문서인 **[TRADING_SCORECARD.md](file:///d:/dev/workspace/stockAuto/docs/TRADING_SCORECARD.md)**에서 상세히 확인할 수 있습니다.
+> 세부 지표별 배점 매트릭스와 실전 채점 시나리오(테슬라, 엔비디아, 코카콜라)는 개별 문서인 **[strategy_scorecard.md](file:///d:/dev/workspace/stockAuto/docs/strategy_scorecard.md)**에서 상세히 확인할 수 있습니다.
 
 ---
 
@@ -97,5 +97,5 @@
 ---
 
 ## 🗺️ 5. 전략 맵 및 채점 상세 참조
-*   **11대 기법 소스코드 매핑 정보:** [TRADING_STRATEGY_MAP.md](file:///d:/dev/workspace/stockAuto/docs/TRADING_STRATEGY_MAP.md)
-*   **장세별 다이내믹 채점 점수판:** [TRADING_SCORECARD.md](file:///d:/dev/workspace/stockAuto/docs/TRADING_SCORECARD.md)
+*   **11대 기법 소스코드 매핑 정보:** [strategy_map.md](file:///d:/dev/workspace/stockAuto/docs/strategy_map.md)
+*   **장세별 다이내믹 채점 점수판:** [strategy_scorecard.md](file:///d:/dev/workspace/stockAuto/docs/strategy_scorecard.md)

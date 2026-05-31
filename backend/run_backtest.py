@@ -18,6 +18,7 @@ async def main():
     parser.add_argument("--end", type=str, default="2026-05-30", help="종료 날짜 (YYYY-MM-DD)")
     parser.add_argument("--interval", type=str, default="1h", choices=["1m", "5m", "15m", "1h", "1d"], help="데이터 타임프레임 인터벌")
     parser.add_argument("--cash", type=float, default=10000.0, help="가상 시작 예수금 (USD)")
+    parser.add_argument("--strategy", type=str, default="complex", choices=["complex", "senior_simple"], help="백테스트 전략 모드 (complex: 11대 혼합, senior_simple: 시니어 단순화)")
     
     args = parser.parse_args()
     
@@ -33,6 +34,7 @@ async def main():
     print(f" • 검증 기간   : {args.start} ~ {args.end}")
     print(f" • 타임프레임  : {args.interval}")
     print(f" • 시작 예수금 : ${args.cash:,.2f} USD")
+    print(f" • 적용 전략   : {'시니어 단순화 (Strategy S)' if args.strategy == 'senior_simple' else '11대 복합 가감점 (Strategy C)'}")
     print("--------------------------------------------------------------------------")
     print(" ⏳ 1단계: 역사적 OHLCV 시세 및 QQQ 지수 데이터 병렬 다운로드 중...")
     
@@ -42,7 +44,8 @@ async def main():
         start_date=args.start, 
         end_date=args.end, 
         interval=args.interval, 
-        initial_cash=args.cash
+        initial_cash=args.cash,
+        strategy_type=args.strategy
     )
     
     try:

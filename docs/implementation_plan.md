@@ -1,87 +1,92 @@
-# [구현 계획서] Phase 29: 실거래 비용 최적화 및 스마트 리스크/예수금 제어 시스템 구축
+# 🏆 [구현 계획서] 모놀리식 전략 코드의 객체 지향 전략 패턴 (Strategy Pattern) 정밀 리팩토링
 
-본 계획서는 실거래(Live Trading) 환경에서 발생하고 있는 **1) 과도한 거래 비용(수수료/환전 스프레드)으로 인한 손실, 2) 낮은 이익률 및 불리한 손익비, 3) 예수금 부족으로 인한 텔레그램 경고 도배 및 과도한 API 호출** 문제를 근본적으로 해결하기 위한 시스템 개편안입니다.
+본 계획서는 `scanner.py`, `backtest_engine.py`, `scheduler.py` 내부 깊숙이 기입된 14대 모놀리식 조건 분기형 전략 코드들을 완전 객체 지향 수준인 **전략 패턴 (Strategy Pattern)** 구조로 해체/격리하고 조립함으로써, 백테스트와 실시간 거래 논리를 100% 동치시키고 향후 새로운 전략 카드를 레고 블록처럼 손쉽게 꽂아서 쓸 수 있는 고도화된 아키텍처 리팩토링 계획입니다.
 
 ---
 
 ## 🚨 사용자 검토 요구사항 (User Review Required)
 
 > [!IMPORTANT]
-> **핵심 개선 방향: 잦은 휩소 방지 및 거래 자제 가드 구축**
-> 주식 자동매매 봇이 "돈을 버는 것"만큼 중요한 것은 "비용을 지키고 리스크를 제어하는 것"입니다. 특히 수수료가 비싸고 환전 스프레드가 있는 해외 주식에서는 단기 휩소(Whipsaw)에 흔들려 매 분마다 매매가 잦아지면 수수료만으로 깡통을 차게 됩니다. 
+> **전략 패턴 추상 인터페이스 설계의 핵심 사양**
+> 1. **통합 인터페이스 (`BaseStrategy`)**:
+>    - `calculate_score(row, regime, is_entry) -> float`: 모든 전략의 공통 채점 로직 추상화. pandas Series(백테스트) 및 dict(실시간 스캐너) 모두 호환되도록 설계.
+>    - `get_initial_entry_factor(regime) -> float`: 전략별 진입 정찰병 비중 결정 (예: 일반 0.15, 폭발형 1.0)
+>    - `get_pyramid_trigger(stage) -> float`: 전략별 피라미딩(불타기) 트리거 수익률 (예: 일반 2%/4%, 전략 B 3%/6%)
+>    - `get_stop_loss_pct(atr, price) -> float`: 전략별 동적 손절선 계산 (일반 3% / 1.5x ATR, 폭발형 6% / 3.0x ATR)
+>    - `get_trailing_stop_pct(atr, price) -> float`: 전략별 동적 트레일링 스탑 계산 (일반 2% / 1.0x ATR, 폭발형 4% / 2.0x ATR)
+>    - `base_allocation_pct`: 전략별 기본 자본 분할 단위 (일반 0.40, 전략 A 0.10)
+>    - `min_allocation_usd`: 최소 자본 할당액 (일반 $2000.0, 전략 A $0.0)
+>    - `min_smart_exit_profit`: 스마트 익절 최소 마진 (일반 2.5%, 전략 A/B 1.0%)
 > 
-> 1. **비용 극복을 위한 조기 익절선 상향 (수수료 극복)**
->    - 기존의 1.0%의 얕은 조기 익절 기준을 **2.5%** 이상으로 대폭 상향하여, 해외주식 왕복 수수료(약 0.5%~0.7% 및 환전 비용)를 내고도 확실한 순이익을 남길 수 있도록 마진을 확보합니다.
-> 2. **휩소 방지 재매수 쿨타임 강화**
->    - 동일 종목 매도 후 재진입 방지 시간을 **기존 20분에서 60분**으로 대폭 늘려, 급락 및 변동성 구간에서 불필요하게 털리고 다시 타는 수수료 낭비 사이클을 차단합니다.
-> 3. **안전 예수금 및 포트폴리오 개수 제한 가드**
->    - **최대 보유 종목 수 (Max Holdings = 5개)** 및 **최소 안전 예수금 버퍼 (Min Cash Balance = $200 또는 30만원)** 가드를 실장합니다. 
->    - 계좌가 꽉 차 있거나 현금이 바닥난 경우 신규 매수 탐색 및 주문을 원천 스킵함으로써 무용한 증권사 API 호출을 차단합니다.
-> 4. **글로벌 텔레그램 스팸 필터 도입**
->    - 1분 단위로 종목마다 울리던 "예수금 부족" 알림을 **계좌/유저 전체 단위로 묶어 1시간에 최대 1번만** 통합 요약 전송되도록 변경하여 알림 소음을 완벽히 제어합니다.
+> 2. **동적 팩토링 도입 (`strategy_factory.py`)**:
+>    - 문자열 설정 상수(`settings.STRATEGY_TYPE`)를 받아 해당하는 전략 인스턴스를 즉각 동적으로 생성 및 매핑해주는 팩토리 탑재.
 
 ---
 
-## 📋 세부 문제 진단 & 대응 설계
+## 📋 전략 패턴 아키텍처 설계
 
-### 1️⃣ 수수료 때문에 깡통을 차는 현상
-* **원인**: 미국 주식은 원화 거래 시 환전 스프레드 및 왕복 거래 수수료가 약 0.5% ~ 1.0% 발생합니다. 보유 종목이 1% 수익 구간에서 RSI-MACD 조기 익절로 나가거나, 시그널 붕괴(40점 미만)로 손절되는 짧은 매매가 잦아지면 슬리피지와 수수료로 계좌가 급격히 침식됩니다.
-* **대책**:
-  - `scheduler.py` 내의 스마트 조기 익절 최저 수익률(`profit_rate >= 1.0`)을 **`profit_rate >= 2.5`** 로 변경합니다.
-  - 동일 종목 매도 후 쿨다운을 **`20분 -> 60분`** 으로 늘려 휩소를 최소화합니다.
+신설할 `backend/app/strategies/` 모듈의 구조도입니다:
 
-### 2️⃣ 낮은 이익률 문제 (일주일 내내 돌려도 손실/무수익)
-* **원인**: 손절 폭은 ATR 기반으로 3%~12%까지 깊게 가져가는 반면, 익절은 1.0% 수준에서 지나치게 조기에 끊거나 잦은 휩소에 당하여 평균 손실이 평균 이익보다 훨씬 큰 불리한 손익비(Risk-Reward Ratio) 상태입니다. 또한 횡보장에서 무리한 돌파나 추가 매수(피라미딩)가 평단가만 올려 손실을 유발합니다.
-* **대책**:
-  - 하락/횡보장 판정 시 매수 진입 커트라인 점수를 기존 **`90점 -> 92점`** 으로 더욱 보수화하여 칼진입을 극도로 억제합니다.
-  - 조기 익절선을 2.5%로 상향하여 손익비(Risk-Reward Ratio)를 평균 `1:1.2 ~ 1.5` 이상으로 정상화합니다.
-
-### 3️⃣ 자동 매수 실패 - 예수금 부족 텔레그램 스팸 폭탄
-* **원인**: 포트폴리오 보유 수 제한이나 예수금 버퍼 가드가 없어, 예수금이 $0에 수렴한 상태에서도 스캐너에 걸린 수십 개 후보 종목들에 매수 API 호출을 끊임없이 시도합니다. 매수 실패 시마다 텔레그램 알림을 쏴서 하루에 수십~수백 개의 스팸 알림이 누적됩니다.
-* **대책**:
-  - `scheduler.py`에 시스템 안전 매수 제어 규칙 추가:
-    - **`MAX_HOLDINGS = 5`**: 현재 보유 종목 수(`len(holdings)`)가 5개 이상이면 신규 매수 진입을 시도하지 않고 즉시 스킵합니다.
-    - **`MIN_CASH_BALANCE_USD = 200.0`**: 계좌의 사용 가능 달러 예수금(`cash_balance_usd`)이 $200 미만이면 즉시 매수 스케줄링을 정지/스킵합니다.
-  - 텔레그램 예수금 알림 쿨타임 키를 종목별 `(user_id, ticker, reason_title)`에서 계좌 전체 `(user_id, "SYSTEM_INSUFFICIENT_CASH")`로 단일화하여 1시간당 1번만 울리도록 억제합니다.
+```
+backend/app/strategies/
+├── __init__.py             # 패키지 선언 및 간편 임포트 제공
+├── base_strategy.py        # 전략 인터페이스 정의 (추상 베이스 클래스)
+├── strategy_factory.py     # 동적 팩토리 클래스 (레고 블록 변환기)
+├── regime_switching.py     # [🏆 통합 1위] 마스터 레짐스위칭
+├── senior_simple.py        # 시니어 단순화 (Strategy S)
+├── strategy_a.py           # 태초의 방패 (Strategy A)
+├── strategy_b.py           # 채점 분리 과도기 (Strategy B)
+├── strategy_c.py           # 손익비 최적화 v2.0 (Strategy C)
+├── exploded_c.py           # 즉시 풀비중 C-폭발형
+└── qullamaggie.py          # 쿨라매기 단독 전략
+```
 
 ---
 
 ## 🛠️ 제안된 변경 사항 (Proposed Changes)
 
-### [Component 1] 시스템 설정 확장 및 기본 안전 가드 상수 탑재
+### [Component 1] 전략 모듈 신설
+#### [NEW] [base_strategy.py](file:///d:/dev/workspace/stockAuto/backend/app/strategies/base_strategy.py)
+* 추상 베이스 클래스 `BaseStrategy` 정의. 공통 파라미터(Allocation, ATR, Smart Exit Margin)의 디폴트값 정의 및 `calculate_score` 추상 메서드 제공.
 
-#### [MODIFY] [config.py](file:///d:/dev/workspace/stockAuto/backend/app/core/config.py)
-* **글로벌 안전 거래 기본값 상수 추가:**
-  - `MAX_HOLDINGS = 5` (동시 보유 가능한 최대 종목 수 제한)
-  - `MIN_CASH_BALANCE_USD = 200.0` (매수 집행을 위한 최소 주문 가능 예수금 하한선)
-  - `MIN_SMART_EXIT_PROFIT_RATE = 2.5` (조기 스마트 익절을 위한 최소 이익률 가드)
-  - `REENTRY_COOLDOWN_MINUTES = 60` (매도 후 동일 종목 재매수 제한 시간 연장)
+#### [NEW] [strategy_factory.py](file:///d:/dev/workspace/stockAuto/backend/app/strategies/strategy_factory.py)
+* `get_strategy(strategy_type: str) -> BaseStrategy` 구현을 통해 문자열과 매핑 클래스 동적 연동.
+
+#### [NEW] [개별 전략 파일들](file:///d:/dev/workspace/stockAuto/backend/app/strategies/)
+* `regime_switching.py`, `senior_simple.py`, `strategy_a.py`, `strategy_b.py`, `strategy_c.py`, `exploded_c.py`, `qullamaggie.py` 등 핵심 전략 개별 파일 격리 구현.
 
 ---
 
-### [Component 2] 메인 자율 매매 루프의 안전 제어 모듈 리팩토링
+### [Component 2] 백테스트 엔진 리팩토링
+#### [MODIFY] [backtest_engine.py](file:///d:/dev/workspace/stockAuto/backend/app/bot/backtest_engine.py)
+* 백테스터 생성 시 `strategy_factory.get_strategy(strategy_type)`를 호출하여 주입.
+* `_calculate_score` 메서드 내부의 500줄 가량의 거대한 if-else 분기 삭제 ➔ `self.strategy.calculate_score(row, regime, is_entry)` 1줄로 단축.
+* 손절선, 트레일링 스탑, 비중 조절 로직 역시 `self.strategy`가 리턴하는 동적 변수로 일괄 대체하여 백테스트 루프 간결화.
+
+---
+
+### [Component 3] 실시간 스캐너 및 스케줄러 리팩토링
+#### [MODIFY] [scanner.py](file:///d:/dev/workspace/stockAuto/backend/app/scanner/scanner.py)
+* 실시간 채점 시 `strategy_factory.get_strategy(settings.STRATEGY_TYPE)`를 싱글톤 또는 동적으로 가져와 `calculate_score(cand, sentiment, is_entry=True)` 호출로 전면 개편.
+* 200줄 규모의 분기문 제거 완료.
 
 #### [MODIFY] [scheduler.py](file:///d:/dev/workspace/stockAuto/backend/app/bot/scheduler.py)
-* **매도 모니터링 로직 수정:**
-  - 스마트 조기 익절(`profit_rate >= 1.0` -> `profit_rate >= settings.MIN_SMART_EXIT_PROFIT_RATE`) 적용.
-* **매수 스케줄링 사전 안전 가드(Safety Guard) 구축:**
-  - `all_signals` 루프에 들어가기 전, **현재 보유 종목 수**가 `settings.MAX_HOLDINGS` 이상인지 확인하여 즉시 매수 루프 스킵 및 로그 기록.
-  - **계좌 예수금 조회** 직후, 달러 잔고가 `settings.MIN_CASH_BALANCE_USD` 미만이면 신규 매수 스케줄링을 조기 차단.
-  - 동일 종목 재매수 쿨타임 분기를 `settings.REENTRY_COOLDOWN_MINUTES`로 동적 상수화 적용.
-* **텔레그램 알림 쿨타임 캐시 키 범위 재조정:**
-  - 예수금 부족 경고 시 캐시 키를 계좌 전체 `(user_id, "SYSTEM_INSUFFICIENT_CASH")`로 단일화하여 종목별 알림 폭탄 원천 차단.
+* 포지션 청산 및 스마트 익절 판독 시, `strategy` 객체의 `min_smart_exit_profit`을 사용하도록 실시간 파라미터 주입으로 개편.
 
 ---
 
 ## 🧪 검증 계획 (Verification Plan)
 
-### 자동화 테스트 (Automated Tests)
-1. 백엔드 코드의 문법 무결성 사전 검증:
+### 자동 컴파일 및 린트 검증
+1. 백엔드 컴파일 무결성 검증:
    ```bash
-   python -m py_compile backend/app/core/config.py backend/app/bot/scheduler.py
+   python -m py_compile app/strategies/*.py app/bot/backtest_engine.py app/scanner/scanner.py app/bot/scheduler.py
    ```
-2. SIMULATED 모드(가상 거래 모드)에서의 봇 기동 테스트를 실행하여 가용 예수금 부족 시 알림 스팸이 발생하지 않고 안전 차단되는지 활동 로그(`ActionLog`) 및 로컬 디버그 콘솔을 추적하여 검증합니다.
+   * 오류 검출이 없을 때까지 자가 치유(Self-Correction) 반복 가동.
 
-### 수동 검증 (Manual Verification)
-1. **실제 동작 모니터링**: 봇 구동 후 5종목 이상 매수 완료 상태가 되었을 때, 추가 신규 매입 신호가 감지되어도 `[BUY SKIP] Max holdings limit reached (5/5).` 라는 시스템 로그와 함께 매수 시도가 안전하게 차단되는지 확인합니다.
-2. **알림 빈도 점검**: 계좌 예수금을 거의 0원에 가깝게 유도하여 예수금 부족 조건이 활성화될 때, 1분마다 수십 통씩 오던 텔레그램 경고가 최초 1회만 발송되고 1시간 동안 무음 처리되는지 실시간 알림 피드를 최종 검수합니다.
+### 백테스트 정밀 검증 (PnL 정합성 확보)
+2. 리팩토링 전/후 백테스트 결과가 정확히 일치하는지 검증:
+   ```bash
+   python run_tournament.py
+   ```
+   * 리팩토링 후에도 동일 장세에서 `마스터 레짐스위칭` 전략이 `+21.72%` (Q2) 및 동일한 거래 횟수로 정확하게 똑같이 구현되는지 정밀 체크.

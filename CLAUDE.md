@@ -11,6 +11,9 @@
 # 2. 시스템 아키텍처 및 파일 맵
 
 @docs/SYSTEM_MANUAL.md
+@docs/strategy_architecture.md
+@docs/strategy_specification.md
+@docs/strategy_map.md
 
 # 3. 프레임워크 기술 가이드 (Next.js 등)
 

@@ -105,6 +105,10 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         # 1. 사용자 맞춤형 브로커 인스턴스 획득
         broker = get_broker_client(user_settings)
 
+        # 💡 [전략 패턴] 전략 팩토리를 통해 실시간 전략 로드 및 채점
+        from app.strategies.strategy_factory import get_strategy
+        strategy_instance = get_strategy(settings.STRATEGY_TYPE)
+
         # 2. 보유 종목(Holdings) 모니터링 및 매도/탈출 판정 (조기 익절 & 트레일링 스탑)
         holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
         for h in holdings:
@@ -134,13 +138,10 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
 
                 # ATR 기반 동적 익절/손절선 계산
                 atr = current_data.get('details', {}).get('atr', 0.0)
-                stop_loss_pct = 3.0 # 디폴트 3%
-                trailing_stop_pct = 2.0 # 디폴트 2%
                 
-                if atr > 0:
-                    atr_pct = (atr / current_price) * 100
-                    stop_loss_pct = max(3.0, atr_pct * 1.5)
-                    trailing_stop_pct = max(2.0, atr_pct * 1.0)
+                # 💡 [전략 패턴] 동적 손절선 및 트레일링 스탑 비율 계산
+                stop_loss_pct = strategy_instance.get_stop_loss_pct(atr, current_price)
+                trailing_stop_pct = strategy_instance.get_trailing_stop_pct(atr, current_price)
 
                 # 매도 조건 체크
                 sell_reason = None
@@ -169,12 +170,13 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     BREACH_COUNT_CACHE.pop((user_id, ticker), None)
                 
                 # ⭐ 지표 1. 조기 스마트 익절 (RSI 하락 다이버전스 + MACD 데드크로스) - 스마트 익절은 버퍼 없이 즉시 실행
-                if not sell_reason and profit_rate >= settings.MIN_SMART_EXIT_PROFIT_RATE and is_smart_exit:
+                # 전략 A 등 스마트 익절이 없으면 min_smart_exit_profit이 999라 자연스럽게 통과
+                if not sell_reason and profit_rate >= strategy_instance.min_smart_exit_profit and is_smart_exit:
                     sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
                 
                 # 지표 4. 기술적 강세 시그널 붕괴 - 시그널 붕괴는 버퍼 없이 즉시 실행
-                elif not sell_reason and ((sentiment == "BULLISH" and current_score < 40) or (sentiment != "BULLISH" and current_score < 50)):
-                    sell_reason = f"강세 시그널 붕괴 ({current_score}점 - EMA/VWAP 지지선 이탈 또는 매도 압력)"
+                elif not sell_reason and strategy_instance.is_signal_collapsed(current_score, sentiment):
+                    sell_reason = f"강세 시그널 붕괴 ({current_score}점 도달)"
 
                 if sell_reason:
                     log_action(db, user_id, f"EXIT SIGNAL: {ticker} | Reason: {sell_reason}", "SIGNAL")
@@ -254,7 +256,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                 all_signals_to_process = all_signals
 
             # 장세별 통과 커트라인 점수 분기 (상승장 85점, 하락/횡보장 95점 (수수료 절감 최적화 적용))
-            cutoff_score = 85 if sentiment == "BULLISH" else 95
+            cutoff_score = strategy_instance.get_cutoff_score(sentiment)
             cached_balance_data = None # 💡 사용자별 1분 루프 내 KIS 잔고 임시 캐싱 (DDoS급 중복 조회 제거)
             
             for s in all_signals_to_process:
@@ -272,49 +274,44 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                     next_stage = 3             # 기본 최종 단계 (피라미딩 불허 시)
                     
                     if existing_holding:
-                        # 💡 기존 보유 종목인 경우: 상승장(BULLISH) 모드에서만 피라미딩(불타기) 추가 매수 허용
-                        if sentiment != "BULLISH":
-                            continue # 하락/횡보장에서는 추가 매수 전면 스킵
+                        # 💡 기존 보유 중인 경우: 상승장(BULLISH) 모드에서만 피라미딩(불타기) 추가 매수 허용 (피라미딩 미지원 시 pyramid_trigger_1=999로 자동 탈출)
+                        pyramid_trigger_1 = strategy_instance.get_pyramid_trigger(1)
+                        if pyramid_trigger_1 > 100.0 or sentiment != "BULLISH":
+                            continue
                             
                         buy_stage = existing_holding.buy_stage
                         current_price = s['price']
                         profit_rate = ((current_price - existing_holding.avg_price) / existing_holding.avg_price) * 100
-                        
+                        pyramid_trigger_2 = strategy_instance.get_pyramid_trigger(2)
+
                         if buy_stage == 1:
-                            # 1단계 -> 2단계 피라미딩 조건: 평단 대비 +3.0% 이상 수익권 & 점수 85점 이상 유지
-                            if profit_rate >= 3.0:
-                                proposed_alloc_factor = 0.35 # 2차 추가 매수 비중: 35%
+                            if profit_rate >= pyramid_trigger_1:
+                                proposed_alloc_factor = 0.35  # 2차 추가 매수 비중: 35%
                                 next_stage = 2
                                 log_action(db, user_id, f"[Pyramiding] {ticker} meets 2nd Buy Condition (+{profit_rate:.2f}% profit). Placing 35% confirm order.", "SIGNAL")
                             else:
                                 continue
                         elif buy_stage == 2:
-                            # 2단계 -> 3단계 피라미딩 조건: 평단 대비 +6.0% 이상 수익권 & 점수 85점 이상 유지
-                            if profit_rate >= 6.0:
-                                proposed_alloc_factor = 0.50 # 3차 추가 매수 비중: 50%
+                            if profit_rate >= pyramid_trigger_2:
+                                proposed_alloc_factor = 0.50  # 3차 추가 매수 비중: 50%
                                 next_stage = 3
                                 log_action(db, user_id, f"[Pyramiding] {ticker} meets 3rd Buy Condition (+{profit_rate:.2f}% profit). Placing 50% ultimate order.", "SIGNAL")
                             else:
                                 continue
-
                         else:
-                            continue # 이미 3단계 풀배팅 완료 상태
+                            continue  # 이미 3단계 풀배팅 완료 상태
                     else:
-                        # 💡 신규 종목 첫 진입인 경우: 장세에 따른 피라미딩(상승장) / 1회성 단일 매수(약세장) 분기
-                        if sentiment == "BULLISH":
-                            # 상승장: 후지모토 시게루 1:2:6 기법에 따라 15% 비중의 정찰병 우선 진입
-                            proposed_alloc_factor = 0.15
-                            next_stage = 1
+                        # 💡 신규 포지션 진입 분기
+                        proposed_alloc_factor = strategy_instance.get_initial_entry_factor(sentiment)
+                        if sentiment == "BULLISH" and proposed_alloc_factor < 1.0:
+                            next_stage = 1  # 정찰병 15% 진입
                             log_action(db, user_id, f"[New Entry] {ticker} scanned in BULLISH market. Placing 15% scout order.", "INFO")
                         else:
-                            # 하락/횡보장: 피라미딩 금지, 1회성 격리 단일 매수집행 및 비중 제한
-                            next_stage = 3 # 추가 불타기 불허
+                            next_stage = 3  # 즉시 풀비중 진입
                             if sentiment == "BEARISH":
-                                proposed_alloc_factor = 0.30 # 하락장: 비중 30% 제한
-                                log_action(db, user_id, f"[New Entry] {ticker} scanned in BEARISH market. Placing 30% single defensive order.", "INFO")
+                                log_action(db, user_id, f"[New Entry] {ticker} scanned in BEARISH market. Placing {proposed_alloc_factor*100:.0f}% single defensive order.", "INFO")
                             else:
-                                proposed_alloc_factor = 0.50 # 횡보장: 비중 50% 제한
-                                log_action(db, user_id, f"[New Entry] {ticker} scanned in NEUTRAL market. Placing 50% single defensive order.", "INFO")
+                                log_action(db, user_id, f"[New Entry] {ticker} scanned in NEUTRAL market. Placing {proposed_alloc_factor*100:.0f}% single defensive order.", "INFO")
 
                     # ① 동적 쿨다운: 동일 종목 매도 후 일정 시간 재매수 금지 (Whipsaw 방지)
                     cooldown_cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.REENTRY_COOLDOWN_MINUTES)
@@ -367,8 +364,10 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         log_action(db, user_id, f"[BUY SKIP] Insufficient cash balance (${cash_balance_usd:.2f} < ${settings.MIN_CASH_BALANCE_USD:.2f}). Skipping {ticker}.", "WARNING")
                         continue
 
-                    # 기준 투자금 (총 달러 자산의 10%, 최소 $500 보장)
-                    base_alloc_usd = max(500.0, total_asset_usd * 0.10)
+                    # 기준 투자금 (총 달러 자산 대비 전략 설정 비중, 최소/최대 가이드라인 완비)
+                    base_alloc_usd = total_asset_usd * strategy_instance.base_allocation_pct
+                    if strategy_instance.min_allocation_usd > 0.0:
+                        base_alloc_usd = max(strategy_instance.min_allocation_usd, base_alloc_usd)
 
                     # ATR 변동성 조절 비율
                     atr = s.get('details', {}).get('atr', 0.0)

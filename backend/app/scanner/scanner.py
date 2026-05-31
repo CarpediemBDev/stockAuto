@@ -1,6 +1,8 @@
 import pandas as pd
 import asyncio
 import numpy as np
+from app.core.config import settings
+
 
 from app.translations.translator import Translator
 from app.scanner.indicators import (
@@ -280,118 +282,41 @@ async def scan_market_expert() -> list:
                 # ----------------- 다이내믹 세부 채점표 (score_card) 구축 -----------------
                 score_card = []
                 final_score = 0
-                
-                # 1단계 점수(S1 Score) 세부 쪼개기 반영
-                if cand['gap_pct'] >= 3.0:
-                    score_card.append({"factor": f"당일 시가 갭상승 폭발 (+{cand['gap_pct']}%)", "score": 30, "passed": True})
-                elif cand['gap_pct'] >= 1.5:
-                    score_card.append({"factor": f"당일 시가 갭상승 강세 (+{cand['gap_pct']}%)", "score": 15, "passed": True})
-                
-                if cand['rvol'] >= 2.0:
-                    score_card.append({"factor": f"상대 거래량(RVOL) 급증 (+{cand['rvol']}배)", "score": 30, "passed": True})
-                elif cand['rvol'] >= 1.2:
-                    score_card.append({"factor": f"상대 거래량(RVOL) 완만 상승 (+{cand['rvol']}배)", "score": 15, "passed": True})
-                    
-                if cand['dist_to_high'] > -1.5:
-                    score_card.append({"factor": "직전 전고점 저항선 돌파 가중치", "score": 20, "passed": True})
-                if cand['rs'] > 0:
-                    score_card.append({"factor": f"QQQ 지수 대비 초과 수익률 달성 (RS +{cand['rs']})", "score": 10, "passed": True})
-                if cand['ema_aligned']:
-                    score_card.append({"factor": "EMA 9/20 정배열 상승 흐름 정방향", "score": 10, "passed": True})
-                if cand.get('is_near_52w_high'):
-                    score_card.append({"factor": "52주 최고가 역사적 신고가 영역 인접", "score": 25, "passed": True})
-                if cand.get('momentum_candles'):
-                    score_card.append({"factor": "3연속 거래량 실린 강세 양봉 출현", "score": 15, "passed": True})
-                if cand.get('premarket_gap_pct', 0.0) >= 5.0:
-                    score_card.append({"factor": f"프리마켓 거래 갭 급증 (+{cand['premarket_gap_pct']}%)", "score": 20, "passed": True})
-                
-                # 2단계(Stage 2) 장세별 점수 분기 채점
-                if sentiment == "BULLISH":
-                    score_card.append({"factor": "나스닥 QQQ 상승장 레짐 보너스", "score": 5, "passed": True})
-                    final_score = cand['s1_score'] + 5
-                    
-                    is_vwap_above = not vwap.empty and last_close > vwap.iloc[-1]
-                    if is_vwap_above:
-                        score_card.append({"factor": "1분봉 VWAP 거래량 가중 평균선 상방 돌파", "score": 10, "passed": True})
-                        final_score += 10
-                    else:
-                        score_card.append({"factor": "1분봉 VWAP 지지선 붕괴 (하방 저항 발생)", "score": -15, "passed": False})
-                        final_score -= 15
-                        
-                    if news_sentiment == "POSITIVE":
-                        score_card.append({"factor": f"AI 뉴스 심리 진단 (호재 포착: {news_sentiment_score}점)", "score": 20, "passed": True})
-                        final_score += 20
-                    elif news_sentiment == "NEGATIVE":
-                        score_card.append({"factor": f"AI 뉴스 심리 진단 (경보 악재 감지: {news_sentiment_score}점)", "score": -30, "passed": False})
-                        final_score -= 30
-                        
-                    if risk_level == "LOW":
-                        score_card.append({"factor": "캔들 윗꼬리 차트 매물대 저항 없음 (안전)", "score": 10, "passed": True})
-                        final_score += 10
-                    elif risk_level == "HIGH":
-                        score_card.append({"factor": "캔들 윗꼬리 차트 악성 매물 저항 (물림 위험)", "score": -20, "passed": False})
-                        final_score -= 20
-                        
-                    if is_orb_breakout:
-                        score_card.append({"factor": "장초반 5분봉 고가 상방 대량 돌파 (ORB)", "score": 20, "passed": True})
-                        final_score += 20
-                else:
-                    final_score = cand['s1_score']  # 💡 S1 점수를 보존 (기존: 0으로 리셋하여 Stage 1 분석 결과가 폐기됨)
-                    if is_obv_accumulation:
-                        score_card.append({"factor": "세력 OBV 매집 다이버전스 골든크로스", "score": 30, "passed": True})
-                        final_score += 30
-                    else:
-                        score_card.append({"factor": "세력 OBV 이탈 및 거래 매집 강도 음수", "score": -20, "passed": False})
-                        final_score -= 20
-                        
-                    if not df_daily.empty and len(df_daily) >= 120:
-                        daily_close = df_daily['Close']
-                        ema120_daily = calculate_ema(daily_close, 120)
-                        if daily_close.iloc[-1] > ema120_daily.iloc[-1]:
-                            score_card.append({"factor": "일봉 장기 120일 이동평균선 상방 안착", "score": 30, "passed": True})
-                            final_score += 30
-                            
-                    if is_rsi_bb_extreme:
-                        score_card.append({"factor": "RSI 볼린저밴드 하단 극점 터치 후 강력 반동 포착", "score": 30, "passed": True})
-                        final_score += 30
-                        
-                    if sentiment == "BEARISH":
-                        score_card.append({"factor": "나스닥 QQQ 약세장 감점 페널티 적용", "score": -30, "passed": False})
-                        final_score -= 30
-                        
-                    is_vwap_above = not vwap.empty and last_close > vwap.iloc[-1]
-                    if is_vwap_above:
-                        score_card.append({"factor": "1분봉 VWAP 거래량 가중 평균선 상방 돌파", "score": 10, "passed": True})
-                        final_score += 10
-                    else:
-                        score_card.append({"factor": "1분봉 VWAP 지지선 붕괴 (하방 저항 발생)", "score": -15, "passed": False})
-                        final_score -= 15
-                        
-                    if news_sentiment == "POSITIVE":
-                        score_card.append({"factor": f"AI 뉴스 심리 진단 (호재 포착: {news_sentiment_score}점)", "score": 20, "passed": True})
-                        final_score += 20
-                    elif news_sentiment == "NEGATIVE":
-                        score_card.append({"factor": f"AI 뉴스 심리 진단 (경보 악재 감지: {news_sentiment_score}점)", "score": -30, "passed": False})
-                        final_score -= 30
-                        
-                    if risk_level == "LOW":
-                        score_card.append({"factor": "캔들 윗꼬리 차트 매물대 저항 없음 (안전)", "score": 10, "passed": True})
-                        final_score += 10
-                    elif risk_level == "HIGH":
-                        score_card.append({"factor": "캔들 윗꼬리 차트 악성 매물 저항 (물림 위험)", "score": -20, "passed": False})
-                        final_score -= 20
-                
-                # 3단계: 신규 퀀트 차트 패턴 매칭 점수
                 patterns_list = []
-                if is_vcp:
-                    score_card.append({"factor": "마크 미너비니 VCP 변동성 축소 수렴 돌파 완성", "score": 15, "passed": True})
-                    final_score += 15
-                    patterns_list.append("VCP")
-                if is_cup:
-                    score_card.append({"factor": "윌리엄 오닐 컵 앤 핸들 상승 패턴 돌파 완성", "score": 15, "passed": True})
-                    final_score += 15
-                    patterns_list.append("CUP_AND_HANDLE")
-                    
+                
+                # 💡 [전략 패턴] 전략 팩토리를 통해 실시간 전략 로드 및 채점
+                from app.strategies.strategy_factory import get_strategy
+                strategy_instance = get_strategy(settings.STRATEGY_TYPE)
+                
+                # 채점에 필요한 실시간 필드들을 cand(dict)에 바인딩
+                cand['Close'] = last_close
+                cand['Volume'] = float(df_1m['Volume'].iloc[-1]) if not df_1m.empty else 0.0
+                cand['VWAP'] = vwap.iloc[-1] if not vwap.empty else float('nan')
+                cand['Wick'] = wick_ratio
+                cand['is_rsi_bb_extreme'] = is_rsi_bb_extreme
+                cand['OBV_divergence'] = 1.0 if is_obv_accumulation else -1.0
+                cand['relative_strength'] = relative_strength
+                cand['premarket_gap_pct'] = cand.get('premarket_gap_pct', 0.0)
+                cand['news_sentiment'] = news_sentiment
+                cand['news_sentiment_score'] = news_sentiment_score
+                cand['is_vcp'] = is_vcp
+                cand['is_cup'] = is_cup
+                cand['is_orb_breakout'] = is_orb_breakout
+                cand['risk_level'] = risk_level
+                
+                if not df_daily.empty and len(df_daily) >= 120:
+                    daily_ema120 = calculate_ema(df_daily['Close'], 120)
+                    cand['EMA120'] = daily_ema120.iloc[-1] if not daily_ema120.empty else float('nan')
+                else:
+                    cand['EMA120'] = float('nan')
+                
+                # 전략 클래스를 통한 채점 가동 및 score_card 누적
+                final_score = strategy_instance.calculate_score(cand, sentiment, is_entry=True, score_card=score_card)
+                
+                # 패턴 감지 여부 누적
+                if is_vcp: patterns_list.append("VCP")
+                if is_cup: patterns_list.append("CUP_AND_HANDLE")
+
                 # 최종 범위 보장 및 등급 판독
                 final_score = max(0, min(final_score, 100))
                 
@@ -504,45 +429,43 @@ async def analyze_single_ticker(ticker: str) -> dict:
         vwap = calculate_vwap(df_1m)
         risk_level, wick_ratio = detect_fakeout_risk(df_1m)
 
-        final_score = 0
-        
-        if sentiment == "BULLISH":
-            s1_score = 30
-            if ema_aligned: s1_score += 15
-            if rs > 0: s1_score += 10
-            if rvol >= 2.0: s1_score += 30
-            elif rvol >= 1.2: s1_score += 15
-            
-            final_score = s1_score
-            if not vwap.empty and last_close > vwap.iloc[-1]: final_score += 10
-            else: final_score -= 15
-            
-            if risk_level == "LOW": final_score += 10
-            elif risk_level == "HIGH": final_score -= 20
-            
-            if is_orb_breakout: final_score += 20
-            final_score += 5
-        else:
-            if is_obv_accumulation: final_score += 30
-            else: final_score -= 20
-            
-            if not df_daily.empty and len(df_daily) >= 120:
-                daily_close = df_daily['Close']
-                ema120_daily = calculate_ema(daily_close, 120)
-                if daily_close.iloc[-1] > ema120_daily.iloc[-1]:
-                    final_score += 30
-                    
-            if is_rsi_bb_extreme: final_score += 30
-            if sentiment == "BEARISH": final_score -= 30
-            
-            if not vwap.empty and last_close > vwap.iloc[-1]: final_score += 10
-            else: final_score -= 15
-            
-            if risk_level == "LOW": final_score += 10
-            elif risk_level == "HIGH": final_score -= 20
+        # 💡 [전략 패턴] 전략 팩토리를 통해 실시간 전략 로드 및 채점
+        from app.strategies.strategy_factory import get_strategy
+        strategy_instance = get_strategy(settings.STRATEGY_TYPE)
 
+        cand = {
+            'Close': last_close,
+            'Volume': float(df_1m['Volume'].iloc[-1]) if not df_1m.empty else 0.0,
+            'VWAP': vwap.iloc[-1] if not vwap.empty else float('nan'),
+            'Wick': wick_ratio,
+            'is_rsi_bb_extreme': is_rsi_bb_extreme,
+            'OBV_divergence': 1.0 if is_obv_accumulation else -1.0,
+            'relative_strength': rs,
+            'gap_pct': 0.0,
+            'rvol': rvol,
+            'rs': rs,
+            'ema_aligned': ema_aligned,
+            'dollar_volume': float(df_1m['Close'].iloc[-1] * df_1m['Volume'].iloc[-1]) if not df_1m.empty else 0.0,
+            'is_near_52w_high': False,
+            'momentum_candles': False,
+            'premarket_gap_pct': 0.0,
+            'news_sentiment': 'NEUTRAL',
+            'news_sentiment_score': 0.0,
+            'is_vcp': False,
+            'is_cup': False,
+            'is_orb_breakout': is_orb_breakout,
+            'risk_level': risk_level
+        }
+
+        if not df_daily.empty and len(df_daily) >= 120:
+            daily_ema120 = calculate_ema(df_daily['Close'], 120)
+            cand['EMA120'] = daily_ema120.iloc[-1] if not daily_ema120.empty else float('nan')
+        else:
+            cand['EMA120'] = float('nan')
+
+        final_score = strategy_instance.calculate_score(cand, sentiment, is_entry=False)
         final_score -= fundamental_penalty
-        final_score = max(0, min(final_score, 100))
+        final_score = max(0.0, min(float(final_score), 100.0))
 
         if sentiment == "BULLISH":
             sig_type = "STRONG_BUY" if final_score >= 85 else "BUY" if final_score >= 65 else "WATCH"
