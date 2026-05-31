@@ -330,7 +330,7 @@ export function AccountBalance({
                     </div>
                     <div className="relative group/tooltip cursor-help">
                       <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 uppercase tracking-wide animate-pulse">
-                        비중 50% 가동중 ℹ️
+                        가동중 ℹ️
                       </span>
                       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 bg-zinc-950 border border-zinc-800 text-[10px] text-zinc-300 rounded-xl opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity duration-200 z-50 shadow-2xl leading-normal text-left font-normal normal-case">
                         총 자산의 50% 자금을 배정받아 개별 변동성 돌파 매매전략(EP)으로 상시 가동 중이며, 나머지 50% 비중은 RS 슬롯에 할당됩니다.
@@ -393,7 +393,7 @@ export function AccountBalance({
                           ? "bg-purple-500/15 text-purple-400 border-purple-500/20 animate-pulse" 
                           : "bg-amber-500/15 text-amber-400 border-amber-500/20"
                       )}>
-                        {regime === "BULLISH" ? "비중 50% 가동중 ℹ️" : "비중 50% 격리중 🛡️"}
+                        {regime === "BULLISH" ? "가동중 ℹ️" : "격리중 🛡️"}
                       </span>
                       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 bg-zinc-950 border border-zinc-800 text-[10px] text-zinc-300 rounded-xl opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity duration-200 z-50 shadow-2xl leading-normal text-left font-normal normal-case">
                         {regime === "BULLISH" 
