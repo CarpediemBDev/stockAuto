@@ -19,7 +19,7 @@ class BaseBroker(ABC):
         self.db_settings = db_settings
 
     @abstractmethod
-    def get_account_balance(self) -> dict:
+    def get_account_balance(self, exchange_rate: float | None = None) -> dict:
         """
         계좌 예수금, 주식 평가금, 총자산 및 실시간 수익률을 딕셔너리로 조회하여 반환합니다.
         
@@ -36,7 +36,7 @@ class BaseBroker(ABC):
         pass
 
     @abstractmethod
-    def get_holdings(self) -> list:
+    def get_holdings(self, exchange_rate: float | None = None) -> list:
         """
         현재 계좌의 실시간 해외주식 보유 포트폴리오 리스트를 반환합니다.
         

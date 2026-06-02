@@ -21,11 +21,25 @@ _user_network_alert_sent = {}
 import time
 # 매수 실패(단가 초과, 예수금 부족) 알림 도배 방지용 쿨타임 캐시 (1시간)
 WARNING_COOLDOWN_CACHE = {}
+MARKET_CLOSED_LOG_CACHE = {}
+SCANNER_CACHE_EMPTY_LOG_CACHE = {}
+LOG_COOLDOWN_SECONDS = 1800.0
 
 # 💡 동적 손절선 및 트레일링 스탑 이탈 연속 횟수 추적 캐시 (Whipsaw 방지용 연속 2회 확정 가드)
 # 키: (user_id, ticker) -> 값: int (연속 이탈 횟수)
 BREACH_COUNT_CACHE = {}
 
+_scanner_refresh_lock = threading.Lock()
+_scanner_refresh_in_progress = False
+
+
+def should_log_with_cooldown(cache: dict, key, cooldown_seconds: float = LOG_COOLDOWN_SECONDS) -> bool:
+    now = time.time()
+    last_logged = cache.get(key, 0.0)
+    if now - last_logged < cooldown_seconds:
+        return False
+    cache[key] = now
+    return True
 
 
 from app.scanner.scanner import scan_overseas_market, analyze_single_ticker, check_market_sentiment
@@ -87,7 +101,7 @@ def log_action(db, user_id: int, message: str, level="INFO"):
     db.commit()
     logger.info(f"[{level}] [User {user_id}] {message}")
 
-async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: list):
+async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: list, exchange_rate: float):
     """
     개별 사용자별 독자적인 자동매매 시나리오 처리 함수 (멀티테넌시 격리)
     ⭐ 격리형 3슬롯 멀티 전략 코어 (Modular Multi-Strategy Isolation) 실전 가동
@@ -97,6 +111,19 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         # 사용자 설정 로드
         db_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
         if not db_settings or not db_settings.is_running:
+            return
+
+        market_open = is_us_market_open()
+        holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
+
+        if not market_open and not holdings:
+            if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, ("closed_no_holdings", user_id)):
+                log_action(
+                    db,
+                    user_id,
+                    "[MARKET CLOSED] US market is closed and no holdings exist. Skipping market data, balance, and buy analysis for this cycle.",
+                    "INFO"
+                )
             return
 
         # 💡 0. 시장 감정 분석 및 QQQ 레짐 모드 판정
@@ -121,8 +148,6 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         first_slot_key = list(ms_manager.SLOTS.keys())[0]
 
         # 2. 보유 종목(Holdings) 모니터링 및 매도/탈출 판정 (조기 익절 & 트레일링 스탑)
-        holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
-        
         # 💡 레거시 마이그레이션 가드: 접두사 없는 기존 종목에 자동으로 첫 번째 슬롯 접두사 부여
         for h in holdings:
             if not ms_manager.get_slot_by_holding_ticker(h.ticker):
@@ -134,7 +159,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         # 💡 [Self-Healing] 보유 종목 실시간 계좌 정합성 동기화 가드 (Holding Sync Guard)
         # DB와 실제 증권사 계좌 보유 종목 간 유령 누락 및 수량 불일치 정화
         try:
-            real_holdings = await safe_broker_call(broker.get_holdings)
+            real_holdings = await safe_broker_call(broker.get_holdings, exchange_rate=exchange_rate)
             db_holdings_map = {db_h.ticker: db_h for db_h in holdings}
             real_ticker_set = set()
             
@@ -207,11 +232,10 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
             log_action(db, user_id, f"[Self-Healing] Failed to sync holding discrepancy: {sync_err}", "ERROR")
 
         # 💡 KIS 및 Simulated 잔고 실시간 조회 (Rate Limit 세마포어 적용)
-        balance_data = await safe_broker_call(broker.get_account_balance)
+        balance_data = await safe_broker_call(broker.get_account_balance, exchange_rate=exchange_rate)
         total_asset_krw = balance_data.get("total_asset", 10000000.0)
         cash_balance_krw = balance_data.get("cash_balance", 10000000.0)
 
-        exchange_rate = FXRateCache.get_rate()
         total_asset_usd = total_asset_krw / exchange_rate
         cash_balance_usd = cash_balance_krw / exchange_rate
 
@@ -225,11 +249,16 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
             sig = signal_map.get(ticker)
             if sig:
                 target_signals.append(sig)
-            else:
-                # 캐시에 없는 경우 백그라운드 단독 정밀 분석 수행 (Dynamic Fallback)
-                sig = await analyze_single_ticker(ticker)
-                if sig:
-                    target_signals.append(sig)
+
+        if not target_signals and not holdings:
+            if market_open and should_log_with_cooldown(SCANNER_CACHE_EMPTY_LOG_CACHE, ("empty_signals", user_id), 600.0):
+                log_action(
+                    db,
+                    user_id,
+                    "[Scanner Cache] No cached signals are available yet. Skipping per-user fallback analysis to prevent duplicate Yahoo Finance calls.",
+                    "WARNING"
+                )
+            return
 
         target_signal_map = {s['ticker']: s for s in target_signals}
 
@@ -355,7 +384,6 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
                         log_action(db, user_id, f"SUCCESS: {h.ticker} sold via {sell_reason} | Order: {res['order_no']}", "INFO")
                         
-                        exchange_rate = FXRateCache.get_rate()
                         filled_price_krw = filled_price * exchange_rate
                         total_amount_usd = filled_price * filled_qty
                         total_amount_krw = total_amount_usd * exchange_rate
@@ -382,8 +410,9 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                 log_action(db, user_id, f"Error processing holding {h.ticker}: {item_err}", "ERROR")
 
         # ------------------ (Part B) 3개 슬롯별 신규 매수 기회 검사 및 분할 매수 ------------------
-        if not is_us_market_open():
-            log_action(db, user_id, "[BUY SKIP] US market is currently closed. No new buy orders placed.", "INFO")
+        if not market_open:
+            if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, ("closed_buy", user_id)):
+                log_action(db, user_id, "[BUY SKIP] US market is currently closed. No new buy orders placed.", "INFO")
             return
 
         # 💡 최정예 종목 Focusing 필터 적용 (RVOL >= 2.0 이상 대량 거래량 매집봉 포착 5~10개 엄선)
@@ -654,20 +683,29 @@ async def refresh_scanner_cache():
     마켓 스캐너 캐시를 독립적으로 갱신하는 전용 비동기 함수 (10분 주기).
     자동매매 루프와 완전히 분리되어 Rate Limit 위험 없이 안전하게 동작합니다.
     """
-    global latest_scanned_signals
+    global latest_scanned_signals, _scanner_refresh_in_progress
+
+    with _scanner_refresh_lock:
+        if _scanner_refresh_in_progress:
+            logger.info("[Scanner Cache] Previous refresh still running. Skipping duplicate refresh.")
+            return
+        _scanner_refresh_in_progress = True
     
-    # 장 외 시간 API 비용/호출 낭비 방지 가드
-    if not is_us_market_open():
-        logger.info("[Scanner Cache] Market is closed. Skipping scan to save API quotas.")
-        return
-        
-    logger.info("[Scanner Cache] Starting 10-min market scan refresh cycle...")
     try:
+        # 장 외 시간 API 비용/호출 낭비 방지 가드
+        if not is_us_market_open():
+            logger.info("[Scanner Cache] Market is closed. Skipping scan to save API quotas.")
+            return
+
+        logger.info("[Scanner Cache] Starting 10-min market scan refresh cycle...")
         signals = await scan_overseas_market()
         latest_scanned_signals = signals
         logger.info(f"[Scanner Cache] Refresh complete. Cached {len(signals)} signals.")
     except Exception as e:
         logger.exception("[Scanner Cache] ERROR during market scan")
+    finally:
+        with _scanner_refresh_lock:
+            _scanner_refresh_in_progress = False
 
 def scanner_cache_wrapper():
     """스캐너 캐시 갱신용 동기 래퍼 (APScheduler 호출용)"""
@@ -700,12 +738,44 @@ async def async_trading_loop():
             is_processing = False
             return
 
+        active_user_ids = [u.user_id for u in active_users]
+        holding_user_ids = {
+            row[0]
+            for row in db.query(Holding.user_id)
+            .filter(Holding.user_id.in_(active_user_ids))
+            .distinct()
+            .all()
+        }
+
+        market_open = is_us_market_open()
+        if not market_open:
+            if not holding_user_ids:
+                if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, "scheduler_closed_no_holdings"):
+                    logger.info("[Scheduler] Market is closed and no active users have holdings. Skipping all user flows.")
+                return
+            active_users = [u for u in active_users if u.user_id in holding_user_ids]
+
+        if market_open and not latest_scanned_signals:
+            logger.info("[Scheduler] Scanner cache is empty. Refreshing once before user trading flows.")
+            await refresh_scanner_cache()
+
+        if market_open and not latest_scanned_signals:
+            if not holding_user_ids:
+                if should_log_with_cooldown(SCANNER_CACHE_EMPTY_LOG_CACHE, "scheduler_empty_signals_no_holdings", 600.0):
+                    logger.warning("[Scheduler] Scanner cache is still empty and no holdings exist. Skipping user flows to prevent duplicate Yahoo Finance fallback calls.")
+                return
+            active_users = [u for u in active_users if u.user_id in holding_user_ids]
+
         # 2. 캐시된 시그널 사용 (scan_overseas_market 직접 호출 X → Rate Limit 방지)
         all_signals = latest_scanned_signals
         signal_map = {s['ticker']: s for s in all_signals} if all_signals else {}
 
+        # 환율은 사용자별 데이터가 아니라 현재 자동매매 사이클의 공통 market context다.
+        # 한 번만 조회한 값을 모든 사용자 플로우와 브로커 계산에 주입한다.
+        exchange_rate = FXRateCache.get_rate()
+
         # 3. 각 활성 유저별 자동매매 시나리오 병렬 실행
-        tasks = [run_user_trading_flow(u.user_id, signal_map, all_signals) for u in active_users]
+        tasks = [run_user_trading_flow(u.user_id, signal_map, all_signals, exchange_rate) for u in active_users]
         await asyncio.gather(*tasks)
 
     except Exception as e:
@@ -728,10 +798,10 @@ def trading_loop_wrapper():
 
 def start_scheduler():
     if not scheduler.running:
-        # ① 자동매매 루프: 1분 주기 (캐시된 시그널로 봇 실행 사용자 처리)
-        scheduler.add_job(trading_loop_wrapper, 'interval', minutes=1, id='main_trade_job', next_run_time=datetime.now())
-        # ② 스캐너 캐시 갱신: 10분 주기 (yfinance 대규모 API 호출 - Rate Limit 안전)
+        # ① 스캐너 캐시 갱신: 10분 주기 (yfinance 대규모 API 호출 - Rate Limit 안전)
         scheduler.add_job(scanner_cache_wrapper, 'interval', minutes=10, id='scanner_cache_job', next_run_time=datetime.now())
+        # ② 자동매매 루프: 1분 주기 (캐시된 시그널로 봇 실행 사용자 처리)
+        scheduler.add_job(trading_loop_wrapper, 'interval', minutes=1, id='main_trade_job', next_run_time=datetime.now() + timedelta(seconds=20))
         # ③ 텔레그램 일일 리포트 발송: 매일 한국시간 17:10 (미국장 마감 직후)
         scheduler.add_job(send_daily_report_to_all_users_sync, 'cron', hour=17, minute=10, id='daily_telegram_report_job')
         scheduler.start()

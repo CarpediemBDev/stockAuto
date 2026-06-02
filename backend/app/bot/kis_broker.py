@@ -67,14 +67,15 @@ class KISBroker(BaseBroker):
                        f"Using submitted values as fallback: qty={submitted_qty}, price=${submitted_price:.2f}")
         return {"filled_qty": submitted_qty, "filled_price": submitted_price, "confirmed": False}
 
-    def get_account_balance(self) -> dict:
+    def get_account_balance(self, exchange_rate: float | None = None) -> dict:
         # KISClient의 계좌 조회 실행 (내부에 이미 dynamic provider가 구현됨)
-        return self.client.get_account_balance()
+        return self.client.get_account_balance(exchange_rate=exchange_rate)
 
-    def get_holdings(self) -> list:
+    def get_holdings(self, exchange_rate: float | None = None) -> list:
         # KIS API를 통한 실시간 해외 보유 종목 조회
-        from app.bot.fx_cache import FXRateCache
-        exchange_rate = FXRateCache.get_rate()
+        if exchange_rate is None:
+            from app.bot.fx_cache import FXRateCache
+            exchange_rate = FXRateCache.get_rate()
 
         try:
             actual_holdings = self.client.get_overseas_present_balance()

@@ -117,10 +117,11 @@ class KISClient:
             print(f"[KIS API] Token request exception: {e}")
             return None
 
-    def get_account_balance(self):
+    def get_account_balance(self, exchange_rate: float | None = None):
         from app.bot.fx_cache import FXRateCache
         # 실시간 환율을 조회하여 모든 분기(가상 및 KIS 실전)에서 환율을 공유합니다.
-        exchange_rate = FXRateCache.get_rate()
+        if exchange_rate is None:
+            exchange_rate = FXRateCache.get_rate()
 
         token = self.get_access_token()
         if not token:

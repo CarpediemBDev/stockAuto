@@ -2,14 +2,85 @@ import yfinance as yf
 import pandas as pd
 import asyncio
 import time
+import threading
 from app.core.logging import logger
 
-# 💡 전역 마이크로 캐시 장치 (10초 유효 - 1,000명 트래픽 병목 방패막이)
+# yfinance는 프로세스 전체 singleton session/crumb를 공유한다.
+# 병렬 호출 시 Yahoo crumb가 흔들릴 수 있어 모든 Yahoo 호출을 이 게이트로 직렬화한다.
+_yf_lock = threading.RLock()
+_yf_last_call = 0.0
+_yf_min_interval = 0.25
+
+_cache_lock = threading.RLock()
+
+# 전역 캐시 장치
 _ohlcv_cache = {}
 _ticker_info_cache = {}      # Key: ticker, Value: (timestamp, dict)
 _ticker_news_cache = {}      # Key: ticker, Value: (timestamp, list)
 _ticker_fast_info_cache = {}  # Key: ticker, Value: (timestamp, fast_info_obj)
 _bulk_ohlcv_cache = {}        # Key: (sorted_tickers, interval, period, group_by), Value: (timestamp, df)
+
+OHLCV_CACHE_TTL = 45.0
+BULK_OHLCV_CACHE_TTL = 60.0
+TICKER_INFO_CACHE_TTL = 86400.0
+TICKER_NEWS_CACHE_TTL = 600.0
+TICKER_FAST_INFO_CACHE_TTL = 86400.0
+
+def _clone_cached(value):
+    if isinstance(value, pd.DataFrame):
+        return value.copy()
+    if isinstance(value, dict):
+        return value.copy()
+    if isinstance(value, list):
+        return value.copy()
+    return value
+
+def _read_cache(cache: dict, cache_key, ttl: float):
+    now = time.time()
+    with _cache_lock:
+        cached = cache.get(cache_key)
+        if not cached:
+            return None
+        cached_time, cached_value = cached
+        if now - cached_time < ttl:
+            return _clone_cached(cached_value)
+    return None
+
+def _write_cache(cache: dict, cache_key, value):
+    with _cache_lock:
+        cache[cache_key] = (time.time(), _clone_cached(value))
+
+def _normalize_ohlcv(data: pd.DataFrame) -> pd.DataFrame:
+    if data is None:
+        return pd.DataFrame()
+    if isinstance(data.columns, pd.MultiIndex):
+        data = data.copy()
+        data.columns = data.columns.get_level_values(0)
+    return data
+
+def _run_yfinance_cached(cache: dict, cache_key, ttl: float, fetcher):
+    cached = _read_cache(cache, cache_key, ttl)
+    if cached is not None:
+        return cached
+
+    global _yf_last_call
+    with _yf_lock:
+        cached = _read_cache(cache, cache_key, ttl)
+        if cached is not None:
+            return cached
+
+        now = time.time()
+        wait_seconds = _yf_min_interval - (now - _yf_last_call)
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+
+        try:
+            value = fetcher()
+        finally:
+            _yf_last_call = time.time()
+
+        _write_cache(cache, cache_key, value)
+        return _clone_cached(value)
 
 async def fetch_ohlcv(ticker: str, interval: str = "1h", period: str = "5d") -> pd.DataFrame:
     """
@@ -17,25 +88,17 @@ async def fetch_ohlcv(ticker: str, interval: str = "1h", period: str = "5d") -> 
     (💡 10초 전역 캐싱 적용 - 중복 요출 원천 차단)
     """
     cache_key = (ticker, interval, period)
-    now = time.time()
-    
-    # 1. 10초 미만의 최신 캐시가 존재하면 즉시 반환 (DDoS 및 API 차단 완벽 방어)
-    if cache_key in _ohlcv_cache:
-        cached_time, cached_df = _ohlcv_cache[cache_key]
-        if now - cached_time < 10.0:
-            return cached_df.copy()
-            
     try:
-        data = await asyncio.to_thread(yf.download, ticker, period=period, interval=interval, progress=False)
-        if data.empty:
-            return pd.DataFrame()
-            
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.get_level_values(0)
-            
-        # 2. 새로운 데이터를 캐시에 탑재
-        _ohlcv_cache[cache_key] = (now, data)
-        return data
+        data = await asyncio.to_thread(
+            _run_yfinance_cached,
+            _ohlcv_cache,
+            cache_key,
+            OHLCV_CACHE_TTL,
+            lambda: _normalize_ohlcv(
+                yf.download(ticker, period=period, interval=interval, progress=False, threads=False)
+            )
+        )
+        return data if not data.empty else pd.DataFrame()
     except Exception as e:
         logger.warning(f"[DataProvider] Error fetching {ticker} ({interval}): {e}")
         return pd.DataFrame()
@@ -63,22 +126,21 @@ async def fetch_bulk_ohlcv(tickers: list, interval: str, period: str, group_by: 
     if not tickers:
         return pd.DataFrame()
     cache_key = (tuple(sorted(tickers)), interval, period, group_by)
-    now = time.time()
-    if cache_key in _bulk_ohlcv_cache:
-        cached_time, cached_df = _bulk_ohlcv_cache[cache_key]
-        if now - cached_time < 10.0:
-            return cached_df.copy()
-
     try:
         data = await asyncio.to_thread(
-            yf.download, 
-            tickers, 
-            period=period, 
-            interval=interval, 
-            group_by=group_by, 
-            progress=False
+            _run_yfinance_cached,
+            _bulk_ohlcv_cache,
+            cache_key,
+            BULK_OHLCV_CACHE_TTL,
+            lambda: yf.download(
+                tickers,
+                period=period,
+                interval=interval,
+                group_by=group_by,
+                progress=False,
+                threads=False
+            )
         )
-        _bulk_ohlcv_cache[cache_key] = (now, data)
         return data
     except Exception as e:
         logger.warning(f"[DataProvider] Error in bulk download for {len(tickers)} tickers ({interval}): {e}")
@@ -91,17 +153,14 @@ async def fetch_ticker_news(ticker: str) -> list:
     종목의 실시간 최신 뉴스 목록을 비동기 스레드로 안전하게 수집합니다.
     (💡 10초 전역 캐싱 적용)
     """
-    now = time.time()
-    if ticker in _ticker_news_cache:
-        cached_time, cached_news = _ticker_news_cache[ticker]
-        if now - cached_time < 10.0:
-            return cached_news.copy()
-
     try:
-        ticker_obj = yf.Ticker(ticker)
-        news = await asyncio.to_thread(lambda: ticker_obj.news)
-        news_data = news if news else []
-        _ticker_news_cache[ticker] = (now, news_data)
+        news_data = await asyncio.to_thread(
+            _run_yfinance_cached,
+            _ticker_news_cache,
+            ticker,
+            TICKER_NEWS_CACHE_TTL,
+            lambda: yf.Ticker(ticker).news or []
+        )
         return news_data
     except Exception as e:
         logger.warning(f"[DataProvider] Error fetching news for {ticker}: {e}")
@@ -112,17 +171,14 @@ async def fetch_ticker_info(ticker: str) -> dict:
     종목의 실시간 재무/기본정보(info)를 비동기 스레드로 안전하게 수집합니다.
     (💡 10초 전역 캐싱 적용)
     """
-    now = time.time()
-    if ticker in _ticker_info_cache:
-        cached_time, cached_info = _ticker_info_cache[ticker]
-        if now - cached_time < 10.0:
-            return cached_info.copy()
-
     try:
-        ticker_obj = yf.Ticker(ticker)
-        info = await asyncio.to_thread(lambda: ticker_obj.info)
-        info_data = info if info else {}
-        _ticker_info_cache[ticker] = (now, info_data)
+        info_data = await asyncio.to_thread(
+            _run_yfinance_cached,
+            _ticker_info_cache,
+            ticker,
+            TICKER_INFO_CACHE_TTL,
+            lambda: yf.Ticker(ticker).info or {}
+        )
         return info_data
     except Exception as e:
         logger.warning(f"[DataProvider] Error fetching info for {ticker}: {e}")
@@ -133,17 +189,13 @@ def fetch_ticker_fast_info(ticker: str):
     종목의 빠른 지표(fast_info)를 동기식으로 수집합니다. (동기 API용)
     (💡 10초 전역 캐싱 적용)
     """
-    now = time.time()
-    if ticker in _ticker_fast_info_cache:
-        cached_time, cached_fast_info = _ticker_fast_info_cache[ticker]
-        if now - cached_time < 10.0:
-            return cached_fast_info
-
     try:
-        ticker_obj = yf.Ticker(ticker)
-        fast_info = ticker_obj.fast_info
-        _ticker_fast_info_cache[ticker] = (now, fast_info)
-        return fast_info
+        return _run_yfinance_cached(
+            _ticker_fast_info_cache,
+            ticker,
+            TICKER_FAST_INFO_CACHE_TTL,
+            lambda: yf.Ticker(ticker).fast_info
+        )
     except Exception as e:
         logger.warning(f"[DataProvider] Error fetching fast_info for {ticker}: {e}")
         return None
@@ -156,21 +208,20 @@ def fetch_bulk_ohlcv_sync(tickers: list, interval: str, period: str, group_by: s
     if not tickers:
         return pd.DataFrame()
     cache_key = (tuple(sorted(tickers)), interval, period, group_by)
-    now = time.time()
-    if cache_key in _bulk_ohlcv_cache:
-        cached_time, cached_df = _bulk_ohlcv_cache[cache_key]
-        if now - cached_time < 10.0:
-            return cached_df.copy()
-
     try:
-        data = yf.download(
-            tickers, 
-            period=period, 
-            interval=interval, 
-            group_by=group_by, 
-            progress=False
+        data = _run_yfinance_cached(
+            _bulk_ohlcv_cache,
+            cache_key,
+            BULK_OHLCV_CACHE_TTL,
+            lambda: yf.download(
+                tickers,
+                period=period,
+                interval=interval,
+                group_by=group_by,
+                progress=False,
+                threads=False
+            )
         )
-        _bulk_ohlcv_cache[cache_key] = (now, data)
         return data
     except Exception as e:
         logger.warning(f"[DataProvider] Error in sync bulk download for {len(tickers)} tickers ({interval}): {e}")
@@ -181,18 +232,13 @@ def fetch_ticker_info_sync(ticker: str) -> dict:
     종목의 실시간 재무/기본정보(info)를 동기식으로 안전하게 수집합니다. (동기 API용)
     (💡 10초 전역 캐싱 적용)
     """
-    now = time.time()
-    if ticker in _ticker_info_cache:
-        cached_time, cached_info = _ticker_info_cache[ticker]
-        if now - cached_time < 10.0:
-            return cached_info.copy()
-
     try:
-        ticker_obj = yf.Ticker(ticker)
-        info = ticker_obj.info
-        info_data = info if info else {}
-        _ticker_info_cache[ticker] = (now, info_data)
-        return info_data
+        return _run_yfinance_cached(
+            _ticker_info_cache,
+            ticker,
+            TICKER_INFO_CACHE_TTL,
+            lambda: yf.Ticker(ticker).info or {}
+        )
     except Exception as e:
         logger.warning(f"[DataProvider] Error fetching sync info for {ticker}: {e}")
         return {}
@@ -203,27 +249,17 @@ def fetch_ohlcv_sync(ticker: str, interval: str = "1h", period: str = "5d") -> p
     (💡 10초 전역 캐싱 적용 - 비동기 fetch_ohlcv와 캐시 공유)
     """
     cache_key = (ticker, interval, period)
-    now = time.time()
-    
-    # 비동기 fetch_ohlcv와 동일한 _ohlcv_cache를 공유하여 중복 네트워크 요청 원천 차단
-    if cache_key in _ohlcv_cache:
-        cached_time, cached_df = _ohlcv_cache[cache_key]
-        if now - cached_time < 10.0:
-            return cached_df.copy()
-            
     try:
-        data = yf.download(ticker, period=period, interval=interval, progress=False)
-        if data.empty:
-            return pd.DataFrame()
-            
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.get_level_values(0)
-            
-        # 캐싱 처리 (공유 캐시에 저장)
-        _ohlcv_cache[cache_key] = (now, data)
-        return data
+        data = _run_yfinance_cached(
+            _ohlcv_cache,
+            cache_key,
+            OHLCV_CACHE_TTL,
+            lambda: _normalize_ohlcv(
+                yf.download(ticker, period=period, interval=interval, progress=False, threads=False)
+            )
+        )
+        return data if not data.empty else pd.DataFrame()
     except Exception as e:
         logger.warning(f"[DataProvider] Error sync fetching {ticker} ({interval}): {e}")
         return pd.DataFrame()
-
 

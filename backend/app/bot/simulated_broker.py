@@ -19,7 +19,7 @@ class LocalSimulatedBroker(BaseBroker):
         super().__init__(db_settings)
         self.user_id = db_settings.user_id if db_settings else None
 
-    def get_account_balance(self) -> dict:
+    def get_account_balance(self, exchange_rate: float | None = None) -> dict:
         db = SessionLocal()
         try:
             if self.user_id:
@@ -39,7 +39,8 @@ class LocalSimulatedBroker(BaseBroker):
             db.close()
 
         initial_cash = 10000000.0  # 가상 시작 예수금: 1,000만 원 (10,000,000 KRW)
-        exchange_rate = FXRateCache.get_rate()
+        if exchange_rate is None:
+            exchange_rate = FXRateCache.get_rate()
 
         # 누적 실현 손익 계산 (TradeLog 기준 매매 누적 성과)
         total_realized_pnl_usd = sum(log.realized_pnl for log in trade_logs) if trade_logs else 0.0
@@ -100,7 +101,7 @@ class LocalSimulatedBroker(BaseBroker):
             "provider": "Simulated"
         }
 
-    def get_holdings(self) -> list:
+    def get_holdings(self, exchange_rate: float | None = None) -> list:
         db = SessionLocal()
         try:
             if self.user_id:
@@ -113,7 +114,8 @@ class LocalSimulatedBroker(BaseBroker):
         if not holdings:
             return []
 
-        exchange_rate = FXRateCache.get_rate()
+        if exchange_rate is None:
+            exchange_rate = FXRateCache.get_rate()
 
         tickers = [h.ticker.split('_')[-1] for h in holdings]
         try:
