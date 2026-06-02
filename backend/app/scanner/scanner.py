@@ -1,6 +1,7 @@
 import pandas as pd
 import asyncio
 import numpy as np
+import inspect
 from app.core.config import settings
 
 
@@ -34,9 +35,48 @@ from app.scanner.news_analyzer import analyze_news_sentiment
 # 지수 비교용 (Relative Strength)
 MARKET_INDEX = "QQQ" 
 
+# 💡 Sentiment 캐시 (5분 TTL - API 호출 최소화 & 로그 과다 출력 방지)
+_sentiment_cache = {"value": None, "timestamp": 0}
+SENTIMENT_TTL = 300  # 5분 (API 호출 빈도 대폭 감소)
+
+# 💡 동시 호출 방지용 비동기 락 (Race Condition 방지)
+_sentiment_lock = asyncio.Lock()
+
+def calculate_strategy_score(strategy_instance, row, regime: str, is_entry: bool = True, score_card: list | None = None) -> float:
+    """세부 채점표를 지원하는 전략에만 score_card를 전달합니다."""
+    params = inspect.signature(strategy_instance.calculate_score).parameters
+    if score_card is not None and "score_card" in params:
+        return strategy_instance.calculate_score(row, regime, is_entry=is_entry, score_card=score_card)
+    return strategy_instance.calculate_score(row, regime, is_entry=is_entry)
+
 async def check_market_sentiment() -> str:
     """
     나스닥(QQQ) 지수의 추세를 분석하여 전체 시장의 분위기를 파악합니다.
+    캐싱 + 비동기 락을 통해 동시 호출을 원천 차단하고 API 호출을 최소화합니다.
+    """
+    import time
+    now = time.time()
+
+    # 1. 락 없이 빠르게 캐시 확인 (대부분의 경우 여기서 반환)
+    if _sentiment_cache["value"] is not None and (now - _sentiment_cache["timestamp"]) < SENTIMENT_TTL:
+        return _sentiment_cache["value"]
+
+    # 2. 캐시 미스 시 락 획득 후 계산 (동시성 제어)
+    async with _sentiment_lock:
+        # 락 획득 후 다시 한 번 캐시 확인 (다른 태스크가 먼저 계산했을 수 있음)
+        now = time.time()
+        if _sentiment_cache["value"] is not None and (now - _sentiment_cache["timestamp"]) < SENTIMENT_TTL:
+            return _sentiment_cache["value"]
+
+        # 진짜 계산 수행 (오직 하나의 태스크만 실행)
+        result = await _calculate_market_sentiment()
+        _sentiment_cache["value"] = result
+        _sentiment_cache["timestamp"] = now
+        return result
+
+async def _calculate_market_sentiment() -> str:
+    """
+    실제 시장 감정 분석 로직 (캐시 미스 시에만 호출).
     """
     print("[Sentiment] Analyzing Market Condition (QQQ)...")
     try:
@@ -310,8 +350,8 @@ async def scan_market_expert() -> list:
                 else:
                     cand['EMA120'] = float('nan')
                 
-                # 전략 클래스를 통한 채점 가동 및 score_card 누적
-                final_score = strategy_instance.calculate_score(cand, sentiment, is_entry=True, score_card=score_card)
+                # 전략 클래스를 통한 채점 가동
+                final_score = calculate_strategy_score(strategy_instance, cand, sentiment, is_entry=True, score_card=score_card)
                 
                 # 패턴 감지 여부 누적
                 if is_vcp: patterns_list.append("VCP")
@@ -377,9 +417,10 @@ async def analyze_single_ticker(ticker: str) -> dict:
     보유 종목에 대한 실시간 정밀 기술적 지표 및 스코어를 산출합니다. (폭락/약세 판정용)
     """
     try:
+        # 💡 QQQ 데이터는 check_market_sentiment() 캐시와 공유되므로 한 번만 조회
+        sentiment = await check_market_sentiment()
         df_qqq = await fetch_index_data(MARKET_INDEX)
         qqq_perf = (df_qqq['Close'].iloc[-1] / df_qqq['Close'].iloc[0] - 1) if not df_qqq.empty else 0
-        sentiment = await check_market_sentiment()
 
         # 데이터 수집 (데이터 프로바이더 연동으로 강결합 제거)
         df_15m, df_1m, df_daily = await asyncio.gather(
