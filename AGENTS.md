@@ -1,4 +1,4 @@
-# 👑 StockAuto AI & Human Master Directive (CLAUDE.md)
+# 👑 StockAuto AI & Human Master Directive (AGENTS.md)
 
 본 문서는 **StockAuto** 프로젝트를 진행하는 모든 AI 어시스턴트(Antigravity)와 인간 개발자가 준수해야 하는 **최상위 절대 수칙이자 단일 백업 가이드 원장**입니다. 
 
@@ -22,7 +22,7 @@
 
 ## 🚫 2. Git 명령어 동결 및 시점 통제 (Absolute Git Freeze)
 
-*   **자율 실행 절대 금지:** AI는 개발 진행 중 `git status`, `git add`, `git commit`, `git push`, `git checkout` 등 **그 어떠한 Git 명령어도 자율적으로 실행해서는 안 됩니다 (조회용 status 포함).**
+*   **자율 실행 절대 금지:** AI는 개발 진행 중 `git add`, `git commit`, `git push`, `git checkout` 등 **그 어떠한 Git 명령어도 자율적으로 실행해서는 안 됩니다 (조회용 status 포함).**
 *   **명시적 트리거 활성화:** Git 명령을 통한 진단 및 커밋은 오직 유저가 직접 **"커밋하자"** 혹은 **"깃에 올리자"**라고 한국어 음성/명령 신호를 주었을 때만 한시적으로 허용됩니다.
 *   **한글 커밋 메시지 표준:** 모든 커밋 메시지는 유저가 변경 사항을 직관적으로 검증할 수 있도록 구체적인 한글(Korean) 표준을 준수하여 상세히 기술합니다. (예: `feat: KIS API 잔고 환율 연산 정밀화 및 이중 임포트 제거`)
 
@@ -67,6 +67,12 @@
 ---
 
 ## ⚙️ 6. 런타임 퀵 레퍼런스 (CLI Quick Commands)
+
+### 0. 백엔드 가상환경 표준
+```bash
+# Official backend virtual environment directory
+backend/venv
+```
 
 ### 1. 백엔드 가동 모드 선택
 ```bash

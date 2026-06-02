@@ -50,10 +50,14 @@
 
 2. **백엔드 설정**
 
+   > StockAuto의 공식 파이썬 백엔드 가상환경 디렉터리는 **`backend/venv`** 입니다.
+
    ```bash
    cd backend
    python -m venv venv
-   source venv/Scripts/activate # Windows: venv\Scripts\activate
+   # Windows PowerShell: venv\Scripts\Activate.ps1
+   # Git Bash: source venv/Scripts/activate
+   # macOS/Linux: source venv/bin/activate
    pip install -r requirements.txt
 
    # 설정 파일 생성 (원하는 환경의 템플릿 복사)
@@ -73,7 +77,7 @@
 
    > [!TIP]
    > **💡 가상환경 활성화 생략 가이드:**
-   > `run.py` 런처는 자체적으로 로컬 가상환경(`venv`)을 감지하여 가상환경 파이썬 프로세스로 자동 전환(자가 치환, Self Re-execution)합니다. 따라서 패키지 설치(`pip install`) 이후에는 따로 `source venv/Scripts/activate`를 실행하지 않고 바로 `python run.py` 명령어로 서버를 간편하게 실행할 수 있습니다.
+   > `run.py` 런처는 자체적으로 공식 로컬 가상환경(`backend/venv`, 백엔드 폴더 기준 `venv`)을 감지하여 가상환경 파이썬 프로세스로 자동 전환(자가 치환, Self Re-execution)합니다. 따라서 패키지 설치(`pip install`) 이후에는 따로 가상환경을 활성화하지 않고 바로 `python run.py` 명령어로 서버를 간편하게 실행할 수 있습니다.
 
 3. **프론트엔드 설정**
 
@@ -100,7 +104,7 @@
 
 본 프로젝트는 AI 코딩 어시스턴트와의 유기적이고 안전한 협업을 위한 **AI 하네스 환경(AI Harness Environment)**이 완벽히 구축되어 있습니다.
 
-- **`CLAUDE.md`**: AI가 프로젝트 진입 시 최우선으로 읽어 스스로를 동기화하는 가이드 맵입니다.
+- **`AGENTS.md`**: AI가 프로젝트 진입 시 최우선으로 읽어 스스로를 동기화하는 최상위 가이드 맵입니다.
 - **`docs/RULES.md`**: AI와 개발자 간의 협업 규칙, 코드 품질 기준 및 절대 수칙이 정의되어 있습니다.
 - **`docs/AGENTS.md`**: 7인의 분야별 전문 AI 역할 분담과 3회 자가 치유(Self-Correction) 수칙을 수립하여, **자율 협업 루프를 정교하게 제어하고 오류 없는 개발을 유도하는 프로젝트 핵심 '소프트웨어식 하네스 플레이북'**입니다.
 
