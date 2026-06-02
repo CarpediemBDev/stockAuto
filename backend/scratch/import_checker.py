@@ -10,9 +10,6 @@ if backend_dir not in sys.path:
 
 # Set dummy environment variables to prevent crashes due to missing env vars during imports
 os.environ.setdefault("APP_ENV", "local")
-os.environ.setdefault("KIS_APP_KEY", "dummy_key")
-os.environ.setdefault("KIS_APP_SECRET", "dummy_secret")
-os.environ.setdefault("KIS_ACCOUNT_NO", "dummy_acc")
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "dummy_token")
 os.environ.setdefault("GEMINI_API_KEY", "dummy_gemini")
 

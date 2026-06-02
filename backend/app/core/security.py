@@ -9,9 +9,14 @@ from app.core.config import settings
 from app.core.logging import logger
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-INSECURE_DEFAULT_KEY = "stockauto_super_secret_key_2026_change_me_in_production"
+INSECURE_DEFAULT_KEYS = {
+    "stockauto_super_secret_key_2026_change_me_in_production",
+    "change_me_to_a_long_random_local_secret",
+    "change_me_to_a_long_random_dev_secret",
+    "change_me_to_a_long_random_production_secret",
+}
 
-if not JWT_SECRET_KEY or JWT_SECRET_KEY == INSECURE_DEFAULT_KEY:
+if not JWT_SECRET_KEY or JWT_SECRET_KEY in INSECURE_DEFAULT_KEYS:
     warning_msg = (
         "[⚠️ SECURITY CRITICAL] JWT_SECRET_KEY가 설정되지 않았거나 취약한 디폴트 키를 사용 중입니다! "
         "보안을 위해 .env 파일에 안전한 JWT_SECRET_KEY를 생성해 주십시오."
@@ -24,7 +29,7 @@ if not JWT_SECRET_KEY or JWT_SECRET_KEY == INSECURE_DEFAULT_KEY:
     else:
         # 로컬/시뮬레이션 개발 환경에서는 경고 노출 후 임시 키 적용 허용
         logger.warning(warning_msg)
-        JWT_SECRET_KEY = INSECURE_DEFAULT_KEY
+        JWT_SECRET_KEY = "stockauto_super_secret_key_2026_change_me_in_production"
 
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30 # 30일 동안 유효한 토큰 발급

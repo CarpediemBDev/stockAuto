@@ -1,11 +1,7 @@
 import httpx
 import asyncio
-from app.bot.kis_api import KISClient
 from app.core.database import SessionLocal
 from app.core.models import WatchList
-
-# KIS API 클라이언트 초기화
-kis_client = KISClient()
 
 def fetch_db_watchlist() -> list:
     """DB에서 사용자의 관심종목 리스트를 가져옵니다."""
@@ -25,6 +21,21 @@ async def fetch_kis_rankings() -> list:
     """KIS API를 통해 실시간 순위 종목을 가져옵니다."""
     tickers = []
     try:
+        # DB에서 자동매매 중인 사용자 설정을 가져와 KISClient 생성
+        from app.core.models import UserSettings
+        from app.bot.kis_api import KISClient
+
+        db = SessionLocal()
+        try:
+            db_settings = db.query(UserSettings).filter(UserSettings.is_running == True).first()
+            trade_mode = (db_settings.trade_mode or "SIMULATED").upper() if db_settings else "SIMULATED"
+            if not db_settings or trade_mode == "SIMULATED":
+                return []
+
+            kis_client = KISClient(db_settings)
+        finally:
+            db.close()
+
         exchanges = ["NAS", "NYS"]
         rank_types = ["2", "3"] # 2: 거래대금, 3: 등락률
         for ex in exchanges:

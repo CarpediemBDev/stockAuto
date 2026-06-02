@@ -1,6 +1,5 @@
 from app.bot.base_broker import BaseBroker
 from app.bot.kis_api import KISClient
-from app.core.config import settings
 from app.core.logging import logger
 import time
 
@@ -16,9 +15,9 @@ class KISBroker(BaseBroker):
     FILL_POLL_MAX_RETRIES = 5
     FILL_POLL_INTERVAL_SEC = 2.0
 
-    def __init__(self, user_settings=None):
-        super().__init__(user_settings)
-        self.client = KISClient(user_settings)
+    def __init__(self, db_settings=None):
+        super().__init__(db_settings)
+        self.client = KISClient(db_settings)
 
     def _confirm_fill(self, order_no: str, submitted_qty: int, submitted_price: float) -> dict:
         """
@@ -81,6 +80,7 @@ class KISBroker(BaseBroker):
             actual_holdings = self.client.get_overseas_present_balance()
             result = []
             for idx, item in enumerate(actual_holdings):
+                trade_mode = (self.db_settings.trade_mode or "SIMULATED").upper()
                 result.append({
                     "id": idx + 1000,  # KIS 실계좌 종목은 1000번대부터 시작하여 구분
                     "ticker": item["ticker"],
@@ -90,8 +90,8 @@ class KISBroker(BaseBroker):
                     "highest_price": max(item["buy_price"], item["current_price"]),
                     "current_price": item["current_price"],
                     "fx_rate": exchange_rate,
-                    "is_mock": not (self.user_settings.trade_mode == "REAL" if self.user_settings else settings.IS_REAL),
-                    "provider": "KIS Live" if (self.user_settings.trade_mode == "REAL" if self.user_settings else settings.IS_REAL) else "KIS Mock"
+                    "is_mock": trade_mode != "REAL",
+                    "provider": "KIS Live" if trade_mode == "REAL" else "KIS Mock"
                 })
             return result
         except Exception as e:

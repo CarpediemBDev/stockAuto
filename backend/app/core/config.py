@@ -57,11 +57,6 @@ class Settings:
     TR_ID_ORDER_HISTORY = ""
 
     def __init__(self):
-        # KIS API Keys (Integrated Names)
-        self.KIS_APP_KEY = os.getenv("KIS_APP_KEY")
-        self.KIS_APP_SECRET = os.getenv("KIS_APP_SECRET")
-        self.KIS_ACCOUNT_NO = os.getenv("KIS_ACCOUNT_NO")
-
         # Telegram Bot Settings (Phase 11)
         self.TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 

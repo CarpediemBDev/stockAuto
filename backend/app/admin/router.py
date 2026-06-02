@@ -20,6 +20,71 @@ class SettingsUpdateSchema(BaseModel):
     telegram_chat_id: Optional[str] = None
     telegram_enabled: Optional[bool] = False
 
+VALID_TRADE_MODES = {"SIMULATED", "MOCK", "REAL"}
+PLACEHOLDER_KIS_VALUES = {
+    "YOUR_APP_KEY_HERE",
+    "your_virtual_app_key_here",
+    "your_real_app_key_here",
+    "your_app_key_here",
+    "00000000-01",
+    "12345678-01",
+    "your_account_no_here",
+}
+
+def _normalize_trade_mode(mode: str) -> str:
+    normalized = (mode or "").upper().strip()
+    if normalized not in VALID_TRADE_MODES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="지원하지 않는 트레이딩 모드입니다. SIMULATED, MOCK, REAL 중 하나를 선택하세요."
+        )
+    return normalized
+
+def _is_missing_or_placeholder(value: Optional[str]) -> bool:
+    normalized = (value or "").strip()
+    return not normalized or normalized in PLACEHOLDER_KIS_VALUES
+
+def _verify_kis_payload(payload: SettingsUpdateSchema, current_user: User) -> tuple[bool, str]:
+    mode = _normalize_trade_mode(payload.trade_mode)
+    if mode == "SIMULATED":
+        return True, "SIMULATED 모드는 통신 검증이 필요하지 않습니다."
+
+    missing_fields = []
+    if _is_missing_or_placeholder(payload.kis_app_key):
+        missing_fields.append("APP KEY")
+    if _is_missing_or_placeholder(payload.kis_app_secret):
+        missing_fields.append("APP SECRET")
+    if _is_missing_or_placeholder(payload.kis_account_no):
+        missing_fields.append("ACCOUNT NO")
+
+    if missing_fields:
+        return False, f"KIS 연동 정보가 누락되었거나 기본값입니다: {', '.join(missing_fields)}"
+
+    class TempUserSettings:
+        def __init__(self, p: SettingsUpdateSchema, user_id: int):
+            self.user_id = user_id
+            self.kis_app_key = p.kis_app_key
+            self.kis_app_secret = p.kis_app_secret
+            self.kis_account_no = p.kis_account_no
+            self.trade_mode = mode
+
+    try:
+        from app.bot.kis_api import KISClient
+        client = KISClient(db_settings=TempUserSettings(payload, current_user.id))
+
+        token = client.get_access_token()
+        if not token:
+            return False, "KIS Access Token 발급에 실패했습니다. APP KEY 또는 APP SECRET을 확인하세요."
+
+        balance = client.get_account_balance()
+        provider = balance.get("provider")
+
+        if provider in ["KIS Mock", "KIS Live"]:
+            return True, f"KIS API 통신이 성공적으로 검증되었습니다. (서버 유형: {provider})"
+        return False, "KIS 서버 통신은 되었으나 잔고 조회에 실패했습니다. 계좌번호를 확인하세요."
+    except Exception as e:
+        return False, f"검증 중 알 수 없는 에러가 발생했습니다: {str(e)}"
+
 @router.get("/")
 def get_user_settings(
     current_user: User = Depends(get_current_user),
@@ -55,57 +120,8 @@ def verify_kis_settings(
     current_user: User = Depends(get_current_user)
 ):
     """제공된 KIS 설정의 실시간 통신 유효성을 검증합니다."""
-    if payload.trade_mode == "SIMULATED":
-        return {"success": True, "message": "SIMULATED 모드는 통신 검증이 필요하지 않습니다."}
-        
-    # KISClient를 위한 임시 settings 객체 래핑
-    class TempUserSettings:
-        def __init__(self, p, user_id):
-            self.user_id = user_id
-            self.kis_app_key = p.kis_app_key
-            self.kis_app_secret = p.kis_app_secret
-            self.kis_account_no = p.kis_account_no
-            self.trade_mode = p.trade_mode
-
-    temp_settings = TempUserSettings(payload, current_user.id)
-    
-    from app.bot.kis_api import KISClient
-    client = KISClient(user_settings=temp_settings)
-    
-    # 1단계: 토큰 발급 테스트
-    token = client.get_access_token()
-    if not token:
-        return {
-            "success": False,
-            "message": "KIS Access Token 발급에 실패했습니다. APP KEY 또는 APP SECRET을 확인하세요."
-        }
-        
-    # 2단계: 실제 해외주식 잔고조회 테스트
-    try:
-        balance = client.get_account_balance()
-        provider = balance.get("provider")
-        
-        if provider == "Simulated":
-            return {
-                "success": False,
-                "message": "유효한 API Key가 없어 Simulated(모의) 데이터로 우회 동작 중입니다. 연동 키 값을 다시 확인하세요."
-            }
-        elif provider in ["KIS Mock", "KIS Live"]:
-            return {
-                "success": True,
-                "message": f"KIS API 통신이 성공적으로 검증되었습니다. (서버 유형: {provider})"
-            }
-        else:
-            # 잔고조회 API 자체 실패로 기본 딕셔너리 리턴 시 (provider 없음)
-            return {
-                "success": False,
-                "message": "KIS 서버 통신은 되었으나 잔고 조회에 실패했습니다. 계좌번호를 확인하세요."
-            }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"검증 중 알 수 없는 에러가 발생했습니다: {str(e)}"
-        }
+    success, message = _verify_kis_payload(payload, current_user)
+    return {"success": success, "message": message}
 
 @router.post("/")
 def update_user_settings(
@@ -114,12 +130,18 @@ def update_user_settings(
     db: Session = Depends(get_db)
 ):
     """현재 로그인한 사용자의 트레이딩 설정을 DB에 저장하고 해당 사용자의 서비스를 핫 리로드합니다."""
+    trade_mode = _normalize_trade_mode(payload.trade_mode)
+    if trade_mode in {"MOCK", "REAL"}:
+        success, message = _verify_kis_payload(payload, current_user)
+        if not success:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
     db_settings = current_user.settings
     if not db_settings:
         db_settings = UserSettings(user_id=current_user.id)
         db.add(db_settings)
         
-    db_settings.trade_mode = payload.trade_mode
+    db_settings.trade_mode = trade_mode
     db_settings.broker_provider = payload.broker_provider
     db_settings.kis_app_key = payload.kis_app_key
     db_settings.kis_app_secret = payload.kis_app_secret

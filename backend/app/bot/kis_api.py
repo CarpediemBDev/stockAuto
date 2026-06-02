@@ -9,27 +9,48 @@ from app.scanner.data_provider import fetch_bulk_ohlcv_sync, fetch_ticker_fast_i
 _exchange_cache: dict[str, str] = {}
 
 class KISClient:
-    def __init__(self, user_settings=None):
-        if user_settings:
-            self.user_id = user_settings.user_id
-            self.app_key = user_settings.kis_app_key
-            self.app_secret = user_settings.kis_app_secret
-            self.account_no = user_settings.kis_account_no
-            self.trade_mode = user_settings.trade_mode
-            self.is_real = user_settings.trade_mode == "REAL"
-            
-            if self.is_real:
-                self.base_url = "https://openapi.koreainvestment.com:9443"
-            else:
-                self.base_url = "https://vts-openapi.koreainvestment.com:29443"
+    def __init__(self, db_settings):
+        trade_mode = (db_settings.trade_mode or "SIMULATED").upper() if db_settings else "SIMULATED"
+
+        # KIS API Key 유효성 검사 - db_settings가 없거나 가상 모드이면 즉각 연동 거부
+        if not db_settings or trade_mode == "SIMULATED":
+            from app.core.exceptions import StockAutoException
+            raise StockAutoException(
+                code="INVALID_KIS_CREDENTIALS",
+                message="한국투자증권(KIS) 연동을 위해서는 유효한 DB 설정 정보가 필요합니다.",
+                status_code=400
+            )
+
+        self.user_id = db_settings.user_id
+        self.app_key = db_settings.kis_app_key
+        self.app_secret = db_settings.kis_app_secret
+        self.account_no = db_settings.kis_account_no
+        self.trade_mode = trade_mode
+        self.is_real = trade_mode == "REAL"
+
+        # KIS API Key 유효성 검사 - MOCK/REAL 가동 시 키가 없거나 플레이스홀더면 즉각 경고 에러 발생
+        placeholder_keys = {
+            "YOUR_APP_KEY_HERE", "your_virtual_app_key_here",
+            "your_real_app_key_here", "your_app_key_here",
+            None, ""
+        }
+        if (self.app_key in placeholder_keys or
+            self.app_secret in placeholder_keys or
+            not self.account_no or
+            self.account_no in ["00000000-01", "12345678-01", "your_account_no_here", ""]):
+
+            from app.core.exceptions import StockAutoException
+            raise StockAutoException(
+                code="INVALID_KIS_CREDENTIALS",
+                message="한국투자증권(KIS) API 연동 키가 누락되었거나 유효하지 않습니다. "
+                        "'Personal Settings > Trading Environment' 탭으로 이동하여 올바른 API Key, Secret 및 계좌번호를 입력하고 연동을 진행해 주세요.",
+                status_code=400
+            )
+
+        if self.is_real:
+            self.base_url = "https://openapi.koreainvestment.com:9443"
         else:
-            self.user_id = None
-            self.app_key = settings.KIS_APP_KEY
-            self.app_secret = settings.KIS_APP_SECRET
-            self.account_no = settings.KIS_ACCOUNT_NO
-            self.base_url = settings.KIS_BASE_URL
-            self.trade_mode = settings.TRADE_MODE
-            self.is_real = settings.IS_REAL
+            self.base_url = "https://vts-openapi.koreainvestment.com:29443"
 
         self.token = None
         self.token_expired_at = None
@@ -102,78 +123,15 @@ class KISClient:
         exchange_rate = FXRateCache.get_rate()
 
         token = self.get_access_token()
-        if not token or not self.app_key or self.app_key in ["YOUR_APP_KEY_HERE", "your_virtual_app_key_here"]:
-            # API 키가 없거나 토큰 발급 실패 시 가상 모의 투자(Paper Trading) 데이터를 동적 계산하여 반환합니다.
-            print(f"[KIS API] Generating dynamic virtual balance (Mode: {self.trade_mode})")
-            from app.core.database import SessionLocal
-            from app.core.models import Holding
-
-            db = SessionLocal()
-            try:
-                # 멀티유저 대응: user_id가 존재하면 해당 유저의 보유종목만 조회
-                if self.user_id:
-                    holdings = db.query(Holding).filter(Holding.user_id == self.user_id).all()
-                else:
-                    holdings = db.query(Holding).all()
-            finally:
-                db.close()
-
-            initial_cash = 10000000.0  # 가상 시작 예수금: 1,000만 원 (10,000,000 KRW)
-
-            total_purchase_krw = 0.0
-            total_eval_krw = 0.0
-
-            if holdings:
-                tickers = [h.ticker for h in holdings]
-                try:
-                    data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
-                    for h in holdings:
-                        current_price = h.avg_price  # 기본 폴백값
-                        try:
-                            if len(tickers) == 1:
-                                if isinstance(data.columns, pd.MultiIndex):
-                                    df = data[h.ticker].dropna() if h.ticker in data.columns.levels[0] else data.dropna()
-                                else:
-                                    df = data.dropna()
-                            else:
-                                if isinstance(data.columns, pd.MultiIndex):
-                                    df = data[h.ticker].dropna() if h.ticker in data.columns.levels[0] else pd.DataFrame()
-                                else:
-                                    df = data.dropna()
-                            
-                            if not df.empty:
-                                current_price = float(df['Close'].iloc[-1])
-                        except Exception as e:
-                            print(f"[Virtual Balance] Failed to parse price for {h.ticker}: {e}")
-
-                        # KRW 기준 누적금 계산
-                        total_purchase_krw += (h.avg_price * h.quantity) * exchange_rate
-                        total_eval_krw += (current_price * h.quantity) * exchange_rate
-                except Exception as e:
-                    print(f"[Virtual Balance] Failed to download prices: {e}")
-                    # 실패 시 평단가 기준으로 가치 환산
-                    for h in holdings:
-                        total_purchase_krw += (h.avg_price * h.quantity) * exchange_rate
-                        total_eval_krw += (h.avg_price * h.quantity) * exchange_rate
-
-            # 남은 예수금 = 1천만 원 - 주식 매입 원금 (원화)
-            cash_balance = max(0.0, initial_cash - total_purchase_krw)
-            stock_balance = total_eval_krw
-            total_asset = cash_balance + stock_balance
-            
-            # 수익률 = ((전체 자산 - 투자 원금) / 투자 원금) * 100
-            profit_rate = round(((total_asset - initial_cash) / initial_cash) * 100, 2)
-
-            return {
-                "total_asset": int(total_asset),
-                "cash_balance": int(cash_balance),
-                "stock_balance": int(stock_balance),
-                "profit_rate": profit_rate,
-                "profit_loss": int(total_asset - initial_cash),
-                "fx_rate": exchange_rate,
-                "is_mock": True,
-                "provider": "Simulated"
-            }
+        if not token:
+            # KISClient는 __init__에서 SIMULATED 모드를 차단하므로, 여기 도달 시 반드시 MOCK/REAL 모드임
+            from app.core.exceptions import StockAutoException
+            raise StockAutoException(
+                code="INVALID_KIS_CREDENTIALS",
+                message="한국투자증권(KIS) API 인증 토큰을 발급받지 못했습니다. 증권사 서버 장애이거나 키 만료 상태일 수 있습니다. "
+                        "'Personal Settings > Trading Environment' 탭에서 키 검증 상태를 다시 확인해 주세요.",
+                status_code=400
+            )
 
         account_prefix = self.account_no.split("-")[0] if "-" in self.account_no else self.account_no[:8]
         account_suffix = self.account_no.split("-")[1] if "-" in self.account_no else self.account_no[8:]

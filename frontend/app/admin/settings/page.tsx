@@ -24,7 +24,7 @@ export default function PersonalSettingsPage() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   
-  const [settings, setSettings] = useState<UserSettings>({
+  const [dbSettings, setDbSettings] = useState<UserSettings>({
     trade_mode: "SIMULATED",
     broker_provider: "KIS",
     kis_app_key: "",
@@ -62,7 +62,7 @@ export default function PersonalSettingsPage() {
     try {
       const res = await api.get("/admin/");
       const data = res.data;
-      setSettings({
+      setDbSettings({
         trade_mode: data.trade_mode || "SIMULATED",
         broker_provider: data.broker_provider || "KIS",
         kis_app_key: data.kis_app_key || "",
@@ -87,16 +87,16 @@ export default function PersonalSettingsPage() {
   }, [isAuthenticated, fetchSettings]);
 
   const handleSave = async (forceReal = false) => {
-    if (settings.trade_mode === "MOCK" || settings.trade_mode === "REAL") {
-      const key = settings.kis_app_key;
+    if (dbSettings.trade_mode === "MOCK" || dbSettings.trade_mode === "REAL") {
+      const key = dbSettings.kis_app_key;
       const placeholderKeys = ["YOUR_APP_KEY_HERE", "your_virtual_app_key_here", "your_real_app_key_here", "your_app_key_here", "", null, undefined];
       if (placeholderKeys.includes(key)) {
-        toast.error(`[저장 실패] ${settings.trade_mode} 모드를 사용하려면 'Broker Config' 탭에서 유효한 증권사 API 키를 먼저 입력해야 합니다.`);
+        toast.error(`[저장 실패] ${dbSettings.trade_mode} 모드를 사용하려면 'Broker Config' 탭에서 유효한 증권사 API 키를 먼저 입력해야 합니다.`);
         return;
       }
     }
 
-    if (settings.trade_mode === "REAL" && !forceReal) {
+    if (dbSettings.trade_mode === "REAL" && !forceReal) {
       setShowRealWarning(true);
       return;
     }
@@ -108,9 +108,9 @@ export default function PersonalSettingsPage() {
       let verifySuccess = true;
       let verifyMessage = "";
       
-      if (settings.trade_mode === "MOCK" || settings.trade_mode === "REAL") {
+      if (dbSettings.trade_mode === "MOCK" || dbSettings.trade_mode === "REAL") {
         try {
-          const verifyRes = await api.post("/admin/verify-kis", settings);
+          const verifyRes = await api.post("/admin/verify-kis", dbSettings);
           verifySuccess = verifyRes.data.success;
           verifyMessage = verifyRes.data.message;
         } catch (verifyErr) {
@@ -119,26 +119,27 @@ export default function PersonalSettingsPage() {
         }
       }
       
-      await api.post("/admin/", settings);
-      
       if (!verifySuccess) {
-        toast.warning(
+        toast.error(
           <div>
             <p className="font-bold text-amber-500">⚠️ KIS 연동 검증 실패</p>
             <p className="text-xs text-zinc-300 mt-1">{verifyMessage}</p>
             <p className="text-xs text-amber-400/90 font-semibold mt-1.5 leading-normal">
-              안전을 위해 백엔드 트레이딩 엔진이 SIMULATED(모의 투자) 브로커로 자동 후퇴(대체)하여 가동됩니다.
+              안전을 위해 설정을 저장하지 않았습니다. API Key, Secret, 계좌번호를 확인한 뒤 다시 저장해 주세요.
             </p>
           </div>,
           { duration: 8000 }
         );
-      } else {
-        toast.success(
-          settings.trade_mode === "SIMULATED"
-            ? "설정이 정상적으로 저장되었습니다! 실시간 핫리로드 완료."
-            : "설정이 저장되었으며 KIS API 연동이 정상 검증되었습니다!"
-        );
+        return;
       }
+
+      await api.post("/admin/", dbSettings);
+
+      toast.success(
+        dbSettings.trade_mode === "SIMULATED"
+          ? "설정이 정상적으로 저장되었습니다! 실시간 핫리로드 완료."
+          : "설정이 저장되었으며 KIS API 연동이 정상 검증되었습니다!"
+      );
       
       await fetchSettings();
     } catch (err) {
@@ -241,10 +242,10 @@ export default function PersonalSettingsPage() {
                   
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div 
-                      onClick={() => setSettings({ ...settings, trade_mode: "SIMULATED" })}
+                      onClick={() => setDbSettings({ ...dbSettings, trade_mode: "SIMULATED" })}
                       className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                        settings.trade_mode === "SIMULATED" 
-                          ? "border-blue-500 bg-blue-500/5 shadow-[0_0_15px_rgba(59,130,246,0.1)]" 
+                        dbSettings.trade_mode === "SIMULATED"
+                          ? "border-blue-500 bg-blue-500/5 shadow-[0_0_15px_rgba(59,130,246,0.1)]"
                           : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-800 hover:bg-zinc-900/20"
                       }`}
                     >
@@ -258,10 +259,10 @@ export default function PersonalSettingsPage() {
                     </div>
 
                     <div 
-                      onClick={() => setSettings({ ...settings, trade_mode: "MOCK" })}
+                      onClick={() => setDbSettings({ ...dbSettings, trade_mode: "MOCK" })}
                       className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                        settings.trade_mode === "MOCK" 
-                          ? "border-amber-500 bg-amber-500/5 shadow-[0_0_15px_rgba(245,158,11,0.1)]" 
+                        dbSettings.trade_mode === "MOCK"
+                          ? "border-amber-500 bg-amber-500/5 shadow-[0_0_15px_rgba(245,158,11,0.1)]"
                           : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-800 hover:bg-zinc-900/20"
                       }`}
                     >
@@ -275,10 +276,10 @@ export default function PersonalSettingsPage() {
                     </div>
 
                     <div 
-                      onClick={() => setSettings({ ...settings, trade_mode: "REAL" })}
+                      onClick={() => setDbSettings({ ...dbSettings, trade_mode: "REAL" })}
                       className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                        settings.trade_mode === "REAL" 
-                          ? "border-red-500 bg-red-500/5 shadow-[0_0_15px_rgba(239,68,68,0.1)]" 
+                        dbSettings.trade_mode === "REAL"
+                          ? "border-red-500 bg-red-500/5 shadow-[0_0_15px_rgba(239,68,68,0.1)]"
                           : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-800 hover:bg-zinc-900/20"
                       }`}
                     >
@@ -305,7 +306,7 @@ export default function PersonalSettingsPage() {
                     </p>
                   </div>
                   
-                  {settings.trade_mode === "SIMULATED" ? (
+                  {dbSettings.trade_mode === "SIMULATED" ? (
                     <div className="p-4 rounded-xl border border-blue-500/20 bg-blue-500/5 flex items-center gap-3">
                       <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0" />
                       <div className="text-[11px] text-zinc-400 leading-relaxed">
@@ -318,8 +319,8 @@ export default function PersonalSettingsPage() {
                       <div>
                         <label className="block text-xs font-semibold text-zinc-400 mb-1.5">Provider</label>
                         <select 
-                          value={settings.broker_provider}
-                          onChange={(e) => setSettings({ ...settings, broker_provider: e.target.value })}
+                          value={dbSettings.broker_provider}
+                          onChange={(e) => setDbSettings({ ...dbSettings, broker_provider: e.target.value })}
                           className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none text-xs transition-all"
                         >
                           <option value="KIS">Korea Investment & Securities (KIS)</option>
@@ -331,8 +332,8 @@ export default function PersonalSettingsPage() {
                         <label className="block text-xs font-semibold text-zinc-400 mb-1.5">APP KEY</label>
                         <input 
                           type="text" 
-                          value={settings.kis_app_key || ""}
-                          onChange={(e) => setSettings({ ...settings, kis_app_key: e.target.value })}
+                          value={dbSettings.kis_app_key || ""}
+                          onChange={(e) => setDbSettings({ ...dbSettings, kis_app_key: e.target.value })}
                           placeholder="Enter your API Key"
                           className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                         />
@@ -342,8 +343,8 @@ export default function PersonalSettingsPage() {
                         <label className="block text-xs font-semibold text-zinc-400 mb-1.5">APP SECRET</label>
                         <input 
                           type="password" 
-                          value={settings.kis_app_secret || ""}
-                          onChange={(e) => setSettings({ ...settings, kis_app_secret: e.target.value })}
+                          value={dbSettings.kis_app_secret || ""}
+                          onChange={(e) => setDbSettings({ ...dbSettings, kis_app_secret: e.target.value })}
                           placeholder="Enter your API Secret"
                           className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                         />
@@ -353,8 +354,8 @@ export default function PersonalSettingsPage() {
                         <label className="block text-xs font-semibold text-zinc-400 mb-1.5">ACCOUNT NO (계좌번호)</label>
                         <input 
                           type="text" 
-                          value={settings.kis_account_no || ""}
-                          onChange={(e) => setSettings({ ...settings, kis_account_no: e.target.value })}
+                          value={dbSettings.kis_account_no || ""}
+                          onChange={(e) => setDbSettings({ ...dbSettings, kis_account_no: e.target.value })}
                           placeholder="e.g. 12345678-01"
                           className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                         />
@@ -395,8 +396,8 @@ export default function PersonalSettingsPage() {
                     <label className="relative inline-flex items-center cursor-pointer select-none">
                       <input 
                         type="checkbox" 
-                        checked={settings.telegram_enabled} 
-                        onChange={(e) => setSettings({ ...settings, telegram_enabled: e.target.checked })}
+                        checked={dbSettings.telegram_enabled}
+                        onChange={(e) => setDbSettings({ ...dbSettings, telegram_enabled: e.target.checked })}
                         className="sr-only peer"
                       />
                       <div className="w-9 h-5 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-zinc-500 after:border-zinc-500 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
@@ -413,9 +414,9 @@ export default function PersonalSettingsPage() {
                       </p>
                       
                       <a
-                        href={settings.telegram_enabled && settings.global_bot_username ? `https://t.me/${settings.global_bot_username}?start=${username}` : "#"}
+                        href={dbSettings.telegram_enabled && dbSettings.global_bot_username ? `https://t.me/${dbSettings.global_bot_username}?start=${username}` : "#"}
                         onClick={(e) => {
-                          if (!settings.telegram_enabled) {
+                          if (!dbSettings.telegram_enabled) {
                             e.preventDefault();
                             toast.warning("상단의 '텔레그램 연동' 스위치를 먼저 켜주세요!");
                           }
@@ -423,8 +424,8 @@ export default function PersonalSettingsPage() {
                         target="_blank"
                         rel="noopener noreferrer"
                         className={`inline-flex w-full items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-black transition-all active:scale-[0.98] shadow-md ${
-                          settings.telegram_enabled 
-                            ? "bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white shadow-indigo-500/20" 
+                          dbSettings.telegram_enabled
+                            ? "bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white shadow-indigo-500/20"
                             : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
                         }`}
                       >
@@ -440,10 +441,10 @@ export default function PersonalSettingsPage() {
                       <div className="pt-1">
                         <input 
                           type="text" 
-                          value={settings.telegram_chat_id || ""}
-                          onChange={(e) => setSettings({ ...settings, telegram_chat_id: e.target.value })}
+                          value={dbSettings.telegram_chat_id || ""}
+                          onChange={(e) => setDbSettings({ ...dbSettings, telegram_chat_id: e.target.value })}
                           placeholder="예: 987654321"
-                          disabled={!settings.telegram_enabled}
+                          disabled={!dbSettings.telegram_enabled}
                           className="w-full bg-zinc-950 border border-zinc-900 rounded-xl p-3 text-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono text-xs disabled:opacity-40 transition-all"
                         />
                       </div>
@@ -488,7 +489,7 @@ export default function PersonalSettingsPage() {
                       </p>
                     </div>
                     <div className="mt-4">
-                      {settings.trade_mode === "SIMULATED" ? (
+                      {dbSettings.trade_mode === "SIMULATED" ? (
                         <button
                           onClick={() => setShowResetModal(true)}
                           className="w-full py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold transition-all active:scale-[0.98] cursor-pointer"

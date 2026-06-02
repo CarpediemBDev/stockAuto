@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.scanner.data_provider import fetch_ohlcv
 
 from app.core.database import get_db
-from app.bot.broker_factory import get_broker_client
+from app.bot.broker_factory import get_broker_client, is_real_order_locked
 from app.core.response import success_response
 from app.core.dependencies import get_current_user
 from app.core.models import User, Holding, TradeLog, ActionLog
@@ -140,15 +140,23 @@ async def force_liquidate(
     holdings = db.query(Holding).filter(Holding.user_id == current_user.id).all()
     if not holdings:
         return success_response(message="현재 보유 주식이 없어 청산할 주식이 없습니다.")
+
+    if is_real_order_locked(current_user.settings):
+        raise HTTPException(
+            status_code=400,
+            detail="REAL 모드에서는 실전투자 안전 스위치를 켠 뒤에만 전량 청산 주문을 전송할 수 있습니다."
+        )
     
     broker = get_broker_client(current_user.settings)
     liquidated_tickers = []
     
     try:
         for h in holdings:
+            clean_ticker = h.ticker.rsplit("_", 1)[-1]
+
             # 실시간 청산 가격 조회 (데이터 프로바이더 연동으로 결합도 해제)
             try:
-                df = await fetch_ohlcv(h.ticker, interval="1m", period="1d")
+                df = await fetch_ohlcv(clean_ticker, interval="1m", period="1d")
                 if not df.empty:
                     price = float(df["Close"].iloc[-1])
                 else:
@@ -157,7 +165,7 @@ async def force_liquidate(
                 price = h.highest_price or h.avg_price
             
             # 통합 브로커 규격을 사용해 매도 주문 전송
-            res = broker.sell_order(ticker=h.ticker, quantity=h.quantity, price=price)
+            res = broker.sell_order(ticker=clean_ticker, quantity=h.quantity, price=price)
             
             if res.get("success"):
                 filled_price = res.get("filled_price", price)

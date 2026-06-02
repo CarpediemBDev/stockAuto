@@ -18,11 +18,11 @@ def send_message_sync(user_id: int, text: str) -> bool:
     """
     db = SessionLocal()
     try:
-        user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
-        if not user_settings or not user_settings.telegram_enabled:
+        db_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        if not db_settings or not db_settings.telegram_enabled:
             return False
         token = settings.TELEGRAM_BOT_TOKEN
-        chat_id = user_settings.telegram_chat_id
+        chat_id = db_settings.telegram_chat_id
     finally:
         db.close()
 
@@ -51,11 +51,11 @@ async def _send_message_async_coro(user_id: int, text: str) -> bool:
     """
     db = SessionLocal()
     try:
-        user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
-        if not user_settings or not user_settings.telegram_enabled:
+        db_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        if not db_settings or not db_settings.telegram_enabled:
             return False
         token = settings.TELEGRAM_BOT_TOKEN
-        chat_id = user_settings.telegram_chat_id
+        chat_id = db_settings.telegram_chat_id
     finally:
         db.close()
 
@@ -166,9 +166,9 @@ def _process_global_message(msg_chat_id: str, text: str):
     db = SessionLocal()
     try:
         # 1. 이미 이 챗 ID를 사용하는 유저가 있는지 조회
-        user_settings = db.query(UserSettings).filter(UserSettings.telegram_chat_id == msg_chat_id).first()
+        db_settings = db.query(UserSettings).filter(UserSettings.telegram_chat_id == msg_chat_id).first()
         
-        if not user_settings:
+        if not db_settings:
             # 미연동 유저의 딥링크 가입 시도 (/start username)
             if cmd == "/start" and len(parts) > 1:
                 auth_username = parts[1].strip()
@@ -209,11 +209,11 @@ def _process_global_message(msg_chat_id: str, text: str):
             return
             
         # 2. 이미 연동된 유저의 경우 활성화 여부(telegram_enabled) 검증
-        if not user_settings.telegram_enabled:
+        if not db_settings.telegram_enabled:
             _send_direct_message(msg_chat_id, "⚠️ 텔레그램 알림 연동이 비활성화 상태입니다. 웹 페이지의 개인 투자 설정에서 활성화해 주세요.")
             return
             
-        _process_command(user_settings.user_id, text)
+        _process_command(db_settings.user_id, text)
         
     except Exception as e:
         logger.exception("[TelegramBot] Global message processing error")
@@ -231,8 +231,8 @@ def _process_command(user_id: int, text: str):
     
     db = SessionLocal()
     try:
-        user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
-        if not user_settings:
+        db_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        if not db_settings:
             return
             
         if cmd == "/start":
@@ -246,27 +246,27 @@ def _process_command(user_id: int, text: str):
             send_message_sync(user_id, msg)
             
         elif cmd == "/run":
-            if user_settings.is_running:
+            if db_settings.is_running:
                 send_message_sync(user_id, "⚠️ *이미 자동매매 루프가 가동 중입니다.*")
             else:
-                user_settings.is_running = True
+                db_settings.is_running = True
                 db.commit()
                 send_message_sync(user_id, "🟢 *자율 트레이딩 자동매매 루프를 가동했습니다.*")
                 
         elif cmd == "/stop":
-            if not user_settings.is_running:
+            if not db_settings.is_running:
                 send_message_sync(user_id, "⚠️ *이미 자동매매 루프가 정지되어 있습니다.*")
             else:
-                user_settings.is_running = False
+                db_settings.is_running = False
                 db.commit()
                 send_message_sync(user_id, "🔴 *자율 트레이딩 자동매매 루프를 정지했습니다.*")
                 
         elif cmd == "/status":
-            mode = user_settings.trade_mode
-            broker_name = user_settings.broker_provider
+            mode = db_settings.trade_mode
+            broker_name = db_settings.broker_provider
             
             # 사용자 맞춤형 브로커 인스턴스 획득
-            broker = get_broker_client(user_settings)
+            broker = get_broker_client(db_settings)
             try:
                 balance = broker.get_account_balance()
                 total_asset = balance.get("total_asset", 0)
@@ -279,7 +279,7 @@ def _process_command(user_id: int, text: str):
                 
             fx_rate = FXRateCache.get_rate()
             holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
-            status_text = "🟢 *가동 중*" if user_settings.is_running else "🔴 *정지됨*"
+            status_text = "🟢 *가동 중*" if db_settings.is_running else "🔴 *정지됨*"
             
             msg = (
                 f"🤖 *StockAuto 실시간 시스템 상태*\n"

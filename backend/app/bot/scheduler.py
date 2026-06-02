@@ -1,5 +1,5 @@
 from apscheduler.schedulers.background import BackgroundScheduler
-from app.bot.broker_factory import get_broker_client
+from app.bot.broker_factory import get_broker_client, is_real_order_locked
 from app.core.database import SessionLocal
 from app.core.models import TradeLog, Holding, ActionLog, UserSettings
 from datetime import datetime, timezone, timedelta
@@ -95,20 +95,28 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
     db = SessionLocal()
     try:
         # 사용자 설정 로드
-        user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
-        if not user_settings or not user_settings.is_running:
+        db_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        if not db_settings or not db_settings.is_running:
             return
 
         # 💡 0. 시장 감정 분석 및 QQQ 레짐 모드 판정
         sentiment = await check_market_sentiment()
-        log_action(db, user_id, f"Scan Cycle Started (Mode: {user_settings.trade_mode} | Market Regime: {sentiment})")
+        log_action(db, user_id, f"Scan Cycle Started (Mode: {db_settings.trade_mode} | Market Regime: {sentiment})")
 
         # 1. 사용자 맞춤형 브로커 인스턴스 획득
-        broker = get_broker_client(user_settings)
+        broker = get_broker_client(db_settings)
+        real_order_locked = is_real_order_locked(db_settings)
+        if real_order_locked:
+            log_action(
+                db,
+                user_id,
+                "[REAL SAFETY LOCK] REAL mode is selected, but the live trading safety switch is OFF. Broker queries are allowed; buy/sell orders are blocked.",
+                "WARNING"
+            )
 
         # 💡 멀티 전략 매니저 로드
         from app.bot.multi_strategy_manager import MultiStrategyManager
-        strategy_type = getattr(user_settings, "strategy_type", "regime_switching")
+        strategy_type = getattr(db_settings, "strategy_type", "regime_switching")
         ms_manager = MultiStrategyManager(strategy_type=strategy_type)
         first_slot_key = list(ms_manager.SLOTS.keys())[0]
 
@@ -302,6 +310,15 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
 
                 if sell_reason:
                     log_action(db, user_id, f"[{strategy_instance.name}] EXIT SIGNAL: {h.ticker} ({clean_ticker}) | Reason: {sell_reason}", "SIGNAL")
+
+                    if real_order_locked:
+                        log_action(
+                            db,
+                            user_id,
+                            f"[REAL SAFETY LOCK] SELL BLOCKED for {clean_ticker}. Turn on the live trading safety switch before sending REAL orders.",
+                            "ERROR"
+                        )
+                        continue
                     
                     # 브로커 주문 시에는 순수 티커(clean_ticker) 전달
                     res = await safe_broker_call(broker.sell_order, clean_ticker, h.quantity, price=current_price)
@@ -541,6 +558,15 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                         continue
                     
                     # 브로커에 실제 순수 티커로 주문 전송
+                    if real_order_locked:
+                        log_action(
+                            db,
+                            user_id,
+                            f"[REAL SAFETY LOCK] BUY BLOCKED for {clean_ticker}. Turn on the live trading safety switch before sending REAL orders.",
+                            "ERROR"
+                        )
+                        continue
+
                     res = await safe_broker_call(broker.buy_order, clean_ticker, final_qty, price=current_price)
 
                     if res["success"]:
