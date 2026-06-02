@@ -36,7 +36,8 @@
 ### 1. 백엔드 컴파일 무결성 검증 (Python Code Compilation)
 * 수정한 백엔드 핵심 모듈 5개에 대해 파이썬 컴파일 검증을 수행한 결과, 구문 오류 및 패키지 참조 에러 **0건 (완벽 성공)**을 검증 완료하였습니다.
 ```powershell
-.\venv\Scripts\python.exe -m py_compile app/core/models.py app/core/migrator.py app/bot/multi_strategy_manager.py app/bot/scheduler.py app/trades/router_account.py
+# backend/ 폴더 기준 공식 가상환경: venv
+venv\Scripts\python.exe -m py_compile app/core/models.py app/core/migrator.py app/bot/multi_strategy_manager.py app/bot/scheduler.py app/trades/router_account.py
 # 결과: 에러 없이 정상 반환 성공!
 ```
 

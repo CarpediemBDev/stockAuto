@@ -2,24 +2,27 @@ import sys
 import os
 import uvicorn
 
+OFFICIAL_VENV_DIR = "venv"
+
 def bootstrap_venv():
     """
     [DX 업그레이드] 가상환경 자동 감지 및 프로세스 자가 치환 (Self Re-execution).
-    현재 실행 중인 Python 인터프리터가 프로젝트 로컬 가상환경(venv) 내부의 것이 아니라면,
-    경로 내의 'venv/Scripts/python.exe'를 찾아 프로세스를 스스로 대체(execv)시킵니다.
-    이를 통해 터미널에서 가상환경 활성화(activate)를 생략해도 언제나 venv 모드로 무결하게 동작합니다.
+    StockAuto의 공식 백엔드 가상환경 디렉터리는 backend/venv 입니다.
+    현재 실행 중인 Python 인터프리터가 공식 로컬 가상환경(venv) 내부의 것이 아니라면,
+    backend/venv 아래의 Python 실행 파일을 찾아 프로세스를 스스로 대체(execv)시킵니다.
+    이를 통해 터미널에서 가상환경 활성화(activate)를 생략해도 언제나 backend/venv 기준으로 동작합니다.
     """
     current_dir = os.path.dirname(os.path.abspath(__file__))
     
     # OS별 가상환경 내 파이썬 바이너리 경로 특정
     if os.name == "nt":  # Windows
-        venv_python = os.path.join(current_dir, "venv", "Scripts", "python.exe")
+        venv_python = os.path.join(current_dir, OFFICIAL_VENV_DIR, "Scripts", "python.exe")
     else:  # macOS / Linux
-        venv_python = os.path.join(current_dir, "venv", "bin", "python")
+        venv_python = os.path.join(current_dir, OFFICIAL_VENV_DIR, "bin", "python")
         
     # 로컬 가상환경이 실제로 존재하고, 현재 프로세스가 해당 가상환경 파이썬이 아닌 경우
     if os.path.exists(venv_python) and os.path.abspath(sys.executable) != os.path.abspath(venv_python):
-        print(f"[Launcher] [VENV DETECTED] 프로세스를 로컬 가상환경(venv) 파이썬으로 자가 재실행합니다...")
+        print(f"[Launcher] [VENV DETECTED] 프로세스를 공식 백엔드 가상환경(backend/venv) 파이썬으로 자가 재실행합니다...")
         # os.execv를 사용하여 현재 프로세스를 가상환경 파이썬 프로세스로 투명하게 대체
         # sys.argv 인자값도 손실 없이 완벽히 넘깁니다.
         try:

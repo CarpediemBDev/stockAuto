@@ -1,4 +1,5 @@
 # Python
+# Official backend virtual environment directory: backend/venv
 backend/venv/
 backend/__pycache__/
 backend/*.log
