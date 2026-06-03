@@ -8,9 +8,12 @@
     "start-dev": "env-cmd -f .env.dev next start",
     "build-prod": "env-cmd -f .env.prod next build",
     "start-prod": "env-cmd -f .env.prod next start",
+    "dev:e2e": "next dev --webpack -H 127.0.0.1 -p 3100",
+    "start:e2e": "node scripts/start-e2e-server.mjs",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "axios": "^1.16.0",
@@ -25,6 +28,7 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

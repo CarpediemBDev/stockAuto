@@ -6,7 +6,7 @@ StockAuto verification harness.
 This script is intentionally conservative:
 - compile every backend Python file under backend/app
 - run backend pytest scenario tests under backend/tests
-- run frontend TypeScript and ESLint checks
+- run frontend TypeScript, ESLint, and Playwright E2E checks
 
 It should not call live broker or market data services. Tests that need external
 systems must use fakes/mocks.
@@ -54,7 +54,7 @@ def backend_python(root: Path) -> str:
 def print_banner() -> None:
     safe_print(f"{CYAN}{BOLD}")
     safe_print("=" * 65)
-    safe_print("   [SHIELD] STOCKAUTO VERIFICATION HARNESS v1.1.0")
+    safe_print("   [SHIELD] STOCKAUTO VERIFICATION HARNESS v1.2.0")
     safe_print("=" * 65)
     safe_print(f"{RESET}")
 
@@ -88,7 +88,7 @@ def print_result_output(result) -> None:
 
 
 def check_backend_compile(root: Path) -> bool:
-    safe_print(f"{BOLD}[1/3] [BACKEND] Python compile check...{RESET}")
+    safe_print(f"{BOLD}[1/4] [BACKEND] Python compile check...{RESET}")
     app_dir = root / "backend" / "app"
     python_exe = backend_python(root)
     failed_files: list[tuple[Path, str]] = []
@@ -117,7 +117,7 @@ def check_backend_compile(root: Path) -> bool:
 
 
 def check_backend_tests(root: Path) -> bool:
-    safe_print(f"{BOLD}[2/3] [BACKEND] pytest scenario harness...{RESET}")
+    safe_print(f"{BOLD}[2/4] [BACKEND] pytest scenario harness...{RESET}")
     backend_dir = root / "backend"
     tests_dir = backend_dir / "tests"
 
@@ -144,8 +144,8 @@ def check_backend_tests(root: Path) -> bool:
     return True
 
 
-def check_frontend(root: Path) -> bool:
-    safe_print(f"{BOLD}[3/3] [FRONTEND] TypeScript and ESLint checks...{RESET}")
+def check_frontend_static(root: Path) -> bool:
+    safe_print(f"{BOLD}[3/4] [FRONTEND] TypeScript and ESLint checks...{RESET}")
     frontend_dir = root / "frontend"
 
     if not frontend_dir.exists():
@@ -175,16 +175,41 @@ def check_frontend(root: Path) -> bool:
     return success
 
 
+def check_frontend_e2e(root: Path) -> bool:
+    safe_print(f"{BOLD}[4/4] [FRONTEND] Playwright E2E smoke checks...{RESET}")
+    frontend_dir = root / "frontend"
+    playwright_config = frontend_dir / "playwright.config.ts"
+
+    if not frontend_dir.exists():
+        safe_print(f"  {YELLOW}[WARN] frontend directory not found. Skipping E2E checks.{RESET}\n")
+        return True
+
+    if not playwright_config.exists():
+        safe_print(f"  {YELLOW}[WARN] Playwright config not found. Skipping E2E checks.{RESET}\n")
+        return True
+
+    result = run_command("npm run test:e2e", cwd=frontend_dir, timeout=180, shell=True)
+    if result.returncode != 0:
+        safe_print(f"  {RED}[FAIL] Playwright E2E failed.{RESET}")
+        print_result_output(result)
+        return False
+
+    print_result_output(result)
+    safe_print(f"  {GREEN}[OK] Playwright E2E passed.{RESET}\n")
+    return True
+
+
 def main() -> int:
     root = project_root()
     print_banner()
 
     backend_compile_pass = check_backend_compile(root)
     backend_tests_pass = check_backend_tests(root)
-    frontend_pass = check_frontend(root)
+    frontend_static_pass = check_frontend_static(root)
+    frontend_e2e_pass = check_frontend_e2e(root)
 
     safe_print("=" * 65)
-    if backend_compile_pass and backend_tests_pass and frontend_pass:
+    if backend_compile_pass and backend_tests_pass and frontend_static_pass and frontend_e2e_pass:
         safe_print(f"  {GREEN}{BOLD}[SUCCESS] Verification harness passed.{RESET}")
         safe_print("=" * 65)
         return 0

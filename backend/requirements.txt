@@ -3,10 +3,12 @@ uvicorn[standard]
 sqlalchemy
 alembic
 pydantic
+python-dotenv
+PyJWT
+bcrypt
 requests
 pandas
 pykrx
 apscheduler
 yfinance
 httpx
-
