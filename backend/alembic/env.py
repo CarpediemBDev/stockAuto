@@ -17,8 +17,10 @@ config = context.config
 # Interpret the config file for Python logging.
 fileConfig(config.config_file_name)
 
-# Set SQLAlchemy URL from the application database configuration
-config.set_main_option("sqlalchemy.url", SQLALCHEMY_DATABASE_URL)
+# Set SQLAlchemy URL from the application database configuration by default.
+# Tests may provide a temporary database URL through config.attributes.
+configured_url = config.attributes.get("sqlalchemy_url") or SQLALCHEMY_DATABASE_URL
+config.set_main_option("sqlalchemy.url", configured_url)
 
 target_metadata = Base.metadata
 
@@ -37,6 +39,17 @@ def run_migrations_offline():
 
 
 def run_migrations_online():
+    external_connection = config.attributes.get("connection")
+    if external_connection is not None:
+        context.configure(
+            connection=external_connection,
+            target_metadata=target_metadata,
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section),
         prefix="sqlalchemy.",

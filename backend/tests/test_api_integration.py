@@ -1,0 +1,150 @@
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from alembic import command
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, inspect
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+import app.watchlist.router as watchlist_router_module
+from app.auth.router import router as auth_router
+from app.core.database import Base, get_db
+from app.core.exceptions import StockAutoException, stock_auto_exception_handler
+from app.core.models import User, UserSettings, WatchList
+from app.watchlist.router import router as watchlist_router
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def test_session_factory():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    try:
+        yield SessionFactory
+    finally:
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+@pytest.fixture
+def integration_app(test_session_factory):
+    app = FastAPI()
+    app.add_exception_handler(StockAutoException, stock_auto_exception_handler)
+
+    def override_get_db():
+        db = test_session_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.include_router(auth_router, prefix="/api/v1/auth")
+    app.include_router(watchlist_router, prefix="/api/v1/watchlist")
+    return app
+
+
+def make_alembic_config(db_url: str) -> Config:
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
+    config.attributes["sqlalchemy_url"] = db_url
+    return config
+
+
+def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
+    db_path = tmp_path / "stockauto_migration_test.db"
+    db_url = f"sqlite:///{db_path}"
+    config = make_alembic_config(db_url)
+
+    script = ScriptDirectory.from_config(config)
+    assert script.get_current_head() == "908b777e8294"
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(db_url)
+    try:
+        inspector = inspect(engine)
+        assert set(inspector.get_table_names()) >= {
+            "users",
+            "user_settings",
+            "trade_logs",
+            "holdings",
+            "watch_lists",
+            "stock_translations",
+            "alembic_version",
+        }
+
+        user_settings_columns = {column["name"] for column in inspector.get_columns("user_settings")}
+        trade_log_columns = {column["name"] for column in inspector.get_columns("trade_logs")}
+        assert "strategy_type" in user_settings_columns
+        assert {"realized_pnl", "return_rate"} <= trade_log_columns
+    finally:
+        engine.dispose()
+
+
+def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, integration_app, test_session_factory):
+    async def fake_fetch_ohlcv(ticker, interval="1d", period="1d"):
+        return SimpleNamespace(empty=False)
+
+    monkeypatch.setattr(watchlist_router_module, "fetch_ohlcv", fake_fetch_ohlcv)
+
+    with TestClient(integration_app) as client:
+        signup_response = client.post(
+            "/api/v1/auth/signup",
+            json={"username": "tester", "password": "pass1234"},
+        )
+        assert signup_response.status_code == 201
+        token = signup_response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        me_response = client.get("/api/v1/auth/me", headers=headers)
+        assert me_response.status_code == 200
+        assert me_response.json() == {
+            "id": 1,
+            "username": "tester",
+            "trade_mode": "SIMULATED",
+            "broker_provider": "KIS",
+            "telegram_enabled": False,
+        }
+
+        add_response = client.post(
+            "/api/v1/watchlist/",
+            json={"ticker": "aapl", "ticker_name": "Apple"},
+            headers=headers,
+        )
+        assert add_response.status_code == 200
+        assert add_response.json()["data"]["ticker"] == "AAPL"
+        assert add_response.json()["data"]["ticker_name"] == "Apple"
+
+        duplicate_response = client.post(
+            "/api/v1/watchlist/",
+            json={"ticker": "AAPL", "ticker_name": "Apple"},
+            headers=headers,
+        )
+        assert duplicate_response.status_code == 400
+        assert duplicate_response.json()["error"]["code"] == "WATCHLIST_DUPLICATE"
+
+        list_response = client.get("/api/v1/watchlist/", headers=headers)
+        assert list_response.status_code == 200
+        assert [item["ticker"] for item in list_response.json()["data"]] == ["AAPL"]
+
+    db = test_session_factory()
+    try:
+        assert db.query(User).count() == 1
+        assert db.query(UserSettings).count() == 1
+        assert db.query(WatchList).count() == 1
+    finally:
+        db.close()
