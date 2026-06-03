@@ -35,3 +35,34 @@ ema20 = calculate_ema(df_15m['Close'], 20)
 - **검증**: 독립된 테스트 스크립트를 통해 에러 없이 `signal_score`가 정상 반환됨을 확인 완료. 이후 봇은 정상적으로 손절 및 익절 로직을 수행함.
 
 ---
+
+## [Bug-002] "MarketHeader 시장 개요 API 15초 타임아웃 이슈"
+
+### 📅 발생 일시
+- **발견일**: 2026-06-03
+- **영향 범위**: 프론트엔드 시장 헤더 및 백엔드 시장 개요 API (`MarketHeader.tsx`, `router_market.py`)
+- **GitHub Issue**: [#1 bug: MarketHeader 시장 개요 API 15초 타임아웃 발생](https://github.com/CarpediemBDev/stockAuto/issues/1)
+
+### 🔍 현상 (Symptom)
+- 프론트 콘솔에 `Failed to fetch market overview: timeout of 15000ms exceeded` 오류가 발생함.
+- 시장 헤더가 `/api/v1/market/overview` 응답을 받지 못해 NASDAQ, USD-KRW, 시장심리 갱신에 실패함.
+
+### 🕵️ 근본 원인 (Root Cause)
+- `/api/v1/market/overview` 하나가 시장심리(`QQQ`), NASDAQ(`^IXIC`), USD-KRW(`USDKRW=X`)를 모두 조회함.
+- 세 값 모두 yfinance 외부 데이터에 의존하며, Yahoo 호출 안정화를 위한 전역 락/캐시 구조 때문에 외부 조회가 지연되면 전체 API 응답이 프론트 Axios 기본 타임아웃 15초를 넘을 수 있음.
+- UI 표시용 API인데도 일부 지표 지연이 전체 응답 실패로 전파되는 구조였음.
+
+### 🛠️ 해결 조치 (Resolution)
+- **수정 파일**:
+  - `backend/app/trades/router_market.py`
+  - `frontend/lib/api.ts`
+- **수정 내용**:
+  - 시장심리/NASDAQ/USD-KRW 각각에 서버 측 개별 타임아웃을 적용함.
+  - 일부 지표가 늦거나 실패해도 전체 API 실패 대신 부분 응답을 반환하도록 변경함.
+  - 시장심리 실패 시 `NEUTRAL`, NASDAQ/USD-KRW 실패 시 `null` fallback을 사용함.
+  - 프론트에서는 `marketAPI.getOverview()` 호출에만 30초 타임아웃을 적용함.
+
+### 🧠 재발 방지 교훈
+- 외부 API에 의존하는 UI 표시용 엔드포인트는 전체 실패보다 부분 실패 허용 구조를 우선 적용한다.
+- 여러 외부 지표를 한 응답에 묶는 경우, 프론트 타임아웃 증가만으로 해결하지 말고 백엔드에서 개별 작업 시간 제한과 fallback을 먼저 설계한다.
+- 동일 증상 발생 시 `/api/v1/market/overview`의 전체 응답 시간과 개별 지표 fallback 여부를 먼저 확인한다.

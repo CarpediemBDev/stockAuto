@@ -83,11 +83,12 @@ export const accountAPI = {
 
 export const scannerAPI = {
   getLatest: (config?: AxiosRequestConfig) => api.get('/scanner/latest', config),
+  runOverseasScan: (config?: AxiosRequestConfig) => api.get('/scanner/overseas', { timeout: 120000, ...config }),
   getSwingPredict: (config?: AxiosRequestConfig) => api.get('/scanner/swing-predict', config),
 };
 
 export const marketAPI = {
-  getOverview: (config?: AxiosRequestConfig) => api.get('/market/overview', config),
+  getOverview: (config?: AxiosRequestConfig) => api.get('/market/overview', { timeout: 30000, ...config }),
 };
 
 export const watchlistAPI = {

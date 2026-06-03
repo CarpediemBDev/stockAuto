@@ -137,6 +137,23 @@ export function OverseasScanner({
     }
   }, []);
 
+  const runManualScan = useCallback(async () => {
+    setIsLoading(true);
+    setIsSpinning(true);
+    try {
+      const res = await scannerAPI.runOverseasScan();
+      setResults(res.data);
+      setLastUpdated(new Date());
+    } catch (error) {
+      const msg = getErrorMessage(error);
+      console.error("Failed to run overseas scan:", msg);
+      toast.error(`수동 스캔 실패: ${msg}`);
+    } finally {
+      setIsLoading(false);
+      setTimeout(() => setIsSpinning(false), 1000); // 최소 1초 동안 스핀 애니메이션 유지
+    }
+  }, []);
+
   usePolling(fetchScan, 30000);
 
   return (
@@ -200,7 +217,7 @@ export function OverseasScanner({
             </span>
           )}
           <button
-            onClick={() => fetchScan()}
+            onClick={() => runManualScan()}
             disabled={isLoading}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium transition-all active:scale-95 disabled:opacity-50"
           >

@@ -29,6 +29,7 @@ async def get_latest_signals():
 async def get_overseas_scan():
     """수동으로 해외 마켓 스캔을 트리거합니다. (디버깅용)"""
     signals = await scan_overseas_market()
+    scheduler_mod.latest_scanned_signals = signals
     return success_response(data=signals)
 
 @router.get("/swing-predict")
@@ -57,4 +58,3 @@ async def get_swing_prediction(
     candidates = await scan_next_day_candidates(combined_tickers)
     
     return success_response(data=candidates)
-
