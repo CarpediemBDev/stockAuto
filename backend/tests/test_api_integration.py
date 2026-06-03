@@ -70,7 +70,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
     config = make_alembic_config(db_url)
 
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "908b777e8294"
+    assert script.get_current_head() == "a41f0f2d9c7b"
 
     command.upgrade(config, "head")
 
@@ -84,13 +84,23 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             "holdings",
             "watch_lists",
             "stock_translations",
+            "market_overview_snapshots",
             "alembic_version",
         }
 
         user_settings_columns = {column["name"] for column in inspector.get_columns("user_settings")}
         trade_log_columns = {column["name"] for column in inspector.get_columns("trade_logs")}
+        market_overview_columns = {column["name"] for column in inspector.get_columns("market_overview_snapshots")}
         assert "strategy_type" in user_settings_columns
         assert {"realized_pnl", "return_rate"} <= trade_log_columns
+        assert {
+            "market_condition",
+            "market_condition_sync_status",
+            "nasdaq_current",
+            "nasdaq_sync_status",
+            "exchange_rate_current",
+            "exchange_rate_sync_status",
+        } <= market_overview_columns
     finally:
         engine.dispose()
 

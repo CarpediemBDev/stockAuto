@@ -14,6 +14,7 @@ interface MarketData {
 }
 
 interface MarketOverview {
+  market_condition?: string;
   sentiment: string;
   nasdaq: MarketData | null;
   exchange_rate: MarketData | null;
@@ -50,6 +51,7 @@ const MarketHeader = () => {
   }, [fetchMarketData]);
 
   if (!data) return <div className="h-14 bg-[#0f172a] border-b border-slate-800 animate-pulse"></div>;
+  const marketCondition = data.market_condition ?? data.sentiment;
 
   const renderValue = (item: MarketData | null, label: string, icon: React.ReactNode) => {
     if (!item) return null;
@@ -84,11 +86,11 @@ const MarketHeader = () => {
         
         <div className="flex items-center space-x-2">
           <div className={`px-4 py-1.5 rounded-full text-[11px] font-bold tracking-tight border flex items-center space-x-2
-            ${data.sentiment === 'BULLISH' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 
-              data.sentiment === 'BEARISH' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' : 
+            ${marketCondition === 'BULLISH' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 
+              marketCondition === 'BEARISH' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' : 
               'bg-slate-500/10 text-slate-400 border-slate-500/20'}`}>
-            <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${data.sentiment === 'BULLISH' ? 'bg-rose-500' : data.sentiment === 'BEARISH' ? 'bg-blue-500' : 'bg-slate-400'}`}></div>
-            <span className="uppercase">Market {data.sentiment}</span>
+            <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${marketCondition === 'BULLISH' ? 'bg-rose-500' : marketCondition === 'BEARISH' ? 'bg-blue-500' : 'bg-slate-400'}`}></div>
+            <span className="uppercase">Market {marketCondition}</span>
           </div>
         </div>
       </div>

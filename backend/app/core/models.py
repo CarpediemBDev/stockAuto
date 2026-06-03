@@ -123,3 +123,45 @@ class StockTranslation(Base):
     id = Column(Integer, primary_key=True, index=True)
     ticker = Column(String, unique=True, index=True)
     name_ko = Column(String, nullable=False)
+
+class MarketOverviewSnapshot(Base):
+    """시장 헤더와 자동매매 공통 컨텍스트가 참조하는 시장 개요 스냅샷"""
+    __tablename__ = "market_overview_snapshots"
+    __table_args__ = {
+        "comment": "시장 개요 API가 즉시 반환할 수 있도록 저장하는 최신 시장 상태, NASDAQ, USD/KRW 스냅샷"
+    }
+
+    id = Column(Integer, primary_key=True, index=True)
+    market_condition = Column(
+        String,
+        nullable=False,
+        default="NEUTRAL",
+        comment="QQQ 기반 시장 상태: BULLISH, BEARISH, NEUTRAL",
+    )
+    market_condition_sync_status = Column(
+        String,
+        nullable=False,
+        default="failed",
+        comment="시장 상태 동기화 상태: fresh, stale, failed, skipped",
+    )
+    nasdaq_symbol = Column(String, nullable=False, default="^IXIC", comment="NASDAQ 종합지수 Yahoo Finance 티커")
+    nasdaq_current = Column(Float, nullable=True, comment="NASDAQ 종합지수 현재값")
+    nasdaq_change = Column(Float, nullable=True, comment="NASDAQ 종합지수 전일 대비 등락폭")
+    nasdaq_change_pct = Column(Float, nullable=True, comment="NASDAQ 종합지수 전일 대비 등락률")
+    nasdaq_sync_status = Column(
+        String,
+        nullable=False,
+        default="failed",
+        comment="NASDAQ 데이터 동기화 상태: fresh, stale, failed, skipped",
+    )
+    exchange_rate_symbol = Column(String, nullable=False, default="USDKRW=X", comment="USD/KRW Yahoo Finance 티커")
+    exchange_rate_current = Column(Float, nullable=True, comment="USD/KRW 현재 환율")
+    exchange_rate_change = Column(Float, nullable=True, comment="USD/KRW 전일 대비 변화폭")
+    exchange_rate_change_pct = Column(Float, nullable=True, comment="USD/KRW 전일 대비 변화율")
+    exchange_rate_sync_status = Column(
+        String,
+        nullable=False,
+        default="failed",
+        comment="USD/KRW 데이터 동기화 상태: fresh, stale, failed, skipped",
+    )
+    created_at = Column(DateTime, default=datetime.utcnow, index=True, comment="스냅샷 생성 시각")

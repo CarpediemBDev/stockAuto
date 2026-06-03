@@ -88,7 +88,7 @@ export const scannerAPI = {
 };
 
 export const marketAPI = {
-  getOverview: (config?: AxiosRequestConfig) => api.get('/market/overview', { timeout: 30000, ...config }),
+  getOverview: (config?: AxiosRequestConfig) => api.get('/market/overview', { timeout: 10000, ...config }),
 };
 
 export const watchlistAPI = {
