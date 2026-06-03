@@ -39,7 +39,28 @@
 
 ---
 
-## 🏛 4. 백엔드 아키텍처 및 상세 표준 (Backend Architecture)
+## 🔗 4. Linear 보조 백로그 운영 (Auxiliary Backlog)
+
+*   **Linear는 보조 관리판입니다:**
+    *   Linear는 자동 등록/자동 동기화 시스템이 아닙니다. AI 또는 인간 개발자가 명시적으로 이슈를 생성하거나 상태를 갱신할 때만 반영됩니다.
+    *   프로젝트의 최우선 작업 원장은 항상 `docs/tasks/YYYY-MM-DD.md` 일자별 현황판입니다. Linear는 큰 작업, 버그, PR/CI 위험 요소, 장기 백로그를 추적하는 보조 도구로만 사용합니다.
+*   **이슈 생성 기준:**
+    *   하루 안에 끝나는 작은 체크리스트나 구현 세부 단계는 Linear 이슈로 쪼개지 않고 `docs/tasks/YYYY-MM-DD.md`에만 기록합니다.
+    *   여러 날에 걸치는 기능, 회귀 위험이 큰 버그, GitHub PR 리뷰 후속 조치, 실패한 CI/체크 분석, 백엔드/프론트엔드 경계를 넘는 작업은 Linear 이슈로 등록합니다.
+    *   StockAuto 기본 Linear 프로젝트는 `StockAuto 개발`, 팀은 `StockAuto`, 이슈 키는 `STO`를 사용합니다.
+*   **상태 동기화 기준:**
+    *   작업 선등록 시 `docs/tasks/YYYY-MM-DD.md`에는 `[ ]`, Linear에는 `Todo` 또는 `Backlog`로 둡니다.
+    *   실제 작업을 시작하면 `docs/tasks/YYYY-MM-DD.md`는 `[/]`, Linear는 `In Progress`로 맞춥니다.
+    *   유저 최종 승인(Accept) 후에만 `docs/tasks/YYYY-MM-DD.md`를 `[x]`로 갱신하고, 대응 Linear 이슈를 `Done`으로 변경합니다.
+    *   리젝되거나 보류된 작업은 일자별 현황판 상태를 롤백하고, Linear도 `Todo`, `Backlog`, 또는 `Canceled` 중 실제 상태에 맞게 조정합니다.
+*   **다른 AI 에이전트 호환 규칙:**
+    *   다른 AI 에이전트도 이 `AGENTS.md`를 읽고 동일한 운영 원칙을 따라야 합니다.
+    *   단, Linear 직접 조회/생성/수정은 해당 에이전트 런타임에 Linear 커넥터, MCP, API 토큰, 또는 계정 권한이 연결된 경우에만 가능합니다.
+    *   Linear 도구가 없는 에이전트는 임의로 동기화됐다고 보고하지 말고, `docs/tasks/YYYY-MM-DD.md`에 필요한 Linear 반영 요청을 남기거나 유저에게 연결 권한을 요청합니다.
+
+---
+
+## 🏛 5. 백엔드 아키텍처 및 상세 표준 (Backend Architecture)
 
 *   **도메인 격리 및 단일 책임 원칙 (SRP):**
     *   모든 비즈니스 로직은 `backend/app/` 아래 도메인 폴더로 격리 관리합니다:
@@ -56,7 +77,7 @@
 
 ---
 
-## 💻 5. 프론트엔드 및 고성능 UI 표준 (Frontend & UI)
+## 💻 6. 프론트엔드 및 고성능 UI 표준 (Frontend & UI)
 
 *   **기술 스택:** Next.js 15 (App Router), Vanilla CSS, Lucide React, Premium HSL 다크 모드 테마.
 *   **프레임워크 표준 엄격 준수 (No Hacks):**
@@ -66,7 +87,7 @@
 
 ---
 
-## ⚙️ 6. 런타임 퀵 레퍼런스 (CLI Quick Commands)
+## ⚙️ 7. 런타임 퀵 레퍼런스 (CLI Quick Commands)
 
 ### 0. 백엔드 가상환경 표준
 ```bash
