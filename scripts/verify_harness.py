@@ -1,21 +1,24 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-StockAuto AI 에이전트 하드 하네스 검증기 (Hard Harness Verifier)
-이 스크립트는 백엔드 컴파일 무결성과 프론트엔드 TypeScript/Lint 무결성을 
-자동으로 검사하여 실패 시 에러를 뿜으며 커밋 및 병합을 물리적으로 원천 차단합니다.
+StockAuto verification harness.
+
+This script is intentionally conservative:
+- compile every backend Python file under backend/app
+- run backend pytest scenario tests under backend/tests
+- run frontend TypeScript and ESLint checks
+
+It should not call live broker or market data services. Tests that need external
+systems must use fakes/mocks.
 """
 
-import sys
+from __future__ import annotations
+
 import os
 import subprocess
+import sys
+from pathlib import Path
 
-# Windows cmd.exe의 경우 컬러 인코딩 에러 방지를 위해 표준 출력 설정 지원
-try:
-    if os.name == 'nt':
-        os.system('color')
-except Exception:
-    pass
 
 GREEN = "\033[92m"
 RED = "\033[91m"
@@ -24,131 +27,172 @@ CYAN = "\033[96m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
-# 윈도우 인코딩(CP949 등) 환경에서 이모지 출력 시 에러가 나는 것을 방지하기 위해 표준 기호 사용
-EMOJI_SHIELD = "[SHIELD]"
-EMOJI_BE = "[BACKEND]"
-EMOJI_FE = "[FRONTEND]"
-EMOJI_CHECK = "[OK]"
-EMOJI_FAIL = "[FAIL]"
-EMOJI_WARNING = "[WARNING]"
-EMOJI_CONGRATS = "[SUCCESS]"
 
-def safe_print(text):
-    """윈도우 콘솔 인코딩(CP949 등)에서 출력 불가능한 특수 문자가 있을 때 크래시를 방지하는 안전 출력 함수"""
+def safe_print(text: str = "") -> None:
     try:
         print(text)
     except UnicodeEncodeError:
-        encoding = sys.stdout.encoding or 'utf-8'
-        # 인코딩할 수 없는 문자는 대체문자('?')로 치환하여 안전하게 출력
-        clean_text = text.encode(encoding, errors='replace').decode(encoding)
-        print(clean_text)
+        encoding = sys.stdout.encoding or "utf-8"
+        print(text.encode(encoding, errors="replace").decode(encoding))
 
-def print_banner():
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def backend_python(root: Path) -> str:
+    candidates = [
+        root / "backend" / "venv" / "Scripts" / "python.exe",
+        root / "backend" / "venv" / "bin" / "python",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return sys.executable
+
+
+def print_banner() -> None:
     safe_print(f"{CYAN}{BOLD}")
     safe_print("=" * 65)
-    safe_print(f"   {EMOJI_SHIELD}  STOCKAUTO HARD HARNESS ENVIRONMENTAL VERIFIER v1.0.0")
+    safe_print("   [SHIELD] STOCKAUTO VERIFICATION HARNESS v1.1.0")
     safe_print("=" * 65)
     safe_print(f"{RESET}")
 
-def check_backend(project_root):
-    safe_print(f"{BOLD}[1/2] {EMOJI_BE} 백엔드 문법 및 컴파일 무결성 검증 개시...{RESET}")
-    backend_app_dir = os.path.join(project_root, "backend", "app")
-    
-    # backend/app 하위의 모든 .py 파일 검색 및 컴파일
-    failed_files = []
+
+def run_command(
+    command,
+    *,
+    cwd: Path,
+    timeout: int = 120,
+    env: dict[str, str] | None = None,
+    shell: bool = False,
+):
+    return subprocess.run(
+        command,
+        cwd=str(cwd),
+        env=env,
+        shell=shell,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+    )
+
+
+def print_result_output(result) -> None:
+    stdout = result.stdout.decode("utf-8", errors="ignore").strip()
+    stderr = result.stderr.decode("utf-8", errors="ignore").strip()
+    if stdout:
+        safe_print(stdout)
+    if stderr:
+        safe_print(stderr)
+
+
+def check_backend_compile(root: Path) -> bool:
+    safe_print(f"{BOLD}[1/3] [BACKEND] Python compile check...{RESET}")
+    app_dir = root / "backend" / "app"
+    python_exe = backend_python(root)
+    failed_files: list[tuple[Path, str]] = []
     success_count = 0
-    
-    for root, _, files in os.walk(backend_app_dir):
-        for file in files:
-            if file.endswith(".py"):
-                file_path = os.path.join(root, file)
-                # python -m py_compile 실행
-                result = subprocess.run(
-                    [sys.executable, "-m", "py_compile", file_path],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
-                if result.returncode != 0:
-                    failed_files.append((file, result.stderr.decode("utf-8", errors="ignore")))
-                else:
-                    success_count += 1
+
+    for file_path in app_dir.rglob("*.py"):
+        result = run_command(
+            [python_exe, "-m", "py_compile", str(file_path)],
+            cwd=root,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            failed_files.append((file_path, result.stderr.decode("utf-8", errors="ignore")))
+        else:
+            success_count += 1
 
     if failed_files:
-        safe_print(f"  {RED}{EMOJI_FAIL} 백엔드 무결성 검증 실패! ({len(failed_files)}개 파일 오류){RESET}")
-        for file, err in failed_files:
-            safe_print(f"    - {RED}{file} 컴파일 에러:{RESET}\n{err}")
+        safe_print(f"  {RED}[FAIL] Backend compile failed for {len(failed_files)} file(s).{RESET}")
+        for file_path, err in failed_files:
+            safe_print(f"    - {file_path}")
+            safe_print(err)
         return False
-    
-    safe_print(f"  {GREEN}{EMOJI_CHECK} 백엔드 컴파일 무결성 통과! (총 {success_count}개 파일 완료){RESET}\n")
+
+    safe_print(f"  {GREEN}[OK] Backend compile passed ({success_count} files).{RESET}\n")
     return True
 
-def check_frontend(project_root):
-    safe_print(f"{BOLD}[2/2] {EMOJI_FE} 프론트엔드 TypeScript 및 린트 검증 개시...{RESET}")
-    frontend_dir = os.path.join(project_root, "frontend")
-    
-    if not os.path.exists(frontend_dir):
-        safe_print(f"  {YELLOW}{EMOJI_WARNING} 프론트엔드 디렉터리를 찾을 수 없습니다. 건너뜁니다.{RESET}\n")
+
+def check_backend_tests(root: Path) -> bool:
+    safe_print(f"{BOLD}[2/3] [BACKEND] pytest scenario harness...{RESET}")
+    backend_dir = root / "backend"
+    tests_dir = backend_dir / "tests"
+
+    if not tests_dir.exists():
+        safe_print(f"  {YELLOW}[WARN] backend/tests not found. Skipping pytest.{RESET}\n")
         return True
 
-    # 1. TypeScript 타입 검사 (npx tsc --noEmit)
-    safe_print("  * TypeScript 타입 무결성 검사 중 (npx tsc --noEmit)...")
-    tsc_result = subprocess.run(
-        "npx tsc --noEmit",
-        shell=True,
-        cwd=frontend_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(backend_dir) + os.pathsep + env.get("PYTHONPATH", "")
+    result = run_command(
+        [backend_python(root), "-m", "pytest"],
+        cwd=backend_dir,
+        timeout=120,
+        env=env,
     )
-    
-    # 2. ESLint 린트 검사 (npm run lint)
-    safe_print("  * ESLint 정적 코드 분석 검사 중 (npm run lint)...")
-    lint_result = subprocess.run(
-        "npm run lint",
-        shell=True,
-        cwd=frontend_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
+
+    if result.returncode != 0:
+        safe_print(f"  {RED}[FAIL] Backend pytest failed.{RESET}")
+        print_result_output(result)
+        return False
+
+    print_result_output(result)
+    safe_print(f"  {GREEN}[OK] Backend pytest passed.{RESET}\n")
+    return True
+
+
+def check_frontend(root: Path) -> bool:
+    safe_print(f"{BOLD}[3/3] [FRONTEND] TypeScript and ESLint checks...{RESET}")
+    frontend_dir = root / "frontend"
+
+    if not frontend_dir.exists():
+        safe_print(f"  {YELLOW}[WARN] frontend directory not found. Skipping frontend checks.{RESET}\n")
+        return True
+
+    safe_print("  * Running npx tsc --noEmit...")
+    tsc_result = run_command("npx tsc --noEmit", cwd=frontend_dir, timeout=120, shell=True)
+
+    safe_print("  * Running npm run lint...")
+    lint_result = run_command("npm run lint", cwd=frontend_dir, timeout=120, shell=True)
 
     success = True
     if tsc_result.returncode != 0:
-        safe_print(f"  {RED}{EMOJI_FAIL} TypeScript 타입 체크 실패!{RESET}")
-        safe_print(tsc_result.stdout.decode("utf-8", errors="ignore"))
-        safe_print(tsc_result.stderr.decode("utf-8", errors="ignore"))
+        safe_print(f"  {RED}[FAIL] TypeScript check failed.{RESET}")
+        print_result_output(tsc_result)
         success = False
 
     if lint_result.returncode != 0:
-        safe_print(f"  {RED}{EMOJI_FAIL} ESLint 린트 검사 실패!{RESET}")
-        safe_print(lint_result.stdout.decode("utf-8", errors="ignore"))
-        safe_print(lint_result.stderr.decode("utf-8", errors="ignore"))
+        safe_print(f"  {RED}[FAIL] ESLint check failed.{RESET}")
+        print_result_output(lint_result)
         success = False
 
     if success:
-        safe_print(f"  {GREEN}{EMOJI_CHECK} 프론트엔드 타입 및 린트 무결성 통과!{RESET}\n")
-    
+        safe_print(f"  {GREEN}[OK] Frontend checks passed.{RESET}\n")
+
     return success
 
-def main():
+
+def main() -> int:
+    root = project_root()
     print_banner()
-    
-    # 프로젝트 루트 구하기 (이 파일이 scripts/ 하위에 위치하므로 부모 디렉터리)
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(current_dir)
-    
-    be_pass = check_backend(project_root)
-    fe_pass = check_frontend(project_root)
-    
+
+    backend_compile_pass = check_backend_compile(root)
+    backend_tests_pass = check_backend_tests(root)
+    frontend_pass = check_frontend(root)
+
     safe_print("=" * 65)
-    if be_pass and fe_pass:
-        safe_print(f"  {GREEN}{BOLD}{EMOJI_CONGRATS} [SUCCESS] 모든 하드 하네스 보안 가드라인 통과!{RESET}")
-        safe_print(f"  {GREEN}코드 무결성이 완벽하게 증명되었습니다. 커밋/배포가 허용됩니다.{RESET}")
+    if backend_compile_pass and backend_tests_pass and frontend_pass:
+        safe_print(f"  {GREEN}{BOLD}[SUCCESS] Verification harness passed.{RESET}")
         safe_print("=" * 65)
-        sys.exit(0)
-    else:
-        safe_print(f"  {RED}{BOLD}{EMOJI_FAIL} [BLOCKED] 하드 하네스 검증 통과 실패!{RESET}")
-        safe_print(f"  {RED}린트 또는 컴파일 결함이 존재합니다. 수정 후 다시 시도하십시오.{RESET}")
-        safe_print("=" * 65)
-        sys.exit(1)
+        return 0
+
+    safe_print(f"  {RED}{BOLD}[BLOCKED] Verification harness failed.{RESET}")
+    safe_print("=" * 65)
+    return 1
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
