@@ -85,6 +85,7 @@ export const scannerAPI = {
   getLatest: (config?: AxiosRequestConfig) => api.get('/scanner/latest', config),
   runOverseasScan: (config?: AxiosRequestConfig) => api.get('/scanner/overseas', { timeout: 120000, ...config }),
   getSwingPredict: (config?: AxiosRequestConfig) => api.get('/scanner/swing-predict', config),
+  refreshSwingPredict: (config?: AxiosRequestConfig) => api.get('/scanner/swing-predict/refresh', { timeout: 120000, ...config }),
 };
 
 export const marketAPI = {

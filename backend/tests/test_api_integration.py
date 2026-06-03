@@ -70,7 +70,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
     config = make_alembic_config(db_url)
 
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "a41f0f2d9c7b"
+    assert script.get_current_head() == "b7c8d9e0f1a2"
 
     command.upgrade(config, "head")
 
@@ -85,12 +85,14 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             "watch_lists",
             "stock_translations",
             "market_overview_snapshots",
+            "swing_prediction_snapshots",
             "alembic_version",
         }
 
         user_settings_columns = {column["name"] for column in inspector.get_columns("user_settings")}
         trade_log_columns = {column["name"] for column in inspector.get_columns("trade_logs")}
         market_overview_columns = {column["name"] for column in inspector.get_columns("market_overview_snapshots")}
+        swing_prediction_columns = {column["name"] for column in inspector.get_columns("swing_prediction_snapshots")}
         assert "strategy_type" in user_settings_columns
         assert {"realized_pnl", "return_rate"} <= trade_log_columns
         assert {
@@ -101,6 +103,13 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             "exchange_rate_current",
             "exchange_rate_sync_status",
         } <= market_overview_columns
+        assert {
+            "cache_key",
+            "ticker_universe",
+            "candidates_json",
+            "sync_status",
+            "created_at",
+        } <= swing_prediction_columns
     finally:
         engine.dispose()
 

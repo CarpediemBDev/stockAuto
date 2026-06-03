@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core import models
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from app.scanner.data_provider import fetch_ohlcv
 import re
 
@@ -21,9 +21,8 @@ class WatchListResponse(BaseModel):
     id: int
     ticker: str
     ticker_name: str = None
-    
-    class Config:
-        from_attributes = True
+
+    model_config = ConfigDict(from_attributes=True)
 
 @router.get("/")
 def get_watchlist(

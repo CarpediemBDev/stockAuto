@@ -1,7 +1,11 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, UniqueConstraint, Text
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import UTC, datetime
 from app.core.database import Base
+
+def utc_now_naive():
+    """SQLite 호환을 위해 UTC 기준 naive datetime을 저장합니다."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 class User(Base):
     __tablename__ = "users"
@@ -9,7 +13,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now_naive)
 
     # Relationships
     settings = relationship("UserSettings", back_populates="user", uselist=False, cascade="all, delete-orphan")
@@ -42,7 +46,7 @@ class UserSettings(Base):
     
     strategy_type = Column(String, default="regime_switching", nullable=False)
     
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
 
     # Relationships
     user = relationship("User", back_populates="settings")
@@ -62,7 +66,7 @@ class TradeLog(Base):
     signal_score = Column(Integer, nullable=True)   # ⭐ v2.0 매수 당시의 스캔 점수
     realized_pnl = Column(Float, nullable=True)     # ⭐ v2.0 Phase 22 매도 시 실현 손익 (수익금)
     return_rate = Column(Float, nullable=True)      # ⭐ v2.0 Phase 22 매도 시 수익률 (%)
-    executed_at = Column(DateTime, default=datetime.utcnow)
+    executed_at = Column(DateTime, default=utc_now_naive)
 
     # Relationships
     user = relationship("User", back_populates="trade_logs")
@@ -80,7 +84,7 @@ class Holding(Base):
     highest_price = Column(Float) # 구매 후 최고가 (트레일링 스탑 기준점)
     regime_mode = Column(String, nullable=True)     # ⭐ v2.0 진입 당시 장세 레짐
     buy_stage = Column(Integer, default=1)          # ⭐ v2.0 후지모토 시게루식 피라미딩 단계 (1, 2, 3단계)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
 
     # Relationships
     user = relationship("User", back_populates="holdings")
@@ -96,7 +100,7 @@ class ActionLog(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     level = Column(String, default="INFO") # INFO, WARN, ERROR, SIGNAL
     message = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now_naive)
 
     # Relationships
     user = relationship("User", back_populates="action_logs")
@@ -108,7 +112,7 @@ class WatchList(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     ticker = Column(String, index=True)
     ticker_name = Column(String, nullable=True)
-    added_at = Column(DateTime, default=datetime.utcnow)
+    added_at = Column(DateTime, default=utc_now_naive)
 
     # Relationships
     user = relationship("User", back_populates="watch_lists")
@@ -164,4 +168,36 @@ class MarketOverviewSnapshot(Base):
         default="failed",
         comment="USD/KRW 데이터 동기화 상태: fresh, stale, failed, skipped",
     )
-    created_at = Column(DateTime, default=datetime.utcnow, index=True, comment="스냅샷 생성 시각")
+    created_at = Column(DateTime, default=utc_now_naive, index=True, comment="스냅샷 생성 시각")
+
+class SwingPredictionSnapshot(Base):
+    """스윙 예측 후보를 사용자 관심종목 조합별로 보존하는 스냅샷"""
+    __tablename__ = "swing_prediction_snapshots"
+    __table_args__ = {
+        "comment": "스윙 예측 폴링 API가 대량 yfinance 분석 없이 즉시 반환할 수 있도록 저장하는 후보 스냅샷"
+    }
+
+    id = Column(Integer, primary_key=True, index=True)
+    cache_key = Column(
+        String,
+        nullable=False,
+        index=True,
+        comment="기본 스윙 풀과 사용자 관심종목을 정렬해 결합한 캐시 식별자",
+    )
+    ticker_universe = Column(
+        Text,
+        nullable=False,
+        comment="분석 대상 티커 목록 JSON 배열",
+    )
+    candidates_json = Column(
+        Text,
+        nullable=False,
+        comment="스윙 예측 후보 결과 JSON 배열",
+    )
+    sync_status = Column(
+        String,
+        nullable=False,
+        default="fresh",
+        comment="스윙 예측 동기화 상태: fresh, stale, refreshing, failed, empty",
+    )
+    created_at = Column(DateTime, default=utc_now_naive, index=True, comment="스냅샷 생성 시각")

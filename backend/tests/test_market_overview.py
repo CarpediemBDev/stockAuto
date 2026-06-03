@@ -1,5 +1,3 @@
-from datetime import datetime
-
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -10,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 import app.trades.market_overview_cache as cache_module
 import app.trades.router_market as market_router_module
 from app.core.database import Base
-from app.core.models import MarketOverviewSnapshot
+from app.core.models import MarketOverviewSnapshot, utc_now_naive
 
 
 @pytest.fixture
@@ -46,7 +44,7 @@ def test_market_overview_route_returns_cached_data(monkeypatch):
         "market_condition_sync_status": "fresh",
         "nasdaq": None,
         "exchange_rate": None,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utc_now_naive().isoformat(),
     }
 
     monkeypatch.setattr(market_router_module, "get_cached_market_overview", lambda: expected)

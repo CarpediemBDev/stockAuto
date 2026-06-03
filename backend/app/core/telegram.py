@@ -318,13 +318,13 @@ def send_daily_report_to_all_users_sync():
     """
     장 마감 후 모든 활성 사용자에게 당일 매매 성적을 텔레그램으로 발송합니다.
     """
-    from datetime import datetime, timedelta
+    from datetime import UTC, datetime, timedelta
     from app.core.models import TradeLog
     
     db = SessionLocal()
     try:
         # 최근 24시간 거래 내역
-        cutoff = datetime.utcnow() - timedelta(hours=24)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=24)
         
         users = db.query(UserSettings).filter(UserSettings.telegram_enabled == True).all()
         for u in users:

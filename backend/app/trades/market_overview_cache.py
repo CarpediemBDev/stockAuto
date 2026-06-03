@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from datetime import datetime
+from app.core.models import utc_now_naive
 
 from sqlalchemy.orm import Session
 
@@ -87,7 +87,7 @@ def _snapshot_to_response(snapshot: models.MarketOverviewSnapshot) -> dict:
         "market_condition_sync_status": snapshot.market_condition_sync_status,
         "nasdaq": _ticker_from_snapshot(snapshot, "nasdaq"),
         "exchange_rate": _ticker_from_snapshot(snapshot, "exchange_rate"),
-        "timestamp": snapshot.created_at.isoformat() if snapshot.created_at else datetime.utcnow().isoformat(),
+        "timestamp": snapshot.created_at.isoformat() if snapshot.created_at else utc_now_naive().isoformat(),
     }
 
 
@@ -98,7 +98,7 @@ def _default_response() -> dict:
         "market_condition_sync_status": SYNC_STATUS_FAILED,
         "nasdaq": None,
         "exchange_rate": None,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utc_now_naive().isoformat(),
     }
 
 
