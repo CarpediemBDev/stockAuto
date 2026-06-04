@@ -95,3 +95,33 @@ async def test_async_trading_loop_injects_cycle_context_once(monkeypatch):
     assert all(call["sentiment"] == "BULLISH" for call in flow_calls)
     assert all(call["market_open"] is True for call in flow_calls)
     assert all(call["signal_map"] == {"QQQ": {"ticker": "QQQ", "price": 100.0}} for call in flow_calls)
+
+
+def test_start_scheduler_registers_swing_prediction_jobs(monkeypatch):
+    class FakeScheduler:
+        running = False
+
+        def __init__(self):
+            self.jobs = []
+            self.started = False
+
+        def add_job(self, func, trigger, **kwargs):
+            self.jobs.append({"func": func, "trigger": trigger, **kwargs})
+
+        def start(self):
+            self.started = True
+            self.running = True
+
+    fake_scheduler = FakeScheduler()
+    monkeypatch.setattr(scheduler, "scheduler", fake_scheduler)
+
+    scheduler.start_scheduler()
+
+    job_by_id = {job["id"]: job for job in fake_scheduler.jobs}
+    assert fake_scheduler.started is True
+    assert job_by_id["swing_prediction_startup_job"]["trigger"] == "date"
+    assert job_by_id["swing_prediction_startup_job"]["func"] is scheduler.swing_prediction_cache_wrapper
+    assert job_by_id["swing_prediction_daily_job"]["trigger"] == "cron"
+    assert job_by_id["swing_prediction_daily_job"]["hour"] == 8
+    assert job_by_id["swing_prediction_daily_job"]["minute"] == 0
+    assert job_by_id["swing_prediction_daily_job"]["func"] is scheduler.swing_prediction_cache_wrapper

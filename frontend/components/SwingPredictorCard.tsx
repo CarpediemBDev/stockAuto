@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Compass, ShieldCheck, Flame, Layers, TrendingUp, TrendingDown, HelpCircle, Activity, RefreshCw } from 'lucide-react';
 
 import { scannerAPI, isCancel } from '@/lib/api';
@@ -37,7 +37,6 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
   const [refreshing, setRefreshing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SwingPredictionResponse["sync_status"]>("empty");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const autoRefreshAttempted = useRef(false);
 
   const applySwingPrediction = useCallback((payload: SwingPredictionResponse) => {
     setCandidates(payload.candidates);
@@ -66,10 +65,6 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
     try {
       const res = await scannerAPI.getSwingPredict({ signal });
       applySwingPrediction(res.data);
-      if (res.data.candidates.length === 0 && !autoRefreshAttempted.current) {
-        autoRefreshAttempted.current = true;
-        await refreshSwingCandidates(signal);
-      }
     } catch (error) {
       if (isCancel(error)) return;
       const msg = getErrorMessage(error);
@@ -78,7 +73,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
     } finally {
       setLoading(false);
     }
-  }, [applySwingPrediction, refreshSwingCandidates]);
+  }, [applySwingPrediction]);
 
   // 일봉 스윙 분석은 캐시 조회 중심으로 60초 주기 폴링 수행
   usePolling(fetchSwingCandidates, 60000);

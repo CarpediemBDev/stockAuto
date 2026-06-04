@@ -16,6 +16,7 @@ from app.scanner.data_provider import fetch_ohlcv
 from app.core.telegram import send_message_async, send_daily_report_to_all_users_sync
 from app.bot.fx_cache import FXRateCache
 from app.trades.market_overview_cache import market_overview_cache_wrapper
+from app.scanner.swing_prediction_cache import swing_prediction_cache_wrapper
 
 # 💡 네트워크 일시 장애에 따른 텔레그램 경고 도배 방지용 시간 기록 저장소
 _user_network_alert_sent = {}
@@ -947,15 +948,20 @@ def start_scheduler():
     if not scheduler.running:
         # ① 시장 개요 캐시 갱신: 1분 주기 (헤더 API는 캐시만 즉시 반환)
         scheduler.add_job(market_overview_cache_wrapper, 'interval', minutes=1, id='market_overview_cache_job', next_run_time=datetime.now())
-        # ② 스캐너 캐시 갱신: 10분 주기 (yfinance 대규모 API 호출 - Rate Limit 안전)
+        # ② 스윙 예측 캐시 갱신: 서버 시작 시 1회 + 매일 08:00 KST 1회
+        scheduler.add_job(swing_prediction_cache_wrapper, 'date', id='swing_prediction_startup_job', run_date=datetime.now())
+        scheduler.add_job(swing_prediction_cache_wrapper, 'cron', hour=8, minute=0, id='swing_prediction_daily_job')
+        # ③ 스캐너 캐시 갱신: 10분 주기 (yfinance 대규모 API 호출 - Rate Limit 안전)
         scheduler.add_job(scanner_cache_wrapper, 'interval', minutes=10, id='scanner_cache_job', next_run_time=datetime.now())
-        # ③ 자동매매 루프: 1분 주기 (캐시된 시그널로 봇 실행 사용자 처리)
+        # ④ 자동매매 루프: 1분 주기 (캐시된 시그널로 봇 실행 사용자 처리)
         scheduler.add_job(trading_loop_wrapper, 'interval', minutes=1, id='main_trade_job', next_run_time=datetime.now() + timedelta(seconds=20))
-        # ④ 텔레그램 일일 리포트 발송: 매일 한국시간 17:10 (미국장 마감 직후)
+        # ⑤ 텔레그램 일일 리포트 발송: 매일 한국시간 17:10 (미국장 마감 직후)
         scheduler.add_job(send_daily_report_to_all_users_sync, 'cron', hour=17, minute=10, id='daily_telegram_report_job')
         scheduler.start()
         logger.info("Background scheduler started (Multi-tenant 3-Mode Unified Engine).")
         logger.info("  - market_overview_cache_job: every 1 min (market header cache refresh)")
+        logger.info("  - swing_prediction_startup_job: once on startup (daily swing prediction refresh)")
+        logger.info("  - swing_prediction_daily_job: daily at 08:00 KST (daily swing prediction refresh)")
         logger.info("  - main_trade_job  : every 1 min  (trading logic, uses cached signals)")
         logger.info("  - scanner_cache_job: every 10 min (market scan + cache refresh)")
         logger.info("  - daily_telegram_report_job: daily at 17:10 KST")

@@ -148,8 +148,6 @@ async def scan_market_expert() -> list:
                     if df.empty or len(df) < 5: continue
                     
                     last_close = float(df['Close'].iloc[-1])
-                    prev_close = float(df['Close'].iloc[-2])
-                    open_price = float(df['Open'].iloc[-1])
                     
                     # 당일 누적 거래대금(Dollar Volume) 계산
                     temp_df = df.copy()
@@ -162,7 +160,18 @@ async def scan_market_expert() -> list:
                     if today_dollar_volume < min_dollar_volume:
                         continue
                     
-                    gap_pct = (open_price / prev_close - 1) * 100
+                    session_gap_pct = 0.0
+                    try:
+                        if not today_df.empty and len(df) >= 20:
+                            first_open_today = float(today_df['Open'].iloc[0])
+                            prev_day_data = df[df.index < today_df.index[0]]
+                            if not prev_day_data.empty:
+                                prev_day_close = float(prev_day_data['Close'].iloc[-1])
+                                session_gap_pct = (first_open_today / prev_day_close - 1) * 100
+                    except Exception:
+                        session_gap_pct = 0.0
+
+                    gap_pct = session_gap_pct
                     rvol = calculate_rvol(df)
                     recent_high = df['High'].iloc[:-1].max()
                     dist_to_high = (last_close / recent_high - 1) * 100
@@ -172,10 +181,12 @@ async def scan_market_expert() -> list:
                     
                     ema9 = calculate_ema(df['Close'], 9)
                     ema20 = calculate_ema(df['Close'], 20)
-                    is_aligned = bool(ema9.iloc[-1] > ema20.iloc[-1])
+                    latest_ema9 = float(ema9.iloc[-1]) if not ema9.empty else 0.0
+                    latest_ema20 = float(ema20.iloc[-1]) if not ema20.empty else 0.0
+                    is_aligned = bool(latest_ema9 > latest_ema20)
 
-                    high_52w = float(df['High'].max())
-                    is_near_52w_high = last_close >= high_52w * 0.98
+                    recent_5d_high = float(df['High'].max())
+                    is_near_recent_high = last_close >= recent_5d_high * 0.98
 
                     momentum_candles = False
                     if len(df) >= 4:
@@ -186,17 +197,7 @@ async def scan_market_expert() -> list:
                             v.iloc[-1] > v.iloc[-2] > v.iloc[-3]
                         )
 
-                    premarket_gap_pct = 0.0
-                    try:
-                        today_data = today_df
-                        if not today_data.empty and len(df) >= 20:
-                            first_open_today = float(today_data['Open'].iloc[0])
-                            prev_day_data = df[df.index < today_data.index[0]]
-                            if not prev_day_data.empty:
-                                prev_day_close = float(prev_day_data['Close'].iloc[-1])
-                                premarket_gap_pct = (first_open_today / prev_day_close - 1) * 100
-                    except Exception:
-                        premarket_gap_pct = 0.0
+                    premarket_gap_pct = session_gap_pct
                     
                     s1_score = 0
                     if gap_pct >= 3.0: s1_score += 30
@@ -209,11 +210,11 @@ async def scan_market_expert() -> list:
                     if relative_strength > 0: s1_score += 10
                     if is_aligned: s1_score += 10
  
-                    if is_near_52w_high: s1_score += 25
+                    if is_near_recent_high: s1_score += 25
                     if momentum_candles: s1_score += 15
                     if premarket_gap_pct >= 5.0: s1_score += 20
  
-                    if is_near_52w_high and momentum_candles and premarket_gap_pct >= 5.0:
+                    if is_near_recent_high and momentum_candles and premarket_gap_pct >= 5.0:
                         s1_score += 10
                         
                     if s1_score >= 30 or rvol >= 2.5:
@@ -223,11 +224,16 @@ async def scan_market_expert() -> list:
                             "df_15m": df,
                             "gap_pct": round(gap_pct, 2),
                             "rvol": rvol,
+                            "RVOL": rvol,
                             "dist_to_high": round(dist_to_high, 2),
+                            "relative_strength": relative_strength,
                             "rs": round(relative_strength * 100, 2),
+                            "EMA9": latest_ema9,
+                            "EMA20": latest_ema20,
                             "ema_aligned": is_aligned,
                             "dollar_volume": round(today_dollar_volume, 2),
-                            "is_near_52w_high": is_near_52w_high,
+                            "is_near_recent_high": is_near_recent_high,
+                            "is_near_52w_high": False,
                             "momentum_candles": momentum_candles,
                             "premarket_gap_pct": round(premarket_gap_pct, 2),
                         })
@@ -252,7 +258,7 @@ async def scan_market_expert() -> list:
             return await fetch_bulk_ohlcv(candidate_tickers, period="2d", interval="1m")
             
         async def fetch_daily_data():
-            return await fetch_bulk_ohlcv(candidate_tickers, period="200d", interval="1d")
+            return await fetch_bulk_ohlcv(candidate_tickers, period="1y", interval="1d")
             
         async def fetch_news_data(ticker: str) -> list:
             try:
@@ -291,8 +297,16 @@ async def scan_market_expert() -> list:
                     df_daily = data_daily[ticker].dropna()
                 else:
                     df_daily = data_daily.dropna()
-                
+
                 last_close = float(df_1m['Close'].iloc[-1])
+
+                is_near_52w_high = False
+                if not df_daily.empty:
+                    high_52w = float(df_daily['High'].max())
+                    if high_52w > 0:
+                        is_near_52w_high = last_close >= high_52w * 0.98
+                cand['is_near_52w_high'] = is_near_52w_high
+
                 news_list = news_map.get(ticker, [])
                 is_fundamental_healthy = fundamental_map.get(ticker, True)
                 
@@ -333,9 +347,12 @@ async def scan_market_expert() -> list:
                 cand['Volume'] = float(df_1m['Volume'].iloc[-1]) if not df_1m.empty else 0.0
                 cand['VWAP'] = vwap.iloc[-1] if not vwap.empty else float('nan')
                 cand['Wick'] = wick_ratio
+                cand['RVOL'] = cand.get('RVOL', cand.get('rvol', 1.0))
+                cand['EMA9'] = cand.get('EMA9', 0.0)
+                cand['EMA20'] = cand.get('EMA20', 0.0)
                 cand['is_rsi_bb_extreme'] = is_rsi_bb_extreme
                 cand['OBV_divergence'] = 1.0 if is_obv_accumulation else -1.0
-                cand['relative_strength'] = relative_strength
+                cand['relative_strength'] = cand.get('relative_strength', cand.get('rs', 0.0) / 100.0)
                 cand['premarket_gap_pct'] = cand.get('premarket_gap_pct', 0.0)
                 cand['news_sentiment'] = news_sentiment
                 cand['news_sentiment_score'] = news_sentiment_score
@@ -391,6 +408,7 @@ async def scan_market_expert() -> list:
                         "atr": round(latest_atr, 4),
                         "dollar_volume": cand.get('dollar_volume', 0.0),
                         "is_near_52w_high": cand.get('is_near_52w_high', False),
+                        "is_near_recent_high": cand.get('is_near_recent_high', False),
                         "momentum_candles": cand.get('momentum_candles', False),
                         "premarket_gap_pct": cand.get('premarket_gap_pct', 0.0),
                         "is_orb_breakout": is_orb_breakout,
@@ -484,7 +502,10 @@ async def analyze_single_ticker(ticker: str) -> dict:
             'relative_strength': rs,
             'gap_pct': 0.0,
             'rvol': rvol,
+            'RVOL': rvol,
             'rs': rs,
+            'EMA9': float(ema9.iloc[-1]) if not ema9.empty else 0.0,
+            'EMA20': float(ema20.iloc[-1]) if not ema20.empty else 0.0,
             'ema_aligned': ema_aligned,
             'dollar_volume': float(df_1m['Close'].iloc[-1] * df_1m['Volume'].iloc[-1]) if not df_1m.empty else 0.0,
             'is_near_52w_high': False,

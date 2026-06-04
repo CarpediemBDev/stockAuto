@@ -285,7 +285,7 @@ export function OverseasScanner({
                 <th className="py-4 px-2 font-semibold">Ticker / Name</th>
                 <th className="py-4 px-4 font-semibold text-right">Price</th>
                 <th className="py-4 px-4 font-semibold text-center">
-                  <HeaderTooltip title="Gap / RVOL" desc="Gap: 전일 종가 대비 시가의 갭 상승비율. RVOL: 최근 20일 평균 대비 현재 거래량 비율 (2.0배 돌파 시 강세)." />
+                  <HeaderTooltip title="Open Gap / RVOL" desc="Open Gap: 직전 거래일 마지막 15분봉 종가 대비 당일 첫 15분봉 시가의 갭 비율. RVOL: 최근 20개 마감 15분봉 평균 대비 마지막 마감 15분봉 거래량 비율." />
                 </th>
                 <th className="py-4 px-4 font-semibold text-center">
                   <HeaderTooltip title="Trend / RS" desc="Trend: EMA(9/20일 이평선) 정배열 상승 상태. RS: QQQ 지수 대비 실시간 초과수익 성향 (시장 극복 지표)." />

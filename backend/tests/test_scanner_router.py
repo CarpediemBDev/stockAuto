@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.scanner.router as scanner_router_module
+import app.scanner.swing_prediction_cache as swing_cache_module
 from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user
 from app.core.models import SwingPredictionSnapshot, User, WatchList
@@ -80,8 +81,8 @@ def test_swing_prediction_cache_read_does_not_run_heavy_scan(monkeypatch):
     async def fail_scan_next_day_candidates(tickers):
         raise AssertionError("cached read must not run swing scan")
 
-    monkeypatch.setattr(scanner_router_module, "scan_next_day_candidates", fail_scan_next_day_candidates)
-    scanner_router_module.clear_swing_prediction_cache()
+    monkeypatch.setattr(swing_cache_module, "scan_next_day_candidates", fail_scan_next_day_candidates)
+    swing_cache_module.clear_swing_prediction_cache()
     app, db, engine = create_authenticated_scanner_app()
     try:
         with TestClient(app) as client:
@@ -97,7 +98,7 @@ def test_swing_prediction_cache_read_does_not_run_heavy_scan(monkeypatch):
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
-        scanner_router_module.clear_swing_prediction_cache()
+        swing_cache_module.clear_swing_prediction_cache()
 
 
 def test_swing_prediction_refresh_updates_cached_response(monkeypatch):
@@ -107,8 +108,8 @@ def test_swing_prediction_refresh_updates_cached_response(monkeypatch):
         assert "AAPL" in tickers
         return expected
 
-    monkeypatch.setattr(scanner_router_module, "scan_next_day_candidates", fake_scan_next_day_candidates)
-    scanner_router_module.clear_swing_prediction_cache()
+    monkeypatch.setattr(swing_cache_module, "scan_next_day_candidates", fake_scan_next_day_candidates)
+    swing_cache_module.clear_swing_prediction_cache()
     app, db, engine = create_authenticated_scanner_app()
     try:
         with TestClient(app) as client:
@@ -127,19 +128,19 @@ def test_swing_prediction_refresh_updates_cached_response(monkeypatch):
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
-        scanner_router_module.clear_swing_prediction_cache()
+        swing_cache_module.clear_swing_prediction_cache()
 
 
 def test_swing_prediction_read_falls_back_to_persisted_snapshot():
     expected = [{"ticker": "AAPL", "score": 77.0}]
 
-    scanner_router_module.clear_swing_prediction_cache()
+    swing_cache_module.clear_swing_prediction_cache()
     app, db, engine = create_authenticated_scanner_app()
     try:
-        cache_key = scanner_router_module._get_swing_cache_key(["AAPL"])
+        cache_key = swing_cache_module.get_swing_cache_key(["AAPL"])
         db.add(
             SwingPredictionSnapshot(
-                cache_key=scanner_router_module._serialize_swing_cache_key(cache_key),
+                cache_key=swing_cache_module.serialize_swing_cache_key(cache_key),
                 ticker_universe='["AAPL"]',
                 candidates_json='[{"ticker": "AAPL", "score": 77.0}]',
                 sync_status="fresh",
@@ -159,7 +160,7 @@ def test_swing_prediction_read_falls_back_to_persisted_snapshot():
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
-        scanner_router_module.clear_swing_prediction_cache()
+        swing_cache_module.clear_swing_prediction_cache()
 
 
 def test_swing_prediction_refresh_failure_returns_stale_snapshot(monkeypatch):
@@ -168,14 +169,14 @@ def test_swing_prediction_refresh_failure_returns_stale_snapshot(monkeypatch):
     async def fail_scan_next_day_candidates(tickers):
         raise RuntimeError("upstream failed")
 
-    monkeypatch.setattr(scanner_router_module, "scan_next_day_candidates", fail_scan_next_day_candidates)
-    scanner_router_module.clear_swing_prediction_cache()
+    monkeypatch.setattr(swing_cache_module, "scan_next_day_candidates", fail_scan_next_day_candidates)
+    swing_cache_module.clear_swing_prediction_cache()
     app, db, engine = create_authenticated_scanner_app()
     try:
-        cache_key = scanner_router_module._get_swing_cache_key(["AAPL"])
+        cache_key = swing_cache_module.get_swing_cache_key(["AAPL"])
         db.add(
             SwingPredictionSnapshot(
-                cache_key=scanner_router_module._serialize_swing_cache_key(cache_key),
+                cache_key=swing_cache_module.serialize_swing_cache_key(cache_key),
                 ticker_universe='["AAPL"]',
                 candidates_json='[{"ticker": "AAPL", "score": 77.0}]',
                 sync_status="fresh",
@@ -194,4 +195,4 @@ def test_swing_prediction_refresh_failure_returns_stale_snapshot(monkeypatch):
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
-        scanner_router_module.clear_swing_prediction_cache()
+        swing_cache_module.clear_swing_prediction_cache()
