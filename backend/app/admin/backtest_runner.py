@@ -5,6 +5,7 @@ import pandas as pd
 from typing import List, Dict, Any
 from app.bot.backtest_engine import BacktestSimulator
 from app.strategies.strategy_factory import get_strategy
+from app.core.logging import logger
 
 # 가상 DB 보유 레코드 모사 클래스
 class MockHolding:
@@ -431,8 +432,8 @@ async def run_dynamic_tournament(start_date: str, end_date: str) -> List[Dict[st
         try:
             with open(cache_path, "r", encoding="utf-8") as f_c:
                 return json.load(f_c)
-        except Exception:
-            pass # 캐시 로딩 실패 시 라이브 계산으로 Fallback
+        except Exception as e:
+            logger.warning(f"Cache loading failed, falling back to live calc: {e}")
             
     tickers_list = ["AKAN", "WNW", "ASTC", "SDA", "HUBC", "MNTS", "ITP", "SES", "AEHL", "ODYS", "PRFX"]
     interval = "1h"
@@ -654,7 +655,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str) -> List[Dict[st
     try:
         with open(cache_path, "w", encoding="utf-8") as f_w:
             json.dump(results, f_w, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to save tournament cache: {e}")
         
     return results

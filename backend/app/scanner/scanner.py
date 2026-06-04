@@ -3,6 +3,7 @@ import asyncio
 import numpy as np
 import inspect
 from app.core.config import settings
+from app.core.logging import logger
 
 
 from app.translations.translator import Translator
@@ -91,7 +92,7 @@ async def _calculate_market_sentiment() -> str:
     """
     실제 시장 감정 분석 로직 (캐시 미스 시에만 호출).
     """
-    print("[Sentiment] Analyzing Market Condition (QQQ)...")
+    logger.info("[Sentiment] Analyzing Market Condition (QQQ)...")
     try:
         # 데이터 프로바이더 사용
         df = await fetch_index_data(MARKET_INDEX)
@@ -105,15 +106,15 @@ async def _calculate_market_sentiment() -> str:
         is_long_term_safe = ma20 > ma50   # 정배열 확인
         
         if is_bullish and is_long_term_safe:
-            print("[Sentiment] Market is BULLISH. Aggressive mode ON.")
+            logger.info("[Sentiment] Market is BULLISH. Aggressive mode ON.")
             return "BULLISH"
         elif not is_bullish:
-            print("[Sentiment] Market is BEARISH. Defensive mode ON.")
+            logger.info("[Sentiment] Market is BEARISH. Defensive mode ON.")
             return "BEARISH"
         else:
             return "NEUTRAL"
     except Exception as e:
-        print(f"[Sentiment] Error checking QQQ: {e}")
+        logger.error(f"[Sentiment] Error checking QQQ: {e}", exc_info=True)
         return "NEUTRAL"
 
 def get_ticker_name(ticker: str) -> str:
@@ -137,7 +138,7 @@ async def scan_market_expert() -> list:
     from app.bot.fx_cache import FXRateCache
     min_dollar_volume = 100000000.0 / FXRateCache.get_rate()
     
-    print(f"[Stage 1] Scanning {len(tickers)} tickers with 15m data (Min Vol: ${min_dollar_volume:,.2f})...")
+    logger.info(f"[Stage 1] Scanning {len(tickers)} tickers with 15m data (Min Vol: ${min_dollar_volume:,.2f})...")
     
     # 2. Stage 1: 15분봉 벌크 다운로드 및 필터링 (데이터 프로바이더 연동)
     chunk_size = 100
@@ -254,13 +255,13 @@ async def scan_market_expert() -> list:
                     continue
             await asyncio.sleep(0.1)
         except Exception as e:
-            print(f"[Stage 1] Error in chunk: {e}")
+            logger.error(f"[Stage 1] Error in chunk: {e}", exc_info=True)
 
     # 3. Stage 2: 후보군 정밀 분석
     candidates = sorted(all_results, key=lambda x: (x['rvol'], x['s1_score']), reverse=True)[:25]
     if not candidates: return []
     
-    print(f"[Stage 2] Precision scanning {len(candidates)} candidates via dynamic {sentiment} scorecard...")
+    logger.info(f"[Stage 2] Precision scanning {len(candidates)} candidates via dynamic {sentiment} scorecard...")
     
     final_results = []
     candidate_tickers = [c['ticker'] for c in candidates]
@@ -324,7 +325,7 @@ async def scan_market_expert() -> list:
                 is_fundamental_healthy = fundamental_map.get(ticker, True)
                 
                 if not is_fundamental_healthy:
-                    print(f"[Scanner Filter] {ticker} discarded - Negative earnings (not healthy).")
+                    logger.info(f"[Scanner Filter] {ticker} discarded - Negative earnings (not healthy).")
                     continue
                 
                 # AI 기반 뉴스 감성 판독 호출 (Gemini API + 로컬 룰 백업 하이브리드 엔진)
@@ -433,10 +434,10 @@ async def scan_market_expert() -> list:
                     }
                 })
             except Exception as item_err:
-                print(f"[Stage 2] Error processing candidate {ticker}: {item_err}")
+                logger.error(f"[Stage 2] Error processing candidate {ticker}: {item_err}", exc_info=True)
                 continue
     except Exception as e:
-        print(f"[Stage 2] Error: {e}")
+        logger.error(f"[Stage 2] Error: {e}", exc_info=True)
         
     return sorted(final_results, key=lambda x: -x['signal_score'])
 
@@ -576,5 +577,5 @@ async def analyze_single_ticker(ticker: str) -> dict:
             }
         }
     except Exception as e:
-        print(f"[Scanner] Dedicated analysis failed for {ticker}: {e}")
+        logger.error(f"[Scanner] Dedicated analysis failed for {ticker}: {e}", exc_info=True)
         return None

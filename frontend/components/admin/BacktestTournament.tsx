@@ -280,7 +280,10 @@ export function BacktestTournament() {
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#090d16', border: '1px solid #334155', borderRadius: '12px', fontSize: '11px', color: '#cbd5e1' }}
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      formatter={(value: any) => [`$${(value || 0).toLocaleString()}`, '']}
+                      formatter={(value: any) => {
+                        const numericValue = typeof value === 'number' ? value : Number(value);
+                        return [`$${(numericValue || 0).toLocaleString()}`, ''];
+                      }}
                     />
                     <Legend 
                       verticalAlign="top" 

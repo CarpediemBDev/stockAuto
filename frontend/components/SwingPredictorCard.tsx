@@ -49,14 +49,21 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
     try {
       const res = await scannerAPI.refreshSwingPredict({ signal });
       applySwingPrediction(res.data);
+      toast.success("스윙 갱신이 백그라운드에서 시작되었습니다. 잠시 후 자동 갱신됩니다.");
     } catch (error) {
       if (isCancel(error)) return;
       const msg = reportHandledError('Failed to refresh swing predictions', error);
       setSyncStatus('failed');
       toast.error(`스윙 예측 수동 갱신 실패: ${msg}`);
-    } finally {
       setRefreshing(false);
       setLoading(false);
+    } finally {
+      // API가 백그라운드 태스크 시작을 알리고 너무 빨리 종료되므로,
+      // 유저가 클릭 피드백을 눈으로 볼 수 있도록 최소 3초간 스피너 유지
+      setTimeout(() => {
+        setRefreshing(false);
+        setLoading(false);
+      }, 3000);
     }
   }, [applySwingPrediction]);
 
