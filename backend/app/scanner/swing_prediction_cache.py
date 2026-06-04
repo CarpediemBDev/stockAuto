@@ -23,6 +23,9 @@ DEFAULT_SWING_POOL = [
     "CRWD", "PANW", "ZS", "NET", "SNOW", "DDOG", "NOW", "CRM", "ADBE", "INTU",
     "LLY", "NVO", "V", "MA", "JPM", "WMT", "COST", "HD", "UBER", "ABNB",
     "RIVN", "LCID", "CVNA", "ROKU", "DOCU", "ZM", "GME", "AMC", "DKNG", "PENN",
+    # Penny / Small-cap / Meme stocks (1$ 미만/소형주)
+    "AKAN", "WNW", "ASTC", "SDA", "HUBC", "MNTS", "ITP", "SES", "AEHL", "ODYS", 
+    "PRFX", "FFIE", "GWAV", "CRKN", "HOLO", "KOSS", "PEGY", "SINT", "LUNR"
 ]
 
 _swing_prediction_cache_lock = threading.RLock()
