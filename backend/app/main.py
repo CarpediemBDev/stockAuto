@@ -47,6 +47,10 @@ async def lifespan(app: FastAPI):
     
     logger.info("Backend Lifespan Ending: Stopping Telegram Bot...")
     stop_telegram_bot()
+    
+    logger.info("Backend Lifespan Ending: Stopping Scheduler...")
+    from app.bot.scheduler import stop_scheduler
+    stop_scheduler()
 
 app = FastAPI(title="StockAuto API", description="주식 자동매매 API 서버", lifespan=lifespan)
 

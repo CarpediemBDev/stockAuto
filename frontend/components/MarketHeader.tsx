@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { TrendingUp, TrendingDown, DollarSign, Activity } from 'lucide-react';
 import { marketAPI, isCancel } from '@/lib/api';
-import { getErrorMessage } from '@/lib/utils';
+import { reportHandledError } from '@/lib/utils';
 import { toast } from "sonner";
 
 interface MarketData {
@@ -29,8 +29,7 @@ const MarketHeader = () => {
       setData(res.data);
     } catch (error) {
       if (isCancel(error)) return;
-      const msg = getErrorMessage(error);
-      console.error('Failed to fetch market overview:', msg);
+      const msg = reportHandledError('Failed to fetch market overview', error);
       toast.error(`시장 지표 갱신 실패: ${msg}`);
     }
   }, []);

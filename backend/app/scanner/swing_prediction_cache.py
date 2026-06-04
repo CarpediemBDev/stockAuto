@@ -72,17 +72,26 @@ def read_swing_prediction_cache(cache_key: tuple[str, ...], db: Session) -> dict
     with _swing_prediction_cache_lock:
         cached = _swing_prediction_cache.get(cache_key)
         if cached:
-            return {
+            response = {
                 "candidates": list(cached["candidates"]),
                 "sync_status": cached["sync_status"],
                 "updated_at": cached["updated_at"],
             }
+            if is_swing_prediction_refreshing(cache_key):
+                response["sync_status"] = SWING_SYNC_REFRESHING
+            return response
 
     snapshot = get_latest_swing_snapshot(db, cache_key)
     if not snapshot:
-        return empty_swing_response()
+        response = empty_swing_response()
+        if is_swing_prediction_refreshing(cache_key):
+            response["sync_status"] = SWING_SYNC_REFRESHING
+            write_swing_prediction_cache(cache_key, response["candidates"], response["sync_status"], response["updated_at"])
+        return response
 
     response = snapshot_to_swing_response(snapshot, SWING_SYNC_STALE)
+    if is_swing_prediction_refreshing(cache_key):
+        response["sync_status"] = SWING_SYNC_REFRESHING
     write_swing_prediction_cache(cache_key, response["candidates"], response["sync_status"], response["updated_at"])
     return response
 
@@ -117,15 +126,45 @@ def clear_swing_prediction_cache() -> None:
         _swing_prediction_refreshing.clear()
 
 
-async def refresh_swing_prediction_cache(cache_key: tuple[str, ...], db: Session | None = None) -> dict:
-    owns_session = db is None
-    session = db or SessionLocal()
+def reserve_swing_prediction_refresh(cache_key: tuple[str, ...]) -> bool:
     with _swing_prediction_refresh_lock:
         if cache_key in _swing_prediction_refreshing:
-            cached = read_swing_prediction_cache(cache_key, session)
-            cached["sync_status"] = SWING_SYNC_REFRESHING
-            return cached
+            return False
         _swing_prediction_refreshing.add(cache_key)
+        return True
+
+
+def release_swing_prediction_refresh(cache_key: tuple[str, ...]) -> None:
+    with _swing_prediction_refresh_lock:
+        _swing_prediction_refreshing.discard(cache_key)
+
+
+def is_swing_prediction_refreshing(cache_key: tuple[str, ...]) -> bool:
+    with _swing_prediction_refresh_lock:
+        return cache_key in _swing_prediction_refreshing
+
+
+def refreshing_swing_response(cache_key: tuple[str, ...], db: Session) -> dict:
+    cached = read_swing_prediction_cache(cache_key, db)
+    cached["sync_status"] = SWING_SYNC_REFRESHING
+    write_swing_prediction_cache(cache_key, cached["candidates"], cached["sync_status"], cached["updated_at"])
+    return cached
+
+
+async def refresh_swing_prediction_cache(
+    cache_key: tuple[str, ...],
+    db: Session | None = None,
+    refresh_reserved: bool = False,
+) -> dict:
+    owns_session = db is None
+    session = db or SessionLocal()
+    if not refresh_reserved and not reserve_swing_prediction_refresh(cache_key):
+        try:
+            return refreshing_swing_response(cache_key, session)
+        finally:
+            if owns_session:
+                session.close()
+    refreshing_swing_response(cache_key, session)
 
     try:
         candidates = await scan_next_day_candidates(list(cache_key))
@@ -140,11 +179,13 @@ async def refresh_swing_prediction_cache(cache_key: tuple[str, ...], db: Session
         cached = read_swing_prediction_cache(cache_key, session)
         if cached["candidates"]:
             cached["sync_status"] = SWING_SYNC_STALE
+            write_swing_prediction_cache(cache_key, cached["candidates"], cached["sync_status"], cached["updated_at"])
             return cached
-        return empty_swing_response(SWING_SYNC_FAILED)
+        failed_response = empty_swing_response(SWING_SYNC_FAILED)
+        write_swing_prediction_cache(cache_key, failed_response["candidates"], failed_response["sync_status"], failed_response["updated_at"])
+        return failed_response
     finally:
-        with _swing_prediction_refresh_lock:
-            _swing_prediction_refreshing.discard(cache_key)
+        release_swing_prediction_refresh(cache_key)
         if owns_session:
             session.close()
 

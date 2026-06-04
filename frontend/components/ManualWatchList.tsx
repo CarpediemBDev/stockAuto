@@ -5,7 +5,7 @@ import { Eye, Plus, Trash2, Bot } from 'lucide-react';
 import BotSignals from '@/components/BotSignals';
 import { watchlistAPI, translationAPI, scannerAPI } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
-import { getErrorMessage } from '@/lib/utils';
+import { reportHandledError } from '@/lib/utils';
 import { toast } from 'sonner';
 
 interface WatchItem {
@@ -44,7 +44,7 @@ const ManualWatchList = () => {
       setItems(watchRes.data);
       setSignals(scannerRes.data || []);
     } catch (error) {
-      console.error('Failed to fetch watchlist or scanner signals:', error);
+      reportHandledError('Failed to fetch watchlist or scanner signals', error);
     } finally {
       setLoading(false);
     }
@@ -55,7 +55,7 @@ const ManualWatchList = () => {
       const res = await translationAPI.getAll();
       setAllTranslations(res.data);
     } catch (error) {
-      console.error('Failed to fetch translations for autocomplete:', error);
+      reportHandledError('Failed to fetch translations for autocomplete', error);
     }
   }, []);
 
@@ -87,8 +87,7 @@ const ManualWatchList = () => {
       await fetchWatchList();
       toast.success(`${tickerClean} (${nameClean})이(가) 관심종목에 추가되었습니다.`);
     } catch (error) {
-      console.error('Failed to add ticker:', error);
-      toast.error(getErrorMessage(error));
+      toast.error(reportHandledError('Failed to add ticker', error));
     } finally {
       setIsSubmitting(false);
     }
@@ -103,8 +102,7 @@ const ManualWatchList = () => {
       await fetchWatchList();
       toast.success(`${ticker} (${nameKo})이(가) 관심종목에 추가되었습니다.`);
     } catch (error) {
-      console.error('Failed to add suggestion:', error);
-      toast.error(getErrorMessage(error));
+      toast.error(reportHandledError('Failed to add suggestion', error));
     } finally {
       setIsSubmitting(false);
     }
@@ -116,8 +114,8 @@ const ManualWatchList = () => {
       await fetchWatchList();
       toast.success("관심종목에서 성공적으로 제거되었습니다.");
     } catch (error) {
-      console.error('Failed to delete ticker:', error);
-      toast.error(`삭제 실패: ${getErrorMessage(error)}`);
+      const msg = reportHandledError('Failed to delete ticker', error);
+      toast.error(`삭제 실패: ${msg}`);
     }
   }, [fetchWatchList]);
 

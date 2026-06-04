@@ -6,7 +6,7 @@ import { scannerAPI, accountAPI, isCancel } from '@/lib/api';
 
 import { usePolling } from '@/hooks/usePolling';
 import { toast } from "sonner";
-import { getErrorMessage } from '@/lib/utils';
+import { reportHandledError } from '@/lib/utils';
 
 interface Signal {
   ticker: string;
@@ -40,8 +40,7 @@ const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
       }
     } catch (error) {
       if (isCancel(error)) return;
-      const msg = getErrorMessage(error);
-      console.error('Failed to fetch bot signals:', msg);
+      const msg = reportHandledError('Failed to fetch bot signals', error);
       toast.error(`시그널 갱신 실패: ${msg}`);
     } finally {
       setLoading(false);

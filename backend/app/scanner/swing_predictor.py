@@ -40,7 +40,7 @@ async def analyze_swing_setup(ticker: str) -> dict:
         ema50 = calculate_ema(close_series, 50)
         ema100 = calculate_ema(close_series, 100)
         
-        is_bullish_trend = current_close > ema50.iloc[-1]
+        is_bullish_trend = bool(current_close > ema50.iloc[-1])
         
         # 4. [지표 A] 마크 미너비니 VCP 패턴 진폭 축소 포착 (최대 25점)
         vcp_triggered = detect_vcp_pattern(df)

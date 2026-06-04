@@ -6,6 +6,7 @@ import ManualWatchList from "@/components/ManualWatchList";
 import { useState, useCallback, useEffect, startTransition } from "react";
 import { watchlistAPI } from "@/lib/api";
 import { useRouter } from "next/navigation";
+import { reportHandledError } from "@/lib/utils";
 
 interface WatchItem {
   id: number;
@@ -45,7 +46,7 @@ export default function ScannerPage() {
           setWatchlistTickers(res.data.map((item: WatchItem) => item.ticker));
         }
       } catch (error) {
-        console.error("Failed to fetch watchlist tickers", error);
+        reportHandledError("Failed to fetch watchlist tickers", error);
       }
     }
 
@@ -61,7 +62,7 @@ export default function ScannerPage() {
       await watchlistAPI.add(ticker, name);
       setWatchlistKey(prev => prev + 1);
     } catch (error) {
-      console.error("Failed to add to watchlist", error);
+      reportHandledError("Failed to add to watchlist", error);
     }
   }, []);
 

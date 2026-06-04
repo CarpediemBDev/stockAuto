@@ -1,3 +1,6 @@
+import asyncio
+import threading
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -66,15 +69,21 @@ def test_manual_overseas_scan_updates_latest_signal_cache(monkeypatch):
 
     monkeypatch.setattr(scanner_router_module, "scan_overseas_market", fake_scan_overseas_market)
     scanner_router_module.scheduler_mod.latest_scanned_signals = []
+    app, db, engine = create_authenticated_scanner_app()
 
-    with TestClient(create_scanner_app()) as client:
-        scan_response = client.get("/api/v1/scanner/overseas")
-        latest_response = client.get("/api/v1/scanner/latest")
+    try:
+        with TestClient(app) as client:
+            scan_response = client.post("/api/v1/scanner/overseas")
+            latest_response = client.get("/api/v1/scanner/latest")
 
-    assert scan_response.status_code == 200
-    assert scan_response.json()["data"] == signals
-    assert latest_response.status_code == 200
-    assert latest_response.json()["data"] == signals
+        assert scan_response.status_code == 200
+        assert scan_response.json()["message"] == "해외 마켓 스캔이 백그라운드에서 시작되었습니다."
+        assert latest_response.status_code == 200
+        assert latest_response.json()["data"] == signals
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
 
 
 def test_swing_prediction_cache_read_does_not_run_heavy_scan(monkeypatch):
@@ -103,27 +112,75 @@ def test_swing_prediction_cache_read_does_not_run_heavy_scan(monkeypatch):
 
 def test_swing_prediction_refresh_updates_cached_response(monkeypatch):
     expected = [{"ticker": "AAPL", "score": 77.0}]
+    refresh_done = threading.Event()
 
-    async def fake_scan_next_day_candidates(tickers):
-        assert "AAPL" in tickers
-        return expected
+    async def fake_refresh_swing_prediction_cache(cache_key, db_arg=None, refresh_reserved=False):
+        assert "AAPL" in cache_key
+        snapshot = swing_cache_module.write_swing_prediction_snapshot(db, cache_key, expected, swing_cache_module.SWING_SYNC_FRESH)
+        response = swing_cache_module.snapshot_to_swing_response(snapshot)
+        swing_cache_module.write_swing_prediction_cache(cache_key, response["candidates"], response["sync_status"], response["updated_at"])
+        swing_cache_module.release_swing_prediction_refresh(cache_key)
+        refresh_done.set()
+        return response
 
-    monkeypatch.setattr(swing_cache_module, "scan_next_day_candidates", fake_scan_next_day_candidates)
     swing_cache_module.clear_swing_prediction_cache()
     app, db, engine = create_authenticated_scanner_app()
+    monkeypatch.setattr(scanner_router_module, "refresh_swing_prediction_cache", fake_refresh_swing_prediction_cache)
     try:
         with TestClient(app) as client:
-            refresh_response = client.get("/api/v1/scanner/swing-predict/refresh")
+            refresh_response = client.post("/api/v1/scanner/swing-predict/refresh")
+            assert refresh_done.wait(timeout=2.0)
             cached_response = client.get("/api/v1/scanner/swing-predict")
 
         assert refresh_response.status_code == 200
         refresh_payload = refresh_response.json()["data"]
-        assert refresh_payload["candidates"] == expected
-        assert refresh_payload["sync_status"] == "fresh"
-        assert refresh_payload["updated_at"] is not None
+        assert refresh_payload["candidates"] == []
+        assert refresh_payload["sync_status"] == "refreshing"
+        assert refresh_payload["updated_at"] is None
         assert cached_response.status_code == 200
-        assert cached_response.json()["data"] == refresh_payload
+        cached_payload = cached_response.json()["data"]
+        assert cached_payload["candidates"] == expected
+        assert cached_payload["sync_status"] == "fresh"
+        assert cached_payload["updated_at"] is not None
         assert db.query(SwingPredictionSnapshot).count() == 1
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+        swing_cache_module.clear_swing_prediction_cache()
+
+
+def test_swing_prediction_refreshing_status_survives_next_poll(monkeypatch):
+    expected = [{"ticker": "AAPL", "score": 77.0}]
+
+    async def keep_refresh_reserved(cache_key, db_arg=None, refresh_reserved=False):
+        return None
+
+    swing_cache_module.clear_swing_prediction_cache()
+    app, db, engine = create_authenticated_scanner_app()
+    monkeypatch.setattr(scanner_router_module, "refresh_swing_prediction_cache", keep_refresh_reserved)
+    try:
+        cache_key = swing_cache_module.get_swing_cache_key(["AAPL"])
+        db.add(
+            SwingPredictionSnapshot(
+                cache_key=swing_cache_module.serialize_swing_cache_key(cache_key),
+                ticker_universe='["AAPL"]',
+                candidates_json='[{"ticker": "AAPL", "score": 77.0}]',
+                sync_status="fresh",
+            )
+        )
+        db.commit()
+
+        with TestClient(app) as client:
+            refresh_response = client.post("/api/v1/scanner/swing-predict/refresh")
+            polling_response = client.get("/api/v1/scanner/swing-predict")
+
+        assert refresh_response.status_code == 200
+        assert refresh_response.json()["data"]["sync_status"] == "refreshing"
+        assert polling_response.status_code == 200
+        polling_payload = polling_response.json()["data"]
+        assert polling_payload["candidates"] == expected
+        assert polling_payload["sync_status"] == "refreshing"
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
@@ -163,7 +220,32 @@ def test_swing_prediction_read_falls_back_to_persisted_snapshot():
         swing_cache_module.clear_swing_prediction_cache()
 
 
-def test_swing_prediction_refresh_failure_returns_stale_snapshot(monkeypatch):
+def test_swing_prediction_refresh_failure_persists_failed_status(monkeypatch):
+    async def fail_scan_next_day_candidates(tickers):
+        raise RuntimeError("upstream failed")
+
+    monkeypatch.setattr(swing_cache_module, "scan_next_day_candidates", fail_scan_next_day_candidates)
+    swing_cache_module.clear_swing_prediction_cache()
+    app, db, engine = create_authenticated_scanner_app()
+    try:
+        cache_key = swing_cache_module.get_swing_cache_key(["AAPL"])
+        response = asyncio.run(swing_cache_module.refresh_swing_prediction_cache(cache_key, db))
+        cached = swing_cache_module.read_swing_prediction_cache(cache_key, db)
+
+        assert response["sync_status"] == "failed"
+        assert cached == {
+            "candidates": [],
+            "sync_status": "failed",
+            "updated_at": None,
+        }
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+        swing_cache_module.clear_swing_prediction_cache()
+
+
+def test_swing_prediction_refresh_failure_persists_stale_status(monkeypatch):
     expected = [{"ticker": "AAPL", "score": 77.0}]
 
     async def fail_scan_next_day_candidates(tickers):
@@ -184,13 +266,63 @@ def test_swing_prediction_refresh_failure_returns_stale_snapshot(monkeypatch):
         )
         db.commit()
 
+        response = asyncio.run(swing_cache_module.refresh_swing_prediction_cache(cache_key, db))
+        cached = swing_cache_module.read_swing_prediction_cache(cache_key, db)
+
+        assert response["candidates"] == expected
+        assert response["sync_status"] == "stale"
+        assert cached["candidates"] == expected
+        assert cached["sync_status"] == "stale"
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+        swing_cache_module.clear_swing_prediction_cache()
+
+
+def test_swing_prediction_refresh_failure_returns_stale_snapshot(monkeypatch):
+    expected = [{"ticker": "AAPL", "score": 77.0}]
+    refresh_done = threading.Event()
+
+    async def fail_refresh_swing_prediction_cache(cache_key, db_arg=None, refresh_reserved=False):
+        cached = swing_cache_module.read_swing_prediction_cache(cache_key, db)
+        cached["sync_status"] = swing_cache_module.SWING_SYNC_STALE
+        swing_cache_module.write_swing_prediction_cache(
+            cache_key,
+            cached["candidates"],
+            cached["sync_status"],
+            cached["updated_at"],
+        )
+        swing_cache_module.release_swing_prediction_refresh(cache_key)
+        refresh_done.set()
+        return cached
+
+    swing_cache_module.clear_swing_prediction_cache()
+    app, db, engine = create_authenticated_scanner_app()
+    monkeypatch.setattr(scanner_router_module, "refresh_swing_prediction_cache", fail_refresh_swing_prediction_cache)
+    try:
+        cache_key = swing_cache_module.get_swing_cache_key(["AAPL"])
+        db.add(
+            SwingPredictionSnapshot(
+                cache_key=swing_cache_module.serialize_swing_cache_key(cache_key),
+                ticker_universe='["AAPL"]',
+                candidates_json='[{"ticker": "AAPL", "score": 77.0}]',
+                sync_status="fresh",
+            )
+        )
+        db.commit()
+
         with TestClient(app) as client:
-            response = client.get("/api/v1/scanner/swing-predict/refresh")
+            response = client.post("/api/v1/scanner/swing-predict/refresh")
+            assert refresh_done.wait(timeout=2.0)
+            cached_response = client.get("/api/v1/scanner/swing-predict")
 
         assert response.status_code == 200
         payload = response.json()["data"]
         assert payload["candidates"] == expected
-        assert payload["sync_status"] == "stale"
+        assert payload["sync_status"] == "refreshing"
+        assert cached_response.status_code == 200
+        assert cached_response.json()["data"]["sync_status"] == "stale"
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)

@@ -6,7 +6,7 @@ import { Compass, ShieldCheck, Flame, Layers, TrendingUp, TrendingDown, HelpCirc
 import { scannerAPI, isCancel } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
 import { toast } from 'sonner';
-import { cn, getErrorMessage } from '@/lib/utils';
+import { cn, reportHandledError } from '@/lib/utils';
 
 interface SwingPredictorCardProps {
   activeTab?: "15m" | "swing";
@@ -51,8 +51,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
       applySwingPrediction(res.data);
     } catch (error) {
       if (isCancel(error)) return;
-      const msg = getErrorMessage(error);
-      console.error('Failed to refresh swing predictions:', msg);
+      const msg = reportHandledError('Failed to refresh swing predictions', error);
       setSyncStatus('failed');
       toast.error(`스윙 예측 수동 갱신 실패: ${msg}`);
     } finally {
@@ -67,8 +66,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
       applySwingPrediction(res.data);
     } catch (error) {
       if (isCancel(error)) return;
-      const msg = getErrorMessage(error);
-      console.error('Failed to fetch swing predictions:', msg);
+      const msg = reportHandledError('Failed to fetch swing predictions', error);
       toast.error(`스윙 예측 데이터 수집 실패: ${msg}`);
     } finally {
       setLoading(false);

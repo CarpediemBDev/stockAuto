@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { reportAPI, tradeAPI } from '@/lib/api';
 import { TradeLogs, TradeLog } from '@/components/TradeLogs';
+import { reportHandledError } from '@/lib/utils';
 
 interface TradeItem {
   id: number;
@@ -65,7 +66,7 @@ export default function ReportPage() {
           setLoading(false);
         }
       } catch (error) {
-        console.error("Failed to fetch report stats or logs", error);
+        reportHandledError("Failed to fetch report stats or logs", error);
         if (isMounted) setLoading(false);
       }
     }
@@ -182,9 +183,9 @@ export default function ReportPage() {
           <TrendingUp className="w-5 h-5 text-emerald-400" />
           <span>누적 수익 곡선 (Cumulative Profit)</span>
         </h2>
-        <div className="h-96 w-full">
+        <div className="h-96 min-h-96 w-full min-w-0 overflow-hidden">
           {chart_data.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height={384} minWidth={0} minHeight={240}>
               <AreaChart data={chart_data} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorPnL" x1="0" y1="0" x2="0" y2="1">

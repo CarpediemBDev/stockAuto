@@ -8,7 +8,7 @@ import {
 import { accountAPI, scannerAPI, isCancel } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
 import { toast } from "sonner";
-import { cn, getErrorMessage } from '@/lib/utils';
+import { cn, reportHandledError } from '@/lib/utils';
 
 interface Holding {
   id: number;
@@ -168,8 +168,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
       setHoldings(res.data);
     } catch (error) {
       if (isCancel(error)) return;
-      const msg = getErrorMessage(error);
-      console.error('Failed to fetch holdings:', msg);
+      const msg = reportHandledError('Failed to fetch holdings', error);
       toast.error(`포트폴리오 갱신 실패: ${msg}`);
     } finally {
       setLoading(false);

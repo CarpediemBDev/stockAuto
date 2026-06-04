@@ -24,7 +24,7 @@ import {
   Legend 
 } from 'recharts';
 import { toast } from "sonner";
-import { getErrorMessage } from '@/lib/utils';
+import { reportHandledError } from '@/lib/utils';
 
 interface TickerStat {
   buys: number;
@@ -76,8 +76,7 @@ export function BacktestTournament() {
       }
     } catch (error) {
       if (isCancel(error)) return;
-      const msg = getErrorMessage(error);
-      console.error('Failed to fetch tournament results:', msg);
+      const msg = reportHandledError('Failed to fetch tournament results', error);
       toast.error(`대항전 결과 데이터 로드 실패: ${msg}`);
     } finally {
       setLoading(false);
@@ -260,8 +259,8 @@ export function BacktestTournament() {
                 Relative Asset Growth Curves (누적 자산 성장 곡선 비교)
               </span>
               
-              <div className="h-[320px] w-full text-slate-400">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[320px] min-h-[320px] w-full min-w-0 overflow-hidden text-slate-400">
+                <ResponsiveContainer width="100%" height={320} minWidth={0} minHeight={240}>
                   <LineChart data={chartData} margin={{ top: 10, right: 30, left: 10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b/30" vertical={false} />
                     <XAxis 

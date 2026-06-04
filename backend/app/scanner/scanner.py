@@ -39,8 +39,20 @@ MARKET_INDEX = "QQQ"
 _sentiment_cache = {"value": None, "timestamp": 0}
 SENTIMENT_TTL = 300  # 5분 (API 호출 빈도 대폭 감소)
 
-# 💡 동시 호출 방지용 비동기 락 (Race Condition 방지)
-_sentiment_lock = asyncio.Lock()
+# 💡 동시 호출 방지용 비동기 락 (이벤트 루프 종속성 이슈 해결을 위해 per-loop 로 관리)
+_sentiment_locks = {}
+
+def get_sentiment_lock() -> asyncio.Lock:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # 이벤트 루프가 없는 상황 (일부 테스트 환경 등)
+        return asyncio.Lock()
+    
+    loop_id = id(loop)
+    if loop_id not in _sentiment_locks:
+        _sentiment_locks[loop_id] = asyncio.Lock()
+    return _sentiment_locks[loop_id]
 
 def calculate_strategy_score(strategy_instance, row, regime: str, is_entry: bool = True, score_card: list | None = None) -> float:
     """세부 채점표를 지원하는 전략에만 score_card를 전달합니다."""
@@ -62,7 +74,8 @@ async def check_market_sentiment() -> str:
         return _sentiment_cache["value"]
 
     # 2. 캐시 미스 시 락 획득 후 계산 (동시성 제어)
-    async with _sentiment_lock:
+    lock = get_sentiment_lock()
+    async with lock:
         # 락 획득 후 다시 한 번 캐시 확인 (다른 태스크가 먼저 계산했을 수 있음)
         now = time.time()
         if _sentiment_cache["value"] is not None and (now - _sentiment_cache["timestamp"]) < SENTIMENT_TTL:

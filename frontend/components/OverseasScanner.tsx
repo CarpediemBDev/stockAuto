@@ -18,7 +18,7 @@ import {
   BarChart2,
   X
 } from "lucide-react";
-import { cn, getErrorMessage } from "@/lib/utils";
+import { cn, reportHandledError } from "@/lib/utils";
 import { scannerAPI, isCancel } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
 import { toast } from "sonner";
@@ -129,8 +129,7 @@ export function OverseasScanner({
       setLastUpdated(new Date());
     } catch (error) {
       if (isCancel(error)) return;
-      const msg = getErrorMessage(error);
-      console.error("Failed to fetch overseas scan results:", msg);
+      const msg = reportHandledError("Failed to fetch overseas scan results", error);
       toast.error(`스캐너 데이터 갱신 실패: ${msg}`);
     } finally {
       setIsLoading(false);
@@ -143,17 +142,24 @@ export function OverseasScanner({
     setIsLoading(true);
     setIsSpinning(true);
     try {
-      const res = await scannerAPI.runOverseasScan();
-      setResults(res.data);
-      setLastUpdated(new Date());
+      await scannerAPI.runOverseasScan();
+      toast.success("스캔이 백그라운드에서 시작되었습니다. 잠시 후 자동 갱신됩니다.");
+      // Note: We don't setResults here because the API now runs in the background
+      // and doesn't return the data immediately. usePolling will fetch it later.
     } catch (error) {
-      const msg = getErrorMessage(error);
-      console.error("Failed to run overseas scan:", msg);
+      const msg = reportHandledError("Failed to run overseas scan", error);
       toast.error(`수동 스캔 실패: ${msg}`);
-    } finally {
       setIsManualScanning(false);
       setIsLoading(false);
-      setTimeout(() => setIsSpinning(false), 1000); // 최소 1초 동안 스핀 애니메이션 유지
+      setIsSpinning(false);
+    } finally {
+      // Keep spinning/loading state slightly longer so user knows it's doing something,
+      // but let the polling take over eventually.
+      setTimeout(() => {
+        setIsManualScanning(false);
+        setIsLoading(false);
+        setIsSpinning(false);
+      }, 3000);
     }
   }, []);
 

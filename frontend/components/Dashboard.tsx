@@ -9,7 +9,7 @@ import { LiveTradeTicker } from "./LiveTradeTicker";
 
 import { botAPI, tradeAPI, isCancel } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
-import { getErrorMessage } from "@/lib/utils";
+import { reportHandledError } from "@/lib/utils";
 import { toast } from "sonner";
 
 export function Dashboard() {
@@ -27,8 +27,7 @@ export function Dashboard() {
 
     } catch (error) {
       if (isCancel(error)) return;
-      const msg = getErrorMessage(error);
-      console.error("Failed to fetch bot status:", msg);
+      const msg = reportHandledError("Failed to fetch bot status", error);
       toast.error(`봇 상태 조회 실패: ${msg}`);
     }
   }, []);
@@ -39,8 +38,7 @@ export function Dashboard() {
       setLogs(res.data);
     } catch (error) {
       if (isCancel(error)) return;
-      const msg = getErrorMessage(error);
-      console.error("Failed to fetch logs:", msg);
+      const msg = reportHandledError("Failed to fetch logs", error);
       toast.error(`로그 조회 실패: ${msg}`);
     }
   }, []);
@@ -57,8 +55,7 @@ export function Dashboard() {
       fetchStatus();
       toast.info("실전 투자 스위치가 변경되었습니다.");
     } catch (error) {
-      const msg = getErrorMessage(error);
-      console.error("Failed to toggle real switch:", msg);
+      const msg = reportHandledError("Failed to toggle real switch", error);
       toast.error(`스위치 조작 실패: ${msg}`);
     }
   };

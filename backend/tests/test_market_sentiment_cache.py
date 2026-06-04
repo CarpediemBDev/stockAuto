@@ -8,7 +8,7 @@ import app.scanner.scanner as scanner
 def reset_sentiment_cache() -> None:
     scanner._sentiment_cache["value"] = None
     scanner._sentiment_cache["timestamp"] = 0
-    scanner._sentiment_lock = asyncio.Lock()
+    scanner._sentiment_locks = {}
 
 
 @pytest.mark.asyncio

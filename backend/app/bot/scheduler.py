@@ -312,6 +312,8 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             # 실시간 가격 데이터 획득
             current_data = target_signal_map.get(clean_ticker)
             if not current_data:
+                current_data = ctx.signal_map.get(clean_ticker)
+            if not current_data:
                 current_data = await analyze_single_ticker(clean_ticker)
             
             if not current_data:
@@ -898,29 +900,11 @@ async def async_trading_loop():
                 if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, "scheduler_closed_no_holdings"):
                     logger.info("[Scheduler] Market is closed and no active users have holdings. Skipping all user flows.")
                 return
-            active_users = [u for u in active_users if u.user_id in holding_user_ids]
-
-        if market_open and not latest_scanned_signals:
-            logger.info("[Scheduler] Scanner cache is empty. Refreshing once before user trading flows.")
-            await refresh_scanner_cache()
-
-        if market_open and not latest_scanned_signals:
-            if not holding_user_ids:
-                if should_log_with_cooldown(SCANNER_CACHE_EMPTY_LOG_CACHE, "scheduler_empty_signals_no_holdings", 600.0):
-                    logger.warning("[Scheduler] Scanner cache is still empty and no holdings exist. Skipping user flows to prevent duplicate Yahoo Finance fallback calls.")
-                return
-            active_users = [u for u in active_users if u.user_id in holding_user_ids]
-
-        # 2. 캐시된 시그널 사용 (scan_overseas_market 직접 호출 X → Rate Limit 방지)
-        all_signals = latest_scanned_signals
-        signal_map = {s['ticker']: s for s in all_signals} if all_signals else {}
-
-        # 시장 레짐도 사용자별 데이터가 아니라 현재 자동매매 사이클의 공통 market context다.
-        sentiment = await check_market_sentiment()
-
-        # 환율은 사용자별 데이터가 아니라 현재 자동매매 사이클의 공통 market context다.
-        # 한 번만 조회한 값을 모든 사용자 플로우와 브로커 계산에 주입한다.
         exchange_rate = FXRateCache.get_rate()
+
+        sentiment = await check_market_sentiment()
+        all_signals = latest_scanned_signals
+        signal_map = {s['ticker']: s for s in all_signals}
 
         # 3. 각 활성 유저별 자동매매 시나리오 병렬 실행
         tasks = [run_user_trading_flow(u.user_id, signal_map, all_signals, exchange_rate, sentiment, market_open) for u in active_users]
@@ -958,10 +942,11 @@ def start_scheduler():
         # ⑤ 텔레그램 일일 리포트 발송: 매일 한국시간 17:10 (미국장 마감 직후)
         scheduler.add_job(send_daily_report_to_all_users_sync, 'cron', hour=17, minute=10, id='daily_telegram_report_job')
         scheduler.start()
+        print("[Scheduler] APScheduler Background Trading Engine Started.")
         logger.info("Background scheduler started (Multi-tenant 3-Mode Unified Engine).")
-        logger.info("  - market_overview_cache_job: every 1 min (market header cache refresh)")
-        logger.info("  - swing_prediction_startup_job: once on startup (daily swing prediction refresh)")
-        logger.info("  - swing_prediction_daily_job: daily at 08:00 KST (daily swing prediction refresh)")
-        logger.info("  - main_trade_job  : every 1 min  (trading logic, uses cached signals)")
-        logger.info("  - scanner_cache_job: every 10 min (market scan + cache refresh)")
-        logger.info("  - daily_telegram_report_job: daily at 17:10 KST")
+
+def stop_scheduler():
+    """앱 종료 시 백그라운드 스레드를 깔끔하게 종료하여 좀비 폴링 방지"""
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+        print("[Scheduler] APScheduler Background Trading Engine Stopped.")

@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { TradeLog } from "./TradeLogs";
 import { accountAPI, isCancel } from "@/lib/api";
-import { getErrorMessage } from "@/lib/utils";
+import { reportHandledError } from "@/lib/utils";
 
 
 interface AssetTrendChartProps {
@@ -34,8 +34,7 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
         }
       } catch (err) {
         if (isCancel(err)) return;
-        const msg = getErrorMessage(err);
-        console.error("[AssetTrendChart] Failed to fetch real asset:", msg);
+        reportHandledError("[AssetTrendChart] Failed to fetch real asset", err);
         if (active) {
           setIsLoading(false);
         }

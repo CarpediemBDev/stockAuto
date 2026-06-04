@@ -5,8 +5,7 @@ import { Terminal, Clock, Loader2, Server } from 'lucide-react';
 import { adminAPI, reportAPI, isCancel } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
 import { toast } from "sonner";
-import { getErrorMessage } from '@/lib/utils';
-import { cn } from '@/lib/utils';
+import { cn, reportHandledError } from '@/lib/utils';
 
 interface ActionLog {
   id: number;
@@ -26,8 +25,7 @@ export function SystemHealth() {
       await reportAPI.triggerManualReport();
       toast.success("텔레그램 일일 결산 리포트 발송에 성공했습니다.");
     } catch (error) {
-      const msg = getErrorMessage(error);
-      console.error("Failed to trigger manual report:", msg);
+      const msg = reportHandledError("Failed to trigger manual report", error);
       toast.error(`리포트 발송 실패: ${msg}`);
     } finally {
       setIsReportSending(false);
@@ -40,8 +38,7 @@ export function SystemHealth() {
       setLogs(res.data);
     } catch (error) {
       if (isCancel(error)) return;
-      const msg = getErrorMessage(error);
-      console.error('Failed to fetch system logs:', msg);
+      const msg = reportHandledError('Failed to fetch system logs', error);
       toast.error(`시스템 로그 갱신 실패: ${msg}`);
     } finally {
       setLoading(false);

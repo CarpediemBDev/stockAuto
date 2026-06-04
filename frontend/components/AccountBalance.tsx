@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback } from "react";
 import { Wallet, TrendingUp, DollarSign, PieChart, ShieldAlert, Zap, Crown, Activity } from "lucide-react";
-import { cn, getErrorMessage } from "@/lib/utils";
+import { cn, reportHandledError } from "@/lib/utils";
 import { accountAPI, isCancel } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
 import { toast } from "sonner";
@@ -45,8 +45,7 @@ export function AccountBalance({
       setError(null);
     } catch (err) {
       if (isCancel(err)) return;
-      const msg = getErrorMessage(err);
-      console.error("Failed to fetch account balance:", msg);
+      const msg = reportHandledError("Failed to fetch account balance", err);
       setError(msg);
       toast.error(`계좌 정보 갱신 실패: ${msg}`);
     }
