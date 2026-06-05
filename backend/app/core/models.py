@@ -35,6 +35,9 @@ class UserSettings(Base):
     kis_app_key = Column(String, nullable=True)
     kis_app_secret = Column(String, nullable=True)
     kis_account_no = Column(String, nullable=True)
+    kis_verification_status = Column(String, default="unverified", nullable=False)
+    kis_verified_trade_mode = Column(String, nullable=True)
+    kis_verified_at = Column(DateTime, nullable=True)
     
     # 텔레그램 설정
     telegram_chat_id = Column(String, nullable=True)

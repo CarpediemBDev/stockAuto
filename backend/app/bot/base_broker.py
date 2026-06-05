@@ -59,7 +59,7 @@ class BaseBroker(ABC):
         pass
 
     @abstractmethod
-    def buy_order(self, ticker: str, quantity: int, price: float) -> dict:
+    def buy_order(self, ticker: str, quantity: int, price: float, session: str = "REGULAR_MARKET") -> dict:
         """
         해외주식 매수 주문을 실행합니다.
 
@@ -75,7 +75,7 @@ class BaseBroker(ABC):
         pass
 
     @abstractmethod
-    def sell_order(self, ticker: str, quantity: int, price: float) -> dict:
+    def sell_order(self, ticker: str, quantity: int, price: float, session: str = "REGULAR_MARKET") -> dict:
         """
         해외주식 매도 주문을 실행합니다.
 

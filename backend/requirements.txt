@@ -12,3 +12,4 @@ pykrx
 apscheduler
 yfinance
 httpx
+cryptography

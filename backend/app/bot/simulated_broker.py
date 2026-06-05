@@ -184,7 +184,7 @@ class LocalSimulatedBroker(BaseBroker):
             print(f"[SimulatedBroker] Failed to fetch live price for {ticker}: {e}")
         return None
 
-    def buy_order(self, ticker: str, quantity: int, price: float) -> dict:
+    def buy_order(self, ticker: str, quantity: int, price: float, session: str = "REGULAR_MARKET") -> dict:
         """
         가상 매수 체결: yfinance 실시간 시세를 기반으로 즉시 체결을 시뮬레이션합니다.
         실제 증권사 API를 호출하지 않고 DB에 직접 Holding/TradeLog를 기록합니다.
@@ -203,7 +203,7 @@ class LocalSimulatedBroker(BaseBroker):
             "message": f"Simulated buy: {quantity} shares of {ticker} at ${fill_price:.2f}"
         }
 
-    def sell_order(self, ticker: str, quantity: int, price: float) -> dict:
+    def sell_order(self, ticker: str, quantity: int, price: float, session: str = "REGULAR_MARKET") -> dict:
         """
         가상 매도 체결: yfinance 실시간 시세를 기반으로 즉시 체결을 시뮬레이션합니다.
         """

@@ -3,6 +3,7 @@ import json
 import pandas as pd
 from datetime import datetime, timedelta
 from app.core.config import settings
+from app.core.credentials import decrypt_credential
 from app.scanner.data_provider import fetch_bulk_ohlcv_sync, fetch_ticker_fast_info
 
 # 티커 → 거래소 코드 메모리 캐시 (서버 수명 동안 유지)
@@ -22,9 +23,9 @@ class KISClient:
             )
 
         self.user_id = db_settings.user_id
-        self.app_key = db_settings.kis_app_key
-        self.app_secret = db_settings.kis_app_secret
-        self.account_no = db_settings.kis_account_no
+        self.app_key = decrypt_credential(db_settings.kis_app_key)
+        self.app_secret = decrypt_credential(db_settings.kis_app_secret)
+        self.account_no = decrypt_credential(db_settings.kis_account_no)
         self.trade_mode = trade_mode
         self.is_real = trade_mode == "REAL"
 
@@ -54,6 +55,15 @@ class KISClient:
 
         self.token = None
         self.token_expired_at = None
+
+    @staticmethod
+    def _order_division_for_session(session: str) -> str:
+        session_code = (session or "REGULAR_MARKET").upper()
+        if session_code == "PRE_MARKET":
+            return "32"
+        if session_code == "AFTER_HOURS":
+            return "34"
+        return "00"
 
     def get_hashkey(self, body):
         """
@@ -222,7 +232,7 @@ class KISClient:
             _exchange_cache[ticker] = "NASD"
             return "NASD"
 
-    def buy_overseas_order(self, ticker: str, quantity: int, price: float = 0):
+    def buy_overseas_order(self, ticker: str, quantity: int, price: float = 0, session: str = "REGULAR_MARKET"):
         """
         해외주식 매수 주문
         """
@@ -231,6 +241,7 @@ class KISClient:
 
         account_prefix = self.account_no.split("-")[0] if "-" in self.account_no else self.account_no[:8]
         account_suffix = self.account_no.split("-")[1] if "-" in self.account_no else self.account_no[8:]
+        ord_dvsn = self._order_division_for_session(session)
 
         body = {
             "CANO": account_prefix,
@@ -240,7 +251,7 @@ class KISClient:
             "ORD_QTY": str(quantity),
             "OVRS_ORD_UNPR": f"{price:.2f}",
             "ORD_SVR_DVSN_CD": "0",
-            "ORD_DVSN": "00"
+            "ORD_DVSN": ord_dvsn
         }
 
         tr_id = "JTTT1002U" if self.is_real else "VTTT1002U"
@@ -257,7 +268,7 @@ class KISClient:
             print(f"[KIS API] Order Exception: {e}")
             return None
 
-    def sell_overseas_order(self, ticker: str, quantity: int, price: float = 0):
+    def sell_overseas_order(self, ticker: str, quantity: int, price: float = 0, session: str = "REGULAR_MARKET"):
         """
         해외주식 매도 주문
         """
@@ -266,6 +277,7 @@ class KISClient:
 
         account_prefix = self.account_no.split("-")[0] if "-" in self.account_no else self.account_no[:8]
         account_suffix = self.account_no.split("-")[1] if "-" in self.account_no else self.account_no[8:]
+        ord_dvsn = self._order_division_for_session(session)
 
         body = {
             "CANO": account_prefix,
@@ -275,7 +287,7 @@ class KISClient:
             "ORD_QTY": str(quantity),
             "OVRS_ORD_UNPR": f"{price:.2f}",
             "ORD_SVR_DVSN_CD": "0",
-            "ORD_DVSN": "00"
+            "ORD_DVSN": ord_dvsn
         }
 
         tr_id = "JTTT1001U" if self.is_real else "VTTT1001U"

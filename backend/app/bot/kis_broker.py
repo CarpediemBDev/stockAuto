@@ -99,13 +99,13 @@ class KISBroker(BaseBroker):
             logger.error(f"[KISBroker] Failed to fetch holdings from KIS: {e}")
             raise e
 
-    def buy_order(self, ticker: str, quantity: int, price: float) -> dict:
+    def buy_order(self, ticker: str, quantity: int, price: float, session: str = "REGULAR_MARKET") -> dict:
         """
         KIS API를 통한 해외주식 매수 주문.
         KISClient.buy_overseas_order()를 호출하고, 체결 확인 후 결과를 표준 형식으로 매핑합니다.
         """
         try:
-            res = self.client.buy_overseas_order(ticker, quantity, price=price)
+            res = self.client.buy_overseas_order(ticker, quantity, price=price, session=session)
             if res and res.get("rt_cd") == "0":
                 order_no = res.get("output", {}).get("ODNO", "")
                 
@@ -139,13 +139,13 @@ class KISBroker(BaseBroker):
                 "message": f"KIS buy order exception: {str(e)}"
             }
 
-    def sell_order(self, ticker: str, quantity: int, price: float) -> dict:
+    def sell_order(self, ticker: str, quantity: int, price: float, session: str = "REGULAR_MARKET") -> dict:
         """
         KIS API를 통한 해외주식 매도 주문.
         체결 확인 폴링을 통해 실제 체결 데이터를 확인합니다.
         """
         try:
-            res = self.client.sell_overseas_order(ticker, quantity, price=price)
+            res = self.client.sell_overseas_order(ticker, quantity, price=price, session=session)
             if res and res.get("rt_cd") == "0":
                 order_no = res.get("output", {}).get("ODNO", "")
                 

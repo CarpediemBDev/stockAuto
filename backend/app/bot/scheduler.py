@@ -70,18 +70,30 @@ async def safe_broker_call(func, *args, **kwargs):
 ET = ZoneInfo("America/New_York") # 미국 동부 표준시(ET)는 DST를 자동으로 반영합니다
 
 
-def is_us_market_open() -> bool:
+def get_market_session() -> str:
     """
-    현재 시각이 미국 주식시장 정규 장중인지 확인합니다.
-    NYSE/NASDAQ 정규 장: 월요일~금요일 09:30~16:00 ET
+    현재 시각 기준 미국 주식시장 세션을 반환합니다.
+    - PRE_MARKET: 04:00 ~ 09:30 ET
+    - REGULAR_MARKET: 09:30 ~ 16:00 ET
+    - AFTER_HOURS: 16:00 ~ 20:00 ET
+    - CLOSED: 나머지 시간 및 주말
     """
     now_et = datetime.now(tz=ET)
     # 토/일 휴장
     if now_et.weekday() >= 5:
-        return False
-    market_open = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
-    market_close = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
-    return market_open <= now_et <= market_close
+        return "CLOSED"
+
+    t = now_et.time()
+    from datetime import time as dt_time
+
+    if dt_time(4, 0) <= t < dt_time(9, 30):
+        return "PRE_MARKET"
+    elif dt_time(9, 30) <= t < dt_time(16, 0):
+        return "REGULAR_MARKET"
+    elif dt_time(16, 0) <= t < dt_time(20, 0):
+        return "AFTER_HOURS"
+    else:
+        return "CLOSED"
 
 async def get_realtime_price(ticker: str) -> float | None:
     """
@@ -110,7 +122,7 @@ class TradingFlowContext:
     db: object
     user_id: int
     db_settings: UserSettings
-    market_open: bool
+    session: str
     sentiment: str
     exchange_rate: float
     holdings: list
@@ -129,14 +141,14 @@ def prepare_trading_flow_context(
     all_signals: list,
     exchange_rate: float,
     sentiment: str,
-    market_open: bool,
+    session: str,
 ) -> TradingFlowContext | None:
     db_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
     if not db_settings or not db_settings.is_running:
         return None
 
     holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
-    if not market_open and not holdings:
+    if session == "CLOSED" and not holdings:
         if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, ("closed_no_holdings", user_id)):
             log_action(
                 db,
@@ -167,7 +179,7 @@ def prepare_trading_flow_context(
         db=db,
         user_id=user_id,
         db_settings=db_settings,
-        market_open=market_open,
+        session=session,
         sentiment=sentiment,
         exchange_rate=exchange_rate,
         holdings=holdings,
@@ -265,7 +277,7 @@ async def calculate_slot_allocations(ctx: TradingFlowContext) -> dict:
     cash_balance_krw = balance_data.get("cash_balance", 10000000.0)
     total_asset_usd = total_asset_krw / ctx.exchange_rate
     cash_balance_usd = cash_balance_krw / ctx.exchange_rate
-    return ctx.ms_manager.calculate_slots_allocation(total_asset_usd, cash_balance_usd, ctx.holdings, ctx.sentiment)
+    return ctx.ms_manager.calculate_slots_allocation(total_asset_usd, cash_balance_usd, ctx.holdings, ctx.sentiment, ctx.session)
 
 
 async def build_target_signals(ctx: TradingFlowContext) -> list | None:
@@ -276,7 +288,7 @@ async def build_target_signals(ctx: TradingFlowContext) -> list | None:
             target_signals.append(sig)
 
     if not target_signals and not ctx.holdings:
-        if ctx.market_open and should_log_with_cooldown(SCANNER_CACHE_EMPTY_LOG_CACHE, ("empty_signals", ctx.user_id), 600.0):
+        if ctx.session != "CLOSED" and should_log_with_cooldown(SCANNER_CACHE_EMPTY_LOG_CACHE, ("empty_signals", ctx.user_id), 600.0):
             log_action(
                 ctx.db,
                 ctx.user_id,
@@ -387,7 +399,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     continue
                 
                 # 브로커 주문 시에는 순수 티커(clean_ticker) 전달
-                res = await safe_broker_call(broker.sell_order, clean_ticker, h.quantity, price=current_price)
+                res = await safe_broker_call(broker.sell_order, clean_ticker, h.quantity, price=current_price, session=ctx.session)
 
                 if res["success"]:
                     filled_price = res["filled_price"]
@@ -637,7 +649,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
     user_id = ctx.user_id
     ms_manager = ctx.ms_manager
 
-    if not ctx.market_open:
+    if ctx.session == "CLOSED":
         if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, ("closed_buy", user_id)):
             log_action(db, user_id, "[BUY SKIP] US market is currently closed. No new buy orders placed.", "INFO")
         return False
@@ -738,7 +750,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 )
                 continue
 
-            res = await safe_broker_call(ctx.broker.buy_order, clean_ticker, final_qty, price=current_price)
+            res = await safe_broker_call(ctx.broker.buy_order, clean_ticker, final_qty, price=current_price, session=ctx.session)
             if not res["success"]:
                 log_action(db, user_id, f"BUY FAILED: {prefixed_ticker} | {res['message']}", "ERROR")
                 continue
@@ -773,7 +785,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
 
     return True
 
-async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: list, exchange_rate: float, sentiment: str, market_open: bool):
+async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: list, exchange_rate: float, sentiment: str, session: str):
     """Runs one user's automated trading flow using cycle-level market context."""
     db = SessionLocal()
     try:
@@ -784,7 +796,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
             all_signals=all_signals,
             exchange_rate=exchange_rate,
             sentiment=sentiment,
-            market_open=market_open,
+            session=session,
         )
         if not ctx:
             return
@@ -840,7 +852,8 @@ async def refresh_scanner_cache():
     
     try:
         # 장 외 시간 API 비용/호출 낭비 방지 가드
-        if not is_us_market_open():
+        session = get_market_session()
+        if session == "CLOSED":
             logger.info("[Scanner Cache] Market is closed. Skipping scan to save API quotas.")
             return
 
@@ -894,8 +907,8 @@ async def async_trading_loop():
             .all()
         }
 
-        market_open = is_us_market_open()
-        if not market_open:
+        session = get_market_session()
+        if session == "CLOSED":
             if not holding_user_ids:
                 if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, "scheduler_closed_no_holdings"):
                     logger.info("[Scheduler] Market is closed and no active users have holdings. Skipping all user flows.")
@@ -907,7 +920,7 @@ async def async_trading_loop():
         signal_map = {s['ticker']: s for s in all_signals}
 
         # 3. 각 활성 유저별 자동매매 시나리오 병렬 실행
-        tasks = [run_user_trading_flow(u.user_id, signal_map, all_signals, exchange_rate, sentiment, market_open) for u in active_users]
+        tasks = [run_user_trading_flow(u.user_id, signal_map, all_signals, exchange_rate, sentiment, session) for u in active_users]
         await asyncio.gather(*tasks)
 
     except Exception as e:

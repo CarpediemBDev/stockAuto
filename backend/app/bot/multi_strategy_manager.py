@@ -158,7 +158,7 @@ class MultiStrategyManager:
         prefix = self.get_prefix_for_slot(slot_key)
         return f"{prefix}{clean_ticker.upper()}"
 
-    def calculate_slots_allocation(self, total_asset_usd: float, cash_balance_usd: float, holdings: list, sentiment: str = "BULLISH") -> dict:
+    def calculate_slots_allocation(self, total_asset_usd: float, cash_balance_usd: float, holdings: list, sentiment: str = "BULLISH", session: str = "REGULAR_MARKET") -> dict:
         """
         각 슬롯별로 현재의 주식 평가액과 격리된 예수금을 수학적 보존 법칙 하에 정밀 계산합니다.
         
@@ -166,6 +166,7 @@ class MultiStrategyManager:
          - cash_balance_usd: 계좌의 총 실제 가용 현금(예수금)
         - holdings: 데이터베이스의 Holdings 레코드 리스트
         - sentiment: 현재 시장 레짐 (BULLISH, BEARISH, NEUTRAL)
+        - session: 현재 시장 세션 (PRE_MARKET, REGULAR_MARKET, AFTER_HOURS, CLOSED)
         """
         # 1. 각 슬롯별 보유 종목의 평가액 실시간 합산
         slot_stock_values = {slot_key: 0.0 for slot_key in self.SLOTS}
@@ -210,6 +211,11 @@ class MultiStrategyManager:
             # 해당 슬롯의 주식 평가 가치
             slot_stock_val = slot_stock_values[slot_key]
             
+            # [시장 세션 방어 로직] 비정규장(PRE_MARKET, AFTER_HOURS)인 경우 신규 진입 예산 50% 삭감
+            if session in ("PRE_MARKET", "AFTER_HOURS"):
+                slot_cash = slot_cash * 0.5
+                logger.info(f"[MultiStrategyManager] {session} detected. Applied 50% penalty to cash budget for slot {slot_key}.")
+
             # 슬롯의 실시간 총 자산 가치 = 슬롯 가용 현금 + 슬롯 주식 평가 가치
             slot_total_asset = slot_cash + slot_stock_val
             

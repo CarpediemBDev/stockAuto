@@ -70,7 +70,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
     config = make_alembic_config(db_url)
 
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "b7c8d9e0f1a2"
+    assert script.get_current_head() == "c4f5a6b7c8d9"
 
     command.upgrade(config, "head")
 
@@ -94,6 +94,11 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
         market_overview_columns = {column["name"] for column in inspector.get_columns("market_overview_snapshots")}
         swing_prediction_columns = {column["name"] for column in inspector.get_columns("swing_prediction_snapshots")}
         assert "strategy_type" in user_settings_columns
+        assert {
+            "kis_verification_status",
+            "kis_verified_trade_mode",
+            "kis_verified_at",
+        } <= user_settings_columns
         assert {"realized_pnl", "return_rate"} <= trade_log_columns
         assert {
             "market_condition",

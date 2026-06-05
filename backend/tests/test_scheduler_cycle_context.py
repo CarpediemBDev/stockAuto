@@ -63,7 +63,7 @@ async def test_async_trading_loop_injects_cycle_context_once(monkeypatch):
         fx_calls += 1
         return 1517.56
 
-    async def fake_run_user_trading_flow(user_id, signal_map, all_signals, exchange_rate, sentiment, market_open):
+    async def fake_run_user_trading_flow(user_id, signal_map, all_signals, exchange_rate, sentiment, session):
         flow_calls.append(
             {
                 "user_id": user_id,
@@ -71,7 +71,7 @@ async def test_async_trading_loop_injects_cycle_context_once(monkeypatch):
                 "all_signals": all_signals,
                 "exchange_rate": exchange_rate,
                 "sentiment": sentiment,
-                "market_open": market_open,
+                "session": session,
             }
         )
 
@@ -79,7 +79,7 @@ async def test_async_trading_loop_injects_cycle_context_once(monkeypatch):
     scheduler.latest_scanned_signals = [{"ticker": "QQQ", "price": 100.0}]
 
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: fake_db)
-    monkeypatch.setattr(scheduler, "is_us_market_open", lambda: True)
+    monkeypatch.setattr(scheduler, "get_market_session", lambda: "REGULAR_MARKET")
     monkeypatch.setattr(scheduler, "check_market_sentiment", fake_check_market_sentiment)
     monkeypatch.setattr(scheduler.FXRateCache, "get_rate", fake_get_rate)
     monkeypatch.setattr(scheduler, "run_user_trading_flow", fake_run_user_trading_flow)
@@ -93,7 +93,7 @@ async def test_async_trading_loop_injects_cycle_context_once(monkeypatch):
     assert [call["user_id"] for call in flow_calls] == [1, 2]
     assert all(call["exchange_rate"] == 1517.56 for call in flow_calls)
     assert all(call["sentiment"] == "BULLISH" for call in flow_calls)
-    assert all(call["market_open"] is True for call in flow_calls)
+    assert all(call["session"] == "REGULAR_MARKET" for call in flow_calls)
     assert all(call["signal_map"] == {"QQQ": {"ticker": "QQQ", "price": 100.0}} for call in flow_calls)
 
 

@@ -102,11 +102,11 @@ class FakeBroker:
             "cash_balance": 15_000_000.0,
         }
 
-    def buy_order(self, ticker, quantity, price=None):
+    def buy_order(self, ticker, quantity, price=None, session="REGULAR_MARKET"):
         self.buy_calls.append((ticker, quantity, price))
         return dict(self.buy_result)
 
-    def sell_order(self, ticker, quantity, price=None):
+    def sell_order(self, ticker, quantity, price=None, session="REGULAR_MARKET"):
         self.sell_calls.append((ticker, quantity, price))
         return dict(self.sell_result)
 
@@ -152,7 +152,7 @@ class FakeStrategyManager:
     def get_focused_tickers(self, all_signals):
         return [signal["ticker"] for signal in all_signals]
 
-    def calculate_slots_allocation(self, total_asset_usd, cash_balance_usd, holdings, sentiment):
+    def calculate_slots_allocation(self, total_asset_usd, cash_balance_usd, holdings, sentiment, session="REGULAR_MARKET"):
         return {
             "slot": {
                 "cash_balance": cash_balance_usd,
@@ -226,7 +226,7 @@ async def test_run_user_trading_flow_records_successful_new_buy(monkeypatch):
         all_signals=[signal],
         exchange_rate=1500.0,
         sentiment="BULLISH",
-        market_open=True,
+        session="REGULAR_MARKET",
     )
 
     assert fake_broker.buy_calls == [("AAPL", 10, 100.0)]
@@ -263,7 +263,7 @@ async def test_run_user_trading_flow_skips_holding_write_when_buy_fails(monkeypa
         all_signals=[signal],
         exchange_rate=1500.0,
         sentiment="BULLISH",
-        market_open=True,
+        session="REGULAR_MARKET",
     )
 
     assert fake_broker.buy_calls == [("AAPL", 10, 100.0)]
@@ -312,7 +312,7 @@ async def test_run_user_trading_flow_records_successful_sell(monkeypatch):
             all_signals=[signal],
             exchange_rate=1500.0,
             sentiment="BULLISH",
-            market_open=True,
+            session="REGULAR_MARKET",
         )
     finally:
         scheduler.BREACH_COUNT_CACHE.pop((1, "slot_AAPL"), None)

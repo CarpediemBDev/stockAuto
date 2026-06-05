@@ -101,7 +101,7 @@ def make_locked_context(db=None, broker=None, holdings=None):
     return SimpleNamespace(
         db=db or FakeDb(),
         user_id=1,
-        market_open=True,
+        session="REGULAR_MARKET",
         sentiment="BULLISH",
         exchange_rate=1500.0,
         holdings=holdings or [],
