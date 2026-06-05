@@ -434,7 +434,7 @@ export default function PersonalSettingsPage() {
                             type="text"
                             value={kisForm.kis_app_key}
                             onChange={(e) => setKisForm((prev) => ({ ...prev, kis_app_key: e.target.value }))}
-                            placeholder="Enter APP KEY"
+                            placeholder={dbSettings.has_kis_credentials ? "•••••••••••••••• (새로 입력 시 덮어쓰기)" : "Enter APP KEY"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="off"
                           />
@@ -446,7 +446,7 @@ export default function PersonalSettingsPage() {
                             type="password"
                             value={kisForm.kis_app_secret}
                             onChange={(e) => setKisForm((prev) => ({ ...prev, kis_app_secret: e.target.value }))}
-                            placeholder="Enter APP SECRET"
+                            placeholder={dbSettings.has_kis_credentials ? "•••••••••••••••• (새로 입력 시 덮어쓰기)" : "Enter APP SECRET"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="new-password"
                           />
@@ -458,7 +458,7 @@ export default function PersonalSettingsPage() {
                             type="text"
                             value={kisForm.kis_account_no}
                             onChange={(e) => setKisForm((prev) => ({ ...prev, kis_account_no: e.target.value }))}
-                            placeholder="12345678-01"
+                            placeholder={dbSettings.has_kis_credentials ? `${dbSettings.kis_account_no_masked || "••••••••"} (새로 입력 시 덮어쓰기)` : "12345678-01"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="off"
                           />
