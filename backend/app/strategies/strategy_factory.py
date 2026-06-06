@@ -302,6 +302,14 @@ def get_strategy(strategy_type: str) -> BaseStrategy:
         from app.strategies.vix_hedging import VixHedging
         return VixHedging()
         
+    elif strategy_type == "premarket_breakout":
+        from app.strategies.premarket_breakout import PremarketBreakout
+        return PremarketBreakout()
+        
+    elif strategy_type == "trend_stabilization":
+        from app.strategies.trend_stabilization import TrendStabilization
+        return TrendStabilization()
+        
     else:
         # 매칭 실패 시 기본값으로 '마스터 레짐스위칭' 반환
         from app.strategies.regime_switching import RegimeSwitching

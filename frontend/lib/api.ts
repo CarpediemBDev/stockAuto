@@ -180,6 +180,7 @@ export const translationAPI = {
 export const reportAPI = {
   getStats: (config?: AxiosRequestConfig) => api.get('/report/stats', config),
   triggerManualReport: () => api.post('/report/trigger-manual-report'),
+  triggerPersonalReport: () => api.post('/report/trigger-personal-report'),
 };
 
 export const adminAPI = {

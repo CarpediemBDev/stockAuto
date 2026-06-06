@@ -374,6 +374,55 @@ def send_daily_report_to_all_users_sync():
     finally:
         db.close()
 
+def send_daily_report_to_user_sync(user_id: int):
+    """
+    특정 사용자에게만 당일 매매 성적을 텔레그램으로 발송합니다. (수동 트리거용)
+    """
+    from datetime import UTC, datetime, timedelta
+    from app.core.models import TradeLog
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=24)
+
+        u = db.query(UserSettings).filter(UserSettings.user_id == user_id, UserSettings.telegram_enabled == True).first()
+        if not u:
+            return
+
+        sells = db.query(TradeLog).filter(
+            TradeLog.user_id == user_id,
+            TradeLog.trade_type == "SELL",
+            TradeLog.executed_at >= cutoff,
+            TradeLog.realized_pnl.isnot(None)
+        ).all()
+
+        if not sells:
+            send_message_sync(user_id, "⚠️ 최근 24시간 동안 매도(수익 실현) 내역이 없어 리포트를 발송할 수 없습니다.")
+            return
+
+        total_trades = len(sells)
+        win_trades = sum(1 for s in sells if float(s.realized_pnl) > 0)
+        total_pnl = sum(float(s.realized_pnl) for s in sells)
+        win_rate = (win_trades / total_trades) * 100
+
+        msg = (
+            f"📊 *[일일 매매 리포트 (수동 요청)]*\n\n"
+            f"요청하신 지난 24시간 거래 결과를 안내해 드립니다.\n"
+            f"───────────────────\n"
+            f"• *총 매도 횟수:* `{total_trades}회`\n"
+            f"• *승리 횟수:* `{win_trades}회`\n"
+            f"• *일일 승률:* `{win_rate:.1f}%`\n"
+            f"• *일일 실현 수익금:* `${total_pnl:,.2f}`\n"
+            f"───────────────────\n"
+            f"더 상세한 누적 성적표 및 수익금 우상향 곡선은 웹 대시보드의 **[📊 성적표]** 메뉴에서 직접 확인하실 수 있습니다!"
+        )
+
+        send_message_sync(user_id, msg)
+    except Exception as e:
+        logger.exception(f"[TelegramBot] Error sending daily report to user {user_id}")
+    finally:
+        db.close()
+
 def start_telegram_bot():
     """
     서버 구동 시 단일 글로벌 텔레그램 봇 폴링 스레드를 기동합니다.

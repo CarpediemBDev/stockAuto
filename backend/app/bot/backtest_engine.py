@@ -719,6 +719,15 @@ class BacktestSimulator:
                     metrics['is_vix_ok'] = (qqq_vol < qqq_vol.rolling(60).mean() * 1.2).astype(float)
                 else:
                     metrics['is_vix_ok'] = 1.0
+                    
+                # [3-25] 프리마켓 고점 돌파 매매 프록시 지표
+                metrics['premarket_high'] = df['High'].shift(1).rolling(10).max().fillna(df['High'])
+                metrics['premarket_max_volume'] = df['Volume'].rolling(20).mean().fillna(df['Volume']) * 1.5
+                
+                # [3-26] 추세 안정화 눌림목 프록시 지표
+                metrics['change_pct'] = ((df['Close'] / df['Close'].shift(20) - 1) * 100).fillna(0.0)
+                metrics['trendline_support'] = metrics['EMA20']
+                metrics['is_uptrend'] = (metrics['EMA9'] > metrics['EMA20'])
                 
                 self.processed_metrics[ticker] = metrics
                 
