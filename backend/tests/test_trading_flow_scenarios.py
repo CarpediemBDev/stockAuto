@@ -274,6 +274,75 @@ async def test_run_user_trading_flow_skips_holding_write_when_buy_fails(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_run_user_trading_flow_stops_bot_when_buy_fill_is_unconfirmed(monkeypatch):
+    signal = make_signal()
+    user_settings = make_user_settings()
+    fake_db = FakeDb(user_settings=user_settings)
+    fake_broker = FakeBroker(
+        buy_result={
+            "success": False,
+            "order_submitted": True,
+            "fill_confirmed": False,
+            "status": "PENDING",
+            "order_no": "BUY-PENDING",
+            "filled_qty": 0,
+            "filled_price": 0.0,
+            "message": "pending",
+        }
+    )
+    logs, messages = install_flow_fakes(monkeypatch, fake_db, fake_broker, FakeStrategy())
+
+    await scheduler.run_user_trading_flow(
+        user_id=1,
+        signal_map={"AAPL": signal},
+        all_signals=[signal],
+        exchange_rate=1500.0,
+        sentiment="BULLISH",
+        session="REGULAR_MARKET",
+    )
+
+    assert user_settings.is_running is False
+    assert fake_db.holdings == []
+    assert any("ORDER RECONCILIATION" in message for _level, message in logs)
+    assert any("BUY-PENDING" in message for _user_id, message in messages)
+
+
+@pytest.mark.asyncio
+async def test_run_user_trading_flow_records_partial_buy_then_stops_bot(monkeypatch):
+    signal = make_signal()
+    user_settings = make_user_settings()
+    fake_db = FakeDb(user_settings=user_settings)
+    fake_broker = FakeBroker(
+        buy_result={
+            "success": True,
+            "order_submitted": True,
+            "fill_confirmed": False,
+            "status": "PARTIAL",
+            "order_no": "BUY-PARTIAL",
+            "filled_qty": 4,
+            "filled_price": 100.5,
+            "message": "partial",
+        }
+    )
+    logs, messages = install_flow_fakes(monkeypatch, fake_db, fake_broker, FakeStrategy())
+
+    await scheduler.run_user_trading_flow(
+        user_id=1,
+        signal_map={"AAPL": signal},
+        all_signals=[signal],
+        exchange_rate=1500.0,
+        sentiment="BULLISH",
+        session="REGULAR_MARKET",
+    )
+
+    assert len(fake_db.holdings) == 1
+    assert fake_db.holdings[0].quantity == 4
+    assert fake_db.holdings[0].avg_price == 100.5
+    assert user_settings.is_running is False
+    assert any("BUY-PARTIAL" in message for _user_id, message in messages)
+
+
+@pytest.mark.asyncio
 async def test_run_user_trading_flow_records_successful_sell(monkeypatch):
     signal = make_signal()
     holding = Holding(
@@ -332,3 +401,129 @@ async def test_run_user_trading_flow_records_successful_sell(monkeypatch):
     assert trade_log.realized_pnl < 0
     assert any("SUCCESS: slot_AAPL sold" in message for _level, message in logs)
     assert any("SELL-1" in message for _user_id, message in messages)
+
+
+@pytest.mark.asyncio
+async def test_run_user_trading_flow_stops_bot_without_deleting_unconfirmed_sell(monkeypatch):
+    signal = make_signal()
+    user_settings = make_user_settings()
+    holding = Holding(
+        user_id=1,
+        ticker="slot_AAPL",
+        ticker_name="Apple",
+        avg_price=120.0,
+        quantity=5,
+        highest_price=120.0,
+        regime_mode="BULLISH",
+        buy_stage=3,
+    )
+    fake_db = FakeDb(user_settings=user_settings, holdings=[holding])
+    fake_broker = FakeBroker(
+        holdings_payload=[
+            {
+                "ticker": "AAPL",
+                "ticker_name": "Apple",
+                "quantity": 5,
+                "avg_price": 120.0,
+            }
+        ],
+        sell_result={
+            "success": False,
+            "order_submitted": True,
+            "fill_confirmed": False,
+            "status": "PENDING",
+            "order_no": "SELL-PENDING",
+            "filled_qty": 0,
+            "filled_price": 0.0,
+            "message": "pending",
+        },
+    )
+    logs, messages = install_flow_fakes(
+        monkeypatch,
+        fake_db,
+        fake_broker,
+        FakeStrategy(entry_score=0),
+    )
+
+    scheduler.BREACH_COUNT_CACHE[(1, "slot_AAPL")] = 1
+    try:
+        await scheduler.run_user_trading_flow(
+            user_id=1,
+            signal_map={"AAPL": signal},
+            all_signals=[signal],
+            exchange_rate=1500.0,
+            sentiment="BULLISH",
+            session="REGULAR_MARKET",
+        )
+    finally:
+        scheduler.BREACH_COUNT_CACHE.pop((1, "slot_AAPL"), None)
+
+    assert fake_db.holdings == [holding]
+    assert fake_db.deleted == []
+    assert fake_db.trade_logs == []
+    assert user_settings.is_running is False
+    assert any("SELL-PENDING" in message for _user_id, message in messages)
+
+
+@pytest.mark.asyncio
+async def test_run_user_trading_flow_keeps_remaining_quantity_after_partial_sell(monkeypatch):
+    signal = make_signal()
+    user_settings = make_user_settings()
+    holding = Holding(
+        user_id=1,
+        ticker="slot_AAPL",
+        ticker_name="Apple",
+        avg_price=120.0,
+        quantity=5,
+        highest_price=120.0,
+        regime_mode="BULLISH",
+        buy_stage=3,
+    )
+    fake_db = FakeDb(user_settings=user_settings, holdings=[holding])
+    fake_broker = FakeBroker(
+        holdings_payload=[
+            {
+                "ticker": "AAPL",
+                "ticker_name": "Apple",
+                "quantity": 5,
+                "avg_price": 120.0,
+            }
+        ],
+        sell_result={
+            "success": True,
+            "order_submitted": True,
+            "fill_confirmed": False,
+            "status": "PARTIAL",
+            "order_no": "SELL-PARTIAL",
+            "filled_qty": 2,
+            "filled_price": 100.0,
+            "message": "partial",
+        },
+    )
+    logs, messages = install_flow_fakes(
+        monkeypatch,
+        fake_db,
+        fake_broker,
+        FakeStrategy(entry_score=0),
+    )
+
+    scheduler.BREACH_COUNT_CACHE[(1, "slot_AAPL")] = 1
+    try:
+        await scheduler.run_user_trading_flow(
+            user_id=1,
+            signal_map={"AAPL": signal},
+            all_signals=[signal],
+            exchange_rate=1500.0,
+            sentiment="BULLISH",
+            session="REGULAR_MARKET",
+        )
+    finally:
+        scheduler.BREACH_COUNT_CACHE.pop((1, "slot_AAPL"), None)
+
+    assert holding.quantity == 3
+    assert fake_db.deleted == []
+    assert len(fake_db.trade_logs) == 1
+    assert fake_db.trade_logs[0].quantity == 2
+    assert user_settings.is_running is False
+    assert any("partially sold" in message for _level, message in logs)
+    assert any("SELL-PARTIAL" in message for _user_id, message in messages)

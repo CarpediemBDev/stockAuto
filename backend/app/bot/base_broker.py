@@ -22,7 +22,7 @@ class BaseBroker(ABC):
     def get_account_balance(self, exchange_rate: float | None = None) -> dict:
         """
         계좌 예수금, 주식 평가금, 총자산 및 실시간 수익률을 딕셔너리로 조회하여 반환합니다.
-        
+
         반환 규격:
         {
             "total_asset": int,
@@ -39,7 +39,7 @@ class BaseBroker(ABC):
     def get_holdings(self, exchange_rate: float | None = None) -> list:
         """
         현재 계좌의 실시간 해외주식 보유 포트폴리오 리스트를 반환합니다.
-        
+
         반환 규격:
         [
             {
@@ -59,7 +59,14 @@ class BaseBroker(ABC):
         pass
 
     @abstractmethod
-    def buy_order(self, ticker: str, quantity: int, price: float, session: str = "REGULAR_MARKET") -> dict:
+    def buy_order(
+        self,
+        ticker: str,
+        quantity: int,
+        price: float,
+        session: str = "REGULAR_MARKET",
+        client_order_id: str | None = None,
+    ) -> dict:
         """
         해외주식 매수 주문을 실행합니다.
 
@@ -75,7 +82,14 @@ class BaseBroker(ABC):
         pass
 
     @abstractmethod
-    def sell_order(self, ticker: str, quantity: int, price: float, session: str = "REGULAR_MARKET") -> dict:
+    def sell_order(
+        self,
+        ticker: str,
+        quantity: int,
+        price: float,
+        session: str = "REGULAR_MARKET",
+        client_order_id: str | None = None,
+    ) -> dict:
         """
         해외주식 매도 주문을 실행합니다.
 
@@ -88,4 +102,19 @@ class BaseBroker(ABC):
             "message": str
         }
         """
+        pass
+
+    @abstractmethod
+    def check_order_status(self, order_no: str, order_date: str | None = None) -> dict:
+        """증권사 주문의 누적 체결 상태를 조회합니다."""
+        pass
+
+    @abstractmethod
+    def list_order_history(self, start_date: str, end_date: str) -> list[dict]:
+        """지정 기간의 주문·체결내역 전체 페이지를 정규화하여 반환합니다."""
+        pass
+
+    @abstractmethod
+    def get_order_metadata(self, ticker: str, session: str) -> dict:
+        """주문 사전 원장에 저장할 거래소와 주문 구분 코드를 반환합니다."""
         pass

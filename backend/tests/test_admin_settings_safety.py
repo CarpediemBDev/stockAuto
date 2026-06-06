@@ -15,6 +15,17 @@ from app.admin.router import (
 from app.core.credentials import ENCRYPTED_PREFIX, decrypt_credential
 
 
+class FakeQuery:
+    def filter(self, *args, **kwargs):
+        return self
+
+    def first(self):
+        return None
+
+    def all(self):
+        return []
+
+
 class FakeDb:
     def __init__(self):
         self.added = []
@@ -23,6 +34,9 @@ class FakeDb:
 
     def add(self, item):
         self.added.append(item)
+
+    def query(self, *args, **kwargs):
+        return FakeQuery()
 
     def commit(self):
         self.commit_count += 1

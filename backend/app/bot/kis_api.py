@@ -56,8 +56,9 @@ class KISClient:
         self.token = None
         self.token_expired_at = None
 
-    @staticmethod
-    def _order_division_for_session(session: str) -> str:
+    def _order_division_for_session(self, session: str) -> str:
+        if not self.is_real:
+            return "00"
         session_code = (session or "REGULAR_MARKET").upper()
         if session_code == "PRE_MARKET":
             return "32"
@@ -150,7 +151,7 @@ class KISClient:
         # 미국 주식(해외 주식) 전용 잔고 조회
         tr_id_balance = "CTRP6504R" if self.is_real else "VTRP6504R"
         headers = self._get_default_headers(tr_id_balance)
-        
+
         params = {
             "CANO": account_prefix,
             "ACNT_PRDT_CD": account_suffix,
@@ -160,22 +161,22 @@ class KISClient:
             "CTX_AREA_FK200": "",
             "CTX_AREA_NK200": ""
         }
-        
+
         url = f"{self.base_url}/uapi/overseas-stock/v1/trading/inquire-present-balance"
         try:
             res = requests.get(url, headers=headers, params=params, timeout=10)
             if res.status_code == 200:
                 data = res.json()
                 output2 = data.get("output2", {})
-                
+
                 # KIS 해외 주식 잔고 API output2 매핑
                 total_asset = int(float(output2.get("tot_asst_amt", 0)))
                 usd_cash = float(output2.get("frcr_use_psbl_amt", 0))
                 cash_balance = int(usd_cash * exchange_rate)
                 stock_balance = int(float(output2.get("tot_evlu_amt", 0)))
-                
+
                 profit_rate = float(output2.get("tot_evlu_pfls_rt", 0.0))
-                
+
                 try:
                     profit_loss = int(float(output2.get("tot_evlu_pft_amt", 0)))
                 except Exception:
@@ -232,7 +233,20 @@ class KISClient:
             _exchange_cache[ticker] = "NASD"
             return "NASD"
 
-    def buy_overseas_order(self, ticker: str, quantity: int, price: float = 0, session: str = "REGULAR_MARKET"):
+    @staticmethod
+    def _client_order_reference(client_order_id: str | None) -> str:
+        if not client_order_id:
+            return ""
+        return "".join(char for char in client_order_id if char.isalnum())[:20]
+
+    def buy_overseas_order(
+        self,
+        ticker: str,
+        quantity: int,
+        price: float = 0,
+        session: str = "REGULAR_MARKET",
+        client_order_id: str | None = None,
+    ):
         """
         해외주식 매수 주문
         """
@@ -250,11 +264,13 @@ class KISClient:
             "PDNO": ticker,
             "ORD_QTY": str(quantity),
             "OVRS_ORD_UNPR": f"{price:.2f}",
+            "CTAC_TLNO": "",
+            "MGCO_APTM_ODNO": self._client_order_reference(client_order_id),
             "ORD_SVR_DVSN_CD": "0",
             "ORD_DVSN": ord_dvsn
         }
 
-        tr_id = "JTTT1002U" if self.is_real else "VTTT1002U"
+        tr_id = "TTTT1002U" if self.is_real else "VTTT1002U"
         headers = self._get_default_headers(tr_id, self.get_hashkey(body))
 
         url = f"{self.base_url}/uapi/overseas-stock/v1/trading/order"
@@ -268,7 +284,14 @@ class KISClient:
             print(f"[KIS API] Order Exception: {e}")
             return None
 
-    def sell_overseas_order(self, ticker: str, quantity: int, price: float = 0, session: str = "REGULAR_MARKET"):
+    def sell_overseas_order(
+        self,
+        ticker: str,
+        quantity: int,
+        price: float = 0,
+        session: str = "REGULAR_MARKET",
+        client_order_id: str | None = None,
+    ):
         """
         해외주식 매도 주문
         """
@@ -286,11 +309,14 @@ class KISClient:
             "PDNO": ticker,
             "ORD_QTY": str(quantity),
             "OVRS_ORD_UNPR": f"{price:.2f}",
+            "CTAC_TLNO": "",
+            "MGCO_APTM_ODNO": self._client_order_reference(client_order_id),
+            "SLL_TYPE": "00",
             "ORD_SVR_DVSN_CD": "0",
             "ORD_DVSN": ord_dvsn
         }
 
-        tr_id = "JTTT1001U" if self.is_real else "VTTT1001U"
+        tr_id = "TTTT1006U" if self.is_real else "VTTT1006U"
         headers = self._get_default_headers(tr_id, self.get_hashkey(body))
 
         url = f"{self.base_url}/uapi/overseas-stock/v1/trading/order"
@@ -304,69 +330,143 @@ class KISClient:
             print(f"[KIS API] Order Exception: {e}")
             return None
 
-    def check_order_status(self, order_no: str, order_date: str = None) -> dict:
-        """
-        해외주식 주문 체결 상태를 조회합니다.
-        """
+    @staticmethod
+    def _parse_int(value) -> int:
+        try:
+            return int(float(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _parse_float(value) -> float:
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @classmethod
+    def _normalize_order_history_item(cls, item: dict) -> dict:
+        ordered_qty = cls._parse_int(item.get("ft_ord_qty"))
+        filled_qty = cls._parse_int(item.get("ft_ccld_qty"))
+        unfilled_qty = cls._parse_int(item.get("nccs_qty"))
+        reject_reason = item.get("rjct_rson_name") or item.get("rjct_rson") or ""
+        correction_type = item.get("rvse_cncl_dvsn_name") or item.get("rvse_cncl_dvsn") or ""
+        processing_status = item.get("prcs_stat_name") or ""
+
+        if reject_reason:
+            status = "REJECTED"
+        elif "취소" in correction_type or "취소" in processing_status:
+            status = "CANCELED"
+        elif ordered_qty > 0 and filled_qty >= ordered_qty:
+            status = "FILLED"
+        elif filled_qty > 0:
+            status = "PARTIAL"
+        else:
+            status = "UNFILLED"
+
+        side_code = str(item.get("sll_buy_dvsn_cd") or "")
+        side_name = str(item.get("sll_buy_dvsn_cd_name") or "")
+        side = "SELL" if side_code == "01" or "매도" in side_name else "BUY"
+
+        return {
+            "order_no": str(item.get("odno") or ""),
+            "original_order_no": str(item.get("orgn_odno") or ""),
+            "order_date": str(item.get("ord_dt") or item.get("dmst_ord_dt") or ""),
+            "order_time": str(item.get("ord_tmd") or item.get("thco_ord_tmd") or ""),
+            "side": side,
+            "ticker": str(item.get("pdno") or ""),
+            "ticker_name": item.get("prdt_name"),
+            "exchange_code": str(item.get("ovrs_excg_cd") or ""),
+            "ordered_qty": ordered_qty,
+            "order_price": cls._parse_float(item.get("ft_ord_unpr3")),
+            "filled_qty": filled_qty,
+            "filled_price": cls._parse_float(item.get("ft_ccld_unpr3")),
+            "unfilled_qty": unfilled_qty,
+            "status": status,
+            "reject_reason": reject_reason,
+            "processing_status": processing_status,
+            "raw": item,
+        }
+
+    def list_order_history(self, start_date: str, end_date: str, max_pages: int = 10) -> list[dict]:
+        """공식 해외주식 주문체결내역 API의 모든 연속조회 페이지를 반환합니다."""
         token = self.get_access_token()
         if not token:
-            return {"status": "ERROR", "message": "No access token"}
+            raise RuntimeError("No access token")
 
         account_prefix = self.account_no.split("-")[0] if "-" in self.account_no else self.account_no[:8]
         account_suffix = self.account_no.split("-")[1] if "-" in self.account_no else self.account_no[8:]
 
-        tr_id = "JTTT3010R" if self.is_real else "VTTS3010R"
-        headers = self._get_default_headers(tr_id)
-
-        from datetime import date
-        today = order_date or date.today().strftime("%Y%m%d")
-
-        params = {
-            "CANO": account_prefix,
-            "ACNT_PRDT_CD": account_suffix,
-            "PDNO": "",
-            "ORD_STRT_DT": today,
-            "ORD_END_DT": today,
-            "SLL_BUY_DVSN_CD": "00",
-            "CTX_AREA_FK200": "",
-            "CTX_AREA_NK200": ""
-        }
-
+        tr_id = "TTTS3035R" if self.is_real else "VTTS3035R"
         url = f"{self.base_url}/uapi/overseas-stock/v1/trading/inquire-ccnl"
-        try:
+        nk200 = ""
+        fk200 = ""
+        tr_cont = ""
+        results = []
+
+        for _page in range(max_pages):
+            headers = self._get_default_headers(tr_id)
+            if tr_cont:
+                headers["tr_cont"] = tr_cont
+            params = {
+                "CANO": account_prefix,
+                "ACNT_PRDT_CD": account_suffix,
+                "PDNO": "%" if self.is_real else "",
+                "ORD_STRT_DT": start_date,
+                "ORD_END_DT": end_date,
+                "SLL_BUY_DVSN": "00",
+                "CCLD_NCCS_DVSN": "00",
+                "OVRS_EXCG_CD": "NASD" if self.is_real else "",
+                "SORT_SQN": "DS",
+                "ORD_DT": "",
+                "ORD_GNO_BRNO": "",
+                "ODNO": "",
+                "CTX_AREA_NK200": nk200,
+                "CTX_AREA_FK200": fk200,
+            }
             res = requests.get(url, headers=headers, params=params, timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                orders = data.get("output", [])
+            if res.status_code != 200:
+                raise RuntimeError(f"KIS order history failed: {res.text}")
 
-                for order in orders:
-                    if order.get("odno") == order_no:
-                        ordered_qty = int(float(order.get("ft_ord_qty", 0)))
-                        filled_qty = int(float(order.get("ft_ccld_qty", 0)))
-                        filled_price = float(order.get("ft_ccld_unpr3", 0))
+            data = res.json()
+            if data.get("rt_cd") not in (None, "0"):
+                raise RuntimeError(data.get("msg1") or "KIS order history rejected")
 
-                        if filled_qty >= ordered_qty:
-                            status = "FILLED"
-                        elif filled_qty > 0:
-                            status = "PARTIAL"
-                        else:
-                            status = "UNFILLED"
+            output = data.get("output", [])
+            if isinstance(output, dict):
+                output = [output]
+            results.extend(self._normalize_order_history_item(item) for item in output)
 
-                        return {
-                            "status": status,
-                            "filled_qty": filled_qty,
-                            "ordered_qty": ordered_qty,
-                            "filled_price": filled_price,
-                            "order_no": order_no
-                        }
+            tr_cont = str(res.headers.get("tr_cont") or res.headers.get("tr-cont") or "")
+            nk200 = str(data.get("ctx_area_nk200") or data.get("CTX_AREA_NK200") or "")
+            fk200 = str(data.get("ctx_area_fk200") or data.get("CTX_AREA_FK200") or "")
+            if tr_cont not in {"M", "F"} or not (nk200 or fk200):
+                break
+            tr_cont = "N"
 
-                return {"status": "UNFILLED", "filled_qty": 0, "ordered_qty": 0, "filled_price": 0, "order_no": order_no}
-            else:
-                print(f"[KIS API] Order status check failed: {res.text}")
-                return {"status": "ERROR", "message": res.text}
-        except Exception as e:
-            print(f"[KIS API] Order status check exception: {e}")
-            return {"status": "ERROR", "message": str(e)}
+        return results
+
+    def check_order_status(self, order_no: str, order_date: str = None) -> dict:
+        """주문번호 검색을 지원하지 않는 KIS API 결과를 애플리케이션에서 필터링합니다."""
+        from datetime import date
+
+        target_date = order_date or date.today().strftime("%Y%m%d")
+        try:
+            orders = self.list_order_history(target_date, target_date)
+        except Exception as exc:
+            print(f"[KIS API] Order status check exception: {exc}")
+            return {"status": "ERROR", "message": str(exc)}
+
+        for order in orders:
+            if order["order_no"] == order_no:
+                return order
+        return {
+            "status": "UNFILLED",
+            "filled_qty": 0,
+            "ordered_qty": 0,
+            "filled_price": 0.0,
+            "order_no": order_no,
+        }
 
     def get_overseas_ranking(self, exchange: str = "NAS", rank_type: str = "2"):
         """
@@ -402,7 +502,7 @@ class KISClient:
 
         tr_id = "CTRP6504R" if self.is_real else "VTRP6504R"
         headers = self._get_default_headers(tr_id)
-        
+
         params = {
             "CANO": account_prefix,
             "ACNT_PRDT_CD": account_suffix,
@@ -412,14 +512,14 @@ class KISClient:
             "CTX_AREA_FK200": "",
             "CTX_AREA_NK200": ""
         }
-        
+
         url = f"{self.base_url}/uapi/overseas-stock/v1/trading/inquire-present-balance"
         try:
             res = requests.get(url, headers=headers, params=params, timeout=10)
             if res.status_code == 200:
                 data = res.json()
                 output1 = data.get("output1", [])
-                
+
                 holdings = []
                 for item in output1:
                     holdings.append({

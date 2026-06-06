@@ -3,12 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
-from app.core.database import engine, Base
 from app.core.exceptions import StockAutoException, stock_auto_exception_handler
 from app.translations.translator import Translator
 from app.bot.scheduler import start_scheduler
-from app.core.config import settings
-from app.core.database import SessionLocal
+from app.bot.order_discovery import discover_orphan_orders_once
+from app.bot.order_reconciler import reconcile_open_orders_once
 from app.core.logging import logger
 
 # 💡 모듈형 아키텍처 라우터 전격 임포트
@@ -26,28 +25,34 @@ from app.bot.router_backtest import router as backtest_router
 
 # 💡 Alembic 프로그램 기반 자동 마이그레이션 실행 (스프링부트 Flyway 방식 이식)
 from app.core.migrator import run_migrations_programmatically
-run_migrations_programmatically()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("Backend Lifespan Starting: Applying database migrations...")
+    run_migrations_programmatically()
+
     # Startup Caching & Seeding Stock Translations
     logger.info("Backend Lifespan Starting: Initializing Stock Translator Cache...")
     Translator.load_cache()
-    
+
+    logger.info("Backend Lifespan Starting: Recovering unresolved broker orders...")
+    discover_orphan_orders_once()
+    reconcile_open_orders_once()
+
     # Start the background trading loop scheduler
     logger.info("Backend Lifespan: Initializing Scheduler...")
     start_scheduler()
-    
+
     # 💡 Telegram Polling Daemon Startup (Phase 11)
     from app.core.telegram import start_telegram_bot, stop_telegram_bot
     logger.info("Backend Lifespan: Starting Telegram Bot...")
     start_telegram_bot()
-    
+
     yield
-    
+
     logger.info("Backend Lifespan Ending: Stopping Telegram Bot...")
     stop_telegram_bot()
-    
+
     logger.info("Backend Lifespan Ending: Stopping Scheduler...")
     from app.bot.scheduler import stop_scheduler
     stop_scheduler()
@@ -59,14 +64,17 @@ app.add_exception_handler(StockAutoException, stock_auto_exception_handler)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-    import traceback
+    logger.exception(
+        "Unhandled request error: %s %s",
+        request.method,
+        request.url.path,
+    )
     return JSONResponse(
         status_code=500,
         content={
             "error": {
                 "code": "INTERNAL_SERVER_ERROR",
-                "message": str(exc),
-                "traceback": traceback.format_exc() if not isinstance(exc, StockAutoException) else None
+                "message": "서버 내부 오류가 발생했습니다."
             }
         }
     )

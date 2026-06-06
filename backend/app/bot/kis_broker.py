@@ -7,7 +7,7 @@ class KISBroker(BaseBroker):
     """
     한국투자증권(KIS) API 실연동 브로커 클라이언트.
     BaseBroker 인터페이스 규격에 맞춰 KIS API의 실제 응답 데이터를 매핑합니다.
-    
+
     MOCK 모드: KIS 모의투자 서버(vts-openapi)에 주문 전송
     REAL 모드: KIS 실전 서버(openapi)에 주문 전송
     """
@@ -23,22 +23,28 @@ class KISBroker(BaseBroker):
         """
         주문 번호를 기반으로 KIS API에 체결 상태를 폴링하여
         실제 체결 수량/가격을 확인합니다.
-        
-        최대 FILL_POLL_MAX_RETRIES 회 시도 후에도 미체결이면
-        주문 제출 시의 수량/가격을 fallback으로 반환합니다.
+
+        최대 FILL_POLL_MAX_RETRIES 회 시도 후에도 미체결이면 PENDING을 반환합니다.
+        체결이 확인되지 않은 주문을 제출 수량/가격으로 임의 체결 처리하지 않습니다.
         """
         if not order_no:
-            return {"filled_qty": submitted_qty, "filled_price": submitted_price, "confirmed": False}
+            return {
+                "status": "UNCONFIRMED",
+                "filled_qty": 0,
+                "filled_price": 0.0,
+                "confirmed": False,
+            }
 
         for attempt in range(1, self.FILL_POLL_MAX_RETRIES + 1):
             time.sleep(self.FILL_POLL_INTERVAL_SEC)
             try:
                 status = self.client.check_order_status(order_no)
-                
+
                 if status.get("status") == "FILLED":
                     logger.info(f"[KISBroker] Order {order_no} FILLED confirmed on attempt {attempt}: "
                                 f"qty={status['filled_qty']}, price=${status['filled_price']:.2f}")
                     return {
+                        "status": "FILLED",
                         "filled_qty": status["filled_qty"],
                         "filled_price": status["filled_price"],
                         "confirmed": True
@@ -49,9 +55,10 @@ class KISBroker(BaseBroker):
                     # 부분 체결은 체결된 만큼만 반환
                     if status["filled_qty"] > 0:
                         return {
+                            "status": "PARTIAL",
                             "filled_qty": status["filled_qty"],
                             "filled_price": status["filled_price"],
-                            "confirmed": True
+                            "confirmed": False
                         }
                 elif status.get("status") == "ERROR":
                     logger.error(f"[KISBroker] Order status check error: {status.get('message')}")
@@ -62,10 +69,14 @@ class KISBroker(BaseBroker):
                 logger.error(f"[KISBroker] Fill confirmation polling error: {e}")
                 break
 
-        # 폴링 실패 시 제출 값을 fallback으로 사용 (기존 동작 호환)
         logger.warning(f"[KISBroker] Order {order_no} fill confirmation timed out after {self.FILL_POLL_MAX_RETRIES} attempts. "
-                       f"Using submitted values as fallback: qty={submitted_qty}, price=${submitted_price:.2f}")
-        return {"filled_qty": submitted_qty, "filled_price": submitted_price, "confirmed": False}
+                       "Keeping the order pending for background reconciliation.")
+        return {
+            "status": "PENDING",
+            "filled_qty": 0,
+            "filled_price": 0.0,
+            "confirmed": False,
+        }
 
     def get_account_balance(self, exchange_rate: float | None = None) -> dict:
         # KISClient의 계좌 조회 실행 (내부에 이미 dynamic provider가 구현됨)
@@ -99,32 +110,75 @@ class KISBroker(BaseBroker):
             logger.error(f"[KISBroker] Failed to fetch holdings from KIS: {e}")
             raise e
 
-    def buy_order(self, ticker: str, quantity: int, price: float, session: str = "REGULAR_MARKET") -> dict:
+    def check_order_status(self, order_no: str, order_date: str | None = None) -> dict:
+        return self.client.check_order_status(order_no, order_date=order_date)
+
+    def list_order_history(self, start_date: str, end_date: str) -> list[dict]:
+        return self.client.list_order_history(start_date, end_date)
+
+    def get_order_metadata(self, ticker: str, session: str) -> dict:
+        return {
+            "exchange_code": self.client._get_exchange_code(ticker),
+            "order_division": self.client._order_division_for_session(session),
+        }
+
+    def buy_order(
+        self,
+        ticker: str,
+        quantity: int,
+        price: float,
+        session: str = "REGULAR_MARKET",
+        client_order_id: str | None = None,
+    ) -> dict:
         """
         KIS API를 통한 해외주식 매수 주문.
         KISClient.buy_overseas_order()를 호출하고, 체결 확인 후 결과를 표준 형식으로 매핑합니다.
         """
         try:
-            res = self.client.buy_overseas_order(ticker, quantity, price=price, session=session)
+            res = self.client.buy_overseas_order(
+                ticker,
+                quantity,
+                price=price,
+                session=session,
+                client_order_id=client_order_id,
+            )
             if res and res.get("rt_cd") == "0":
                 order_no = res.get("output", {}).get("ODNO", "")
-                
+
                 # 💡 체결 확인 폴링 — 실제 체결 수량/가격 확인
                 fill_info = self._confirm_fill(order_no, quantity, price)
-                
+
+                status = fill_info["status"]
+                is_recordable_fill = status in {"FILLED", "PARTIAL"} and fill_info["filled_qty"] > 0
                 return {
-                    "success": True,
+                    "success": is_recordable_fill,
+                    "order_submitted": True,
+                    "status": status,
                     "order_no": order_no,
                     "filled_qty": fill_info["filled_qty"],
                     "filled_price": fill_info["filled_price"],
                     "fill_confirmed": fill_info["confirmed"],
-                    "message": f"KIS buy order {'confirmed' if fill_info['confirmed'] else 'submitted'}: "
+                    "message": f"KIS buy order status={status}: "
                                f"{ticker} x{fill_info['filled_qty']} at ${fill_info['filled_price']:.2f}"
+                }
+            elif res is None or res.get("submission_unknown"):
+                return {
+                    "success": False,
+                    "order_submitted": True,
+                    "submission_unknown": True,
+                    "status": "ACK_UNKNOWN",
+                    "order_no": "",
+                    "filled_qty": 0,
+                    "filled_price": 0,
+                    "fill_confirmed": False,
+                    "message": "KIS buy order acknowledgement was not received.",
                 }
             else:
                 msg = res.get("msg1", "Unknown error") if res else "No response"
                 return {
                     "success": False,
+                    "order_submitted": False,
+                    "status": "REJECTED",
                     "order_no": "",
                     "filled_qty": 0,
                     "filled_price": 0,
@@ -133,38 +187,73 @@ class KISBroker(BaseBroker):
         except Exception as e:
             return {
                 "success": False,
+                "order_submitted": True,
+                "submission_unknown": True,
+                "status": "ACK_UNKNOWN",
                 "order_no": "",
                 "filled_qty": 0,
                 "filled_price": 0,
-                "message": f"KIS buy order exception: {str(e)}"
+                "fill_confirmed": False,
+                "message": f"KIS buy order acknowledgement unknown: {str(e)}"
             }
 
-    def sell_order(self, ticker: str, quantity: int, price: float, session: str = "REGULAR_MARKET") -> dict:
+    def sell_order(
+        self,
+        ticker: str,
+        quantity: int,
+        price: float,
+        session: str = "REGULAR_MARKET",
+        client_order_id: str | None = None,
+    ) -> dict:
         """
         KIS API를 통한 해외주식 매도 주문.
         체결 확인 폴링을 통해 실제 체결 데이터를 확인합니다.
         """
         try:
-            res = self.client.sell_overseas_order(ticker, quantity, price=price, session=session)
+            res = self.client.sell_overseas_order(
+                ticker,
+                quantity,
+                price=price,
+                session=session,
+                client_order_id=client_order_id,
+            )
             if res and res.get("rt_cd") == "0":
                 order_no = res.get("output", {}).get("ODNO", "")
-                
+
                 # 💡 체결 확인 폴링 — 실제 체결 수량/가격 확인
                 fill_info = self._confirm_fill(order_no, quantity, price)
-                
+
+                status = fill_info["status"]
+                is_recordable_fill = status in {"FILLED", "PARTIAL"} and fill_info["filled_qty"] > 0
                 return {
-                    "success": True,
+                    "success": is_recordable_fill,
+                    "order_submitted": True,
+                    "status": status,
                     "order_no": order_no,
                     "filled_qty": fill_info["filled_qty"],
                     "filled_price": fill_info["filled_price"],
                     "fill_confirmed": fill_info["confirmed"],
-                    "message": f"KIS sell order {'confirmed' if fill_info['confirmed'] else 'submitted'}: "
+                    "message": f"KIS sell order status={status}: "
                                f"{ticker} x{fill_info['filled_qty']} at ${fill_info['filled_price']:.2f}"
+                }
+            elif res is None or res.get("submission_unknown"):
+                return {
+                    "success": False,
+                    "order_submitted": True,
+                    "submission_unknown": True,
+                    "status": "ACK_UNKNOWN",
+                    "order_no": "",
+                    "filled_qty": 0,
+                    "filled_price": 0,
+                    "fill_confirmed": False,
+                    "message": "KIS sell order acknowledgement was not received.",
                 }
             else:
                 msg = res.get("msg1", "Unknown error") if res else "No response"
                 return {
                     "success": False,
+                    "order_submitted": False,
+                    "status": "REJECTED",
                     "order_no": "",
                     "filled_qty": 0,
                     "filled_price": 0,
@@ -173,8 +262,12 @@ class KISBroker(BaseBroker):
         except Exception as e:
             return {
                 "success": False,
+                "order_submitted": True,
+                "submission_unknown": True,
+                "status": "ACK_UNKNOWN",
                 "order_no": "",
                 "filled_qty": 0,
                 "filled_price": 0,
-                "message": f"KIS sell order exception: {str(e)}"
+                "fill_confirmed": False,
+                "message": f"KIS sell order acknowledgement unknown: {str(e)}"
             }

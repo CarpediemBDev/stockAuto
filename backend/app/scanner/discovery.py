@@ -27,9 +27,16 @@ async def fetch_kis_rankings() -> list:
 
         db = SessionLocal()
         try:
-            db_settings = db.query(UserSettings).filter(UserSettings.is_running == True).first()
-            trade_mode = (db_settings.trade_mode or "SIMULATED").upper() if db_settings else "SIMULATED"
-            if not db_settings or trade_mode == "SIMULATED":
+            db_settings = db.query(UserSettings).filter(
+                UserSettings.is_running == True,
+                UserSettings.trade_mode.in_(["MOCK", "REAL"]),
+                UserSettings.kis_verification_status == "verified",
+                UserSettings.kis_app_key.isnot(None),
+                UserSettings.kis_app_secret.isnot(None),
+                UserSettings.kis_account_no.isnot(None),
+            ).first()
+
+            if not db_settings:
                 return []
 
             kis_client = KISClient(db_settings)
@@ -71,23 +78,23 @@ async def get_seed_tickers():
     여러 소스에서 분석 대상 종목(Seed Tickers)을 병렬로 수집하고 병합합니다.
     """
     print("\n[Discovery] Starting parallel ticker discovery process...")
-    
+
     # 1. 병렬 수집 예약 (KIS + Yahoo)
     kis_task = fetch_kis_rankings()
     yahoo_task = fetch_yahoo_most_active()
-    
+
     # 2. DB 관심종목 수집 (동기)
     db_list = fetch_db_watchlist()
-    
+
     # 3. 모든 소스 결과 대기 및 병합
     kis_list, yahoo_list = await asyncio.gather(kis_task, yahoo_task)
     final_universe = list(set(kis_list + db_list + yahoo_list))
-    
+
     if not final_universe:
         print("[Discovery] All sources failed. Using safety tech list.")
         return ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "AMD", "NFLX", "TSM"]
-    
+
     print(f"[Discovery] Process complete. Final universe size: {len(final_universe)}")
     print(f" - KIS: {len(kis_list)} | Yahoo: {len(yahoo_list)} | Watchlist: {len(db_list)}")
-    
+
     return final_universe

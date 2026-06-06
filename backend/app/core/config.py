@@ -47,7 +47,7 @@ class Settings:
     IS_SIMULATED = True
     IS_MOCK = False
     IS_REAL = False
-    
+
     # API endpoints
     KIS_BASE_URL = ""
     TR_ID_BALANCE = ""
@@ -69,12 +69,12 @@ class Settings:
 
     def apply_trade_mode(self, mode: str):
         """
-        TRADE_MODE에 따라 IS_* 플래그와 KIS API 엔드포인트/TR_ID를 
+        TRADE_MODE에 따라 IS_* 플래그와 KIS API 엔드포인트/TR_ID를
         단일 창구에서 일괄 업데이트하는 핵심 함수. (중복 로직 제거)
         """
         if mode not in VALID_TRADE_MODES:
             mode = "SIMULATED"
-            
+
         self.TRADE_MODE = mode
         self.IS_SIMULATED = self.TRADE_MODE == "SIMULATED"
         self.IS_MOCK = self.TRADE_MODE == "MOCK"
@@ -83,8 +83,8 @@ class Settings:
         if self.IS_REAL:
             self.KIS_BASE_URL = "https://openapi.koreainvestment.com:9443"
             self.TR_ID_BALANCE = "TTTC8434R" # 실전 잔고조회
-            self.TR_ID_BUY_OVERSEAS = "JTTT1002U" # 해외주식 매수
-            self.TR_ID_SELL_OVERSEAS = "JTTT1001U" # 해외주식 매도
+            self.TR_ID_BUY_OVERSEAS = "TTTT1002U" # 해외주식 매수
+            self.TR_ID_SELL_OVERSEAS = "TTTT1006U" # 해외주식 매도
             self.TR_ID_OVERSEAS_BALANCE = "CTRP6504R" # 해외 잔고조회 (실전)
             self.TR_ID_ORDER_HISTORY = "JTTT3010R" # 체결내역 (실전)
         else:
@@ -99,7 +99,7 @@ class Settings:
     # Global Constants
     API_TITLE = "StockAuto API"
     VERSION = "2.0.0" # 3-Mode Architecture
-    
+
     # [Phase 36] 실시간 라이브 트레이딩 적용 마스터 전략 타입 설정 (기본값: regime_switching)
     STRATEGY_TYPE = "regime_switching"
 
@@ -108,7 +108,7 @@ class Settings:
     MIN_CASH_BALANCE_USD = 200.0
     MIN_SMART_EXIT_PROFIT_RATE = 2.5
     REENTRY_COOLDOWN_MINUTES = 60
-    
+
     # [Phase 30] 거래 수수료 및 제비용 상수
     KIS_FEE_RATE = 0.0008         # 0.08% KIS 우대 수수료율
     SEC_FEE_RATE = 0.0000278      # 0.00278% 미국 매도 제비용 (SEC Fee)

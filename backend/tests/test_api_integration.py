@@ -70,7 +70,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
     config = make_alembic_config(db_url)
 
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "bd07f17fb172"
+    assert script.get_current_head() == "f2a3b4c5d6e7"
 
     command.upgrade(config, "head")
 
@@ -87,12 +87,14 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             "market_overview_snapshots",
             "swing_prediction_snapshots",
             "refresh_tokens",
+            "broker_orders",
             "alembic_version",
         }
 
         user_settings_columns = {column["name"] for column in inspector.get_columns("user_settings")}
         user_columns = {column["name"] for column in inspector.get_columns("users")}
         refresh_token_columns = {column["name"] for column in inspector.get_columns("refresh_tokens")}
+        broker_order_columns = {column["name"] for column in inspector.get_columns("broker_orders")}
         trade_log_columns = {column["name"] for column in inspector.get_columns("trade_logs")}
         market_overview_columns = {column["name"] for column in inspector.get_columns("market_overview_snapshots")}
         swing_prediction_columns = {column["name"] for column in inspector.get_columns("swing_prediction_snapshots")}
@@ -100,6 +102,19 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
         assert "role" in user_columns
         assert {"failed_login_attempts", "locked_until"} <= user_columns
         assert {"user_id", "token", "expires_at", "is_revoked"} <= refresh_token_columns
+        assert {
+            "intent_id",
+            "broker_order_no",
+            "status",
+            "requested_qty",
+            "broker_filled_qty",
+            "applied_filled_qty",
+            "resume_after_resolution",
+            "submission_attempts",
+            "discovery_attempts",
+            "submission_started_at",
+            "response_received_at",
+        } <= broker_order_columns
         assert {
             "kis_verification_status",
             "kis_verified_trade_mode",

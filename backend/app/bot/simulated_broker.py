@@ -11,7 +11,7 @@ class LocalSimulatedBroker(BaseBroker):
     """
     증권사 API 연동 없이 로컬 SQLite 데이터베이스와 yfinance를 활용하여
     가상으로 작동하는 모의투자(Paper Trading) 브로커 클라이언트.
-    
+
     buy_order / sell_order는 yfinance 실시간 시세를 기반으로
     DB에 가상 체결 기록을 생성합니다.
     """
@@ -67,7 +67,7 @@ class LocalSimulatedBroker(BaseBroker):
                                 df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else pd.DataFrame()
                             else:
                                 df = data.dropna()
-                        
+
                         if not df.empty:
                             current_price = float(df['Close'].iloc[-1])
                     except Exception as e:
@@ -86,7 +86,7 @@ class LocalSimulatedBroker(BaseBroker):
         cash_balance = max(0.0, initial_cash + total_realized_pnl_krw - total_purchase_krw)
         stock_balance = total_eval_krw
         total_asset = cash_balance + stock_balance
-        
+
         # 가상 수익률 계산
         profit_rate = round(((total_asset - initial_cash) / initial_cash) * 100, 2)
 
@@ -135,12 +135,12 @@ class LocalSimulatedBroker(BaseBroker):
                             df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else pd.DataFrame()
                         else:
                             df = data.dropna()
-                    
+
                     if not df.empty:
                         current_price = float(df['Close'].iloc[-1])
                 except Exception as e:
                     print(f"[SimulatedBroker] Failed to get price for {h.ticker}: {e}")
-                    
+
                 result.append({
                     "id": h.id,
                     "ticker": h.ticker,
@@ -184,7 +184,30 @@ class LocalSimulatedBroker(BaseBroker):
             print(f"[SimulatedBroker] Failed to fetch live price for {ticker}: {e}")
         return None
 
-    def buy_order(self, ticker: str, quantity: int, price: float, session: str = "REGULAR_MARKET") -> dict:
+    def check_order_status(self, order_no: str, order_date: str | None = None) -> dict:
+        return {
+            "status": "ERROR",
+            "message": "Simulated orders are filled synchronously and are not reconciled.",
+            "order_no": order_no,
+        }
+
+    def list_order_history(self, start_date: str, end_date: str) -> list[dict]:
+        return []
+
+    def get_order_metadata(self, ticker: str, session: str) -> dict:
+        return {
+            "exchange_code": "SIMULATED",
+            "order_division": "00",
+        }
+
+    def buy_order(
+        self,
+        ticker: str,
+        quantity: int,
+        price: float,
+        session: str = "REGULAR_MARKET",
+        client_order_id: str | None = None,
+    ) -> dict:
         """
         가상 매수 체결: yfinance 실시간 시세를 기반으로 즉시 체결을 시뮬레이션합니다.
         실제 증권사 API를 호출하지 않고 DB에 직접 Holding/TradeLog를 기록합니다.
@@ -197,13 +220,23 @@ class LocalSimulatedBroker(BaseBroker):
 
         return {
             "success": True,
+            "order_submitted": True,
+            "status": "FILLED",
+            "fill_confirmed": True,
             "order_no": order_no,
             "filled_qty": quantity,
             "filled_price": fill_price,
             "message": f"Simulated buy: {quantity} shares of {ticker} at ${fill_price:.2f}"
         }
 
-    def sell_order(self, ticker: str, quantity: int, price: float, session: str = "REGULAR_MARKET") -> dict:
+    def sell_order(
+        self,
+        ticker: str,
+        quantity: int,
+        price: float,
+        session: str = "REGULAR_MARKET",
+        client_order_id: str | None = None,
+    ) -> dict:
         """
         가상 매도 체결: yfinance 실시간 시세를 기반으로 즉시 체결을 시뮬레이션합니다.
         """
@@ -214,6 +247,9 @@ class LocalSimulatedBroker(BaseBroker):
 
         return {
             "success": True,
+            "order_submitted": True,
+            "status": "FILLED",
+            "fill_confirmed": True,
             "order_no": order_no,
             "filled_qty": quantity,
             "filled_price": fill_price,

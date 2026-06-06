@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, UniqueConstraint, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, Index, UniqueConstraint, Text
 from sqlalchemy.orm import relationship
 from datetime import UTC, datetime
 from app.core.database import Base
@@ -27,6 +27,7 @@ class User(Base):
     action_logs = relationship("ActionLog", back_populates="user", cascade="all, delete-orphan")
     watch_lists = relationship("WatchList", back_populates="user", cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
+    broker_orders = relationship("BrokerOrder", back_populates="user", cascade="all, delete-orphan")
 
 class RefreshToken(Base):
     """안전한 토큰 갱신 및 다중 기기 강제 로그아웃을 위한 세션 테이블"""
@@ -114,6 +115,53 @@ class Holding(Base):
 
     # 동일 사용자가 동일 티커를 이중으로 보유하는 것을 물리적으로 차단
     __table_args__ = (UniqueConstraint('user_id', 'ticker', name='_user_ticker_uc'),)
+
+class BrokerOrder(Base):
+    """증권사 주문의 누적 체결 상태와 DB 반영 수량을 보존하는 영구 원장."""
+    __tablename__ = "broker_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    intent_id = Column(String, nullable=False, unique=True, index=True)
+    broker_order_no = Column(String, nullable=True)
+    broker_order_date = Column(String, nullable=False)
+    trade_mode = Column(String, nullable=False)
+    side = Column(String, nullable=False)
+    ticker = Column(String, nullable=False)
+    prefixed_ticker = Column(String, nullable=False)
+    ticker_name = Column(String, nullable=True)
+    exchange_code = Column(String, nullable=True)
+    order_division = Column(String, nullable=True)
+    source = Column(String, nullable=False, default="STRATEGY")
+    status = Column(String, nullable=False, default="INTENT_CREATED")
+    requested_qty = Column(Integer, nullable=False)
+    broker_filled_qty = Column(Integer, nullable=False, default=0)
+    applied_filled_qty = Column(Integer, nullable=False, default=0)
+    submitted_price = Column(Float, nullable=False)
+    filled_price = Column(Float, nullable=True)
+    buy_stage = Column(Integer, nullable=True)
+    regime_mode = Column(String, nullable=True)
+    signal_score = Column(Integer, nullable=True)
+    sell_reason = Column(Text, nullable=True)
+    submission_attempts = Column(Integer, nullable=False, default=0)
+    discovery_attempts = Column(Integer, nullable=False, default=0)
+    retry_count = Column(Integer, nullable=False, default=0)
+    resume_after_resolution = Column(Boolean, nullable=False, default=False)
+    last_error = Column(Text, nullable=True)
+    submitted_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    submission_started_at = Column(DateTime, nullable=True)
+    response_received_at = Column(DateTime, nullable=True)
+    last_discovery_at = Column(DateTime, nullable=True)
+    last_checked_at = Column(DateTime, nullable=True)
+    last_alerted_at = Column(DateTime, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="broker_orders")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "broker_order_no", name="_user_broker_order_uc"),
+        Index("ix_broker_orders_user_status", "user_id", "status"),
+    )
 
 class ActionLog(Base):
     """봇의 실시간 사용자별 활동 기록 (스캔, 판단, 시스템 메시지 등)"""

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.bot.order_reconciler import disable_auto_resume_for_user, has_unresolved_orders
 from app.core.credentials import CredentialCryptoError, decrypt_credential, encrypt_credential
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, get_current_admin_user
@@ -235,6 +236,11 @@ def save_kis_credentials(
     db: Session = Depends(get_db),
 ):
     """KIS 인증정보를 검증한 뒤 암호화하여 저장합니다. 원문은 응답하지 않습니다."""
+    if has_unresolved_orders(db, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="미해결 주문 재조정 중에는 KIS 인증정보를 변경할 수 없습니다.",
+        )
     trade_mode = _normalize_trade_mode(payload.trade_mode)
     if trade_mode == "SIMULATED":
         raise HTTPException(
@@ -331,6 +337,11 @@ def delete_kis_credentials(
     db: Session = Depends(get_db),
 ):
     """저장된 KIS 인증정보와 검증 메타데이터를 삭제합니다."""
+    if has_unresolved_orders(db, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="미해결 주문 재조정 중에는 KIS 인증정보를 삭제할 수 없습니다.",
+        )
     db_settings = current_user.settings
     if not db_settings:
         db_settings = UserSettings(user_id=current_user.id)
@@ -361,8 +372,17 @@ def update_user_settings(
 ):
     """현재 로그인한 사용자의 일반 설정을 저장합니다. KIS 원문 인증정보는 처리하지 않습니다."""
     trade_mode = _normalize_trade_mode(payload.trade_mode)
+    current_settings = current_user.settings
+    if (
+        current_settings
+        and trade_mode != (current_settings.trade_mode or "SIMULATED").upper()
+        and has_unresolved_orders(db, current_user.id)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="미해결 주문 재조정 중에는 거래 모드를 변경할 수 없습니다.",
+        )
     if trade_mode in {"MOCK", "REAL"}:
-        current_settings = current_user.settings
         if not _has_usable_kis_credentials(current_settings):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -427,6 +447,13 @@ def toggle_user_bot(
     if not target_settings:
         raise HTTPException(status_code=404, detail="사용자 설정을 찾을 수 없습니다.")
 
+    if not target_settings.is_running and has_unresolved_orders(db, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="미해결 증권사 주문이 있어 봇을 시작할 수 없습니다.",
+        )
+    if target_settings.is_running:
+        disable_auto_resume_for_user(db, user_id)
     target_settings.is_running = not target_settings.is_running
     db.commit()
     db.refresh(target_settings)

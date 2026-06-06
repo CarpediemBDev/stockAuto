@@ -17,6 +17,15 @@ from app.core.telegram import send_message_async, send_daily_report_to_all_users
 from app.bot.fx_cache import FXRateCache
 from app.trades.market_overview_cache import market_overview_cache_wrapper
 from app.scanner.swing_prediction_cache import swing_prediction_cache_wrapper
+from app.bot.us_market_calendar import nyse_regular_close
+from app.bot.order_reconciler import (
+    begin_order_submission,
+    create_order_intent,
+    finalize_order_submission,
+    has_unresolved_orders,
+    reconcile_open_orders_once,
+)
+from app.bot.order_discovery import discover_orphan_orders_once
 
 # 💡 네트워크 일시 장애에 따른 텔레그램 경고 도배 방지용 시간 기록 저장소
 _user_network_alert_sent = {}
@@ -70,7 +79,7 @@ async def safe_broker_call(func, *args, **kwargs):
 ET = ZoneInfo("America/New_York") # 미국 동부 표준시(ET)는 DST를 자동으로 반영합니다
 
 
-def get_market_session() -> str:
+def get_market_session(now_et: datetime | None = None) -> str:
     """
     현재 시각 기준 미국 주식시장 세션을 반환합니다.
     - PRE_MARKET: 04:00 ~ 09:30 ET
@@ -78,9 +87,14 @@ def get_market_session() -> str:
     - AFTER_HOURS: 16:00 ~ 20:00 ET
     - CLOSED: 나머지 시간 및 주말
     """
-    now_et = datetime.now(tz=ET)
-    # 토/일 휴장
-    if now_et.weekday() >= 5:
+    now_et = now_et or datetime.now(tz=ET)
+    if now_et.tzinfo is None:
+        now_et = now_et.replace(tzinfo=ET)
+    else:
+        now_et = now_et.astimezone(ET)
+
+    regular_close = nyse_regular_close(now_et.date())
+    if regular_close is None:
         return "CLOSED"
 
     t = now_et.time()
@@ -88,9 +102,9 @@ def get_market_session() -> str:
 
     if dt_time(4, 0) <= t < dt_time(9, 30):
         return "PRE_MARKET"
-    elif dt_time(9, 30) <= t < dt_time(16, 0):
+    elif dt_time(9, 30) <= t < regular_close:
         return "REGULAR_MARKET"
-    elif dt_time(16, 0) <= t < dt_time(20, 0):
+    elif regular_close <= t < (dt_time(17, 0) if regular_close.hour == 13 else dt_time(20, 0)):
         return "AFTER_HOURS"
     else:
         return "CLOSED"
@@ -115,6 +129,33 @@ def log_action(db, user_id: int, message: str, level="INFO"):
     db.add(ActionLog(user_id=user_id, message=message, level=level))
     db.commit()
     logger.info(f"[{level}] [User {user_id}] {message}")
+
+
+def halt_trading_for_order_review(
+    ctx: "TradingFlowContext",
+    side: str,
+    ticker: str,
+    order_result: dict,
+) -> None:
+    ctx.db_settings.is_running = False
+    ctx.db.commit()
+    status = order_result.get("status", "UNCONFIRMED")
+    order_no = order_result.get("order_no", "")
+    message = (
+        f"[ORDER RECONCILIATION] {side} order for {ticker} is {status}. "
+        f"Automatic trading is paused while the order ledger retries broker reconciliation. "
+        f"Order: {order_no or 'UNKNOWN'}"
+    )
+    log_action(ctx.db, ctx.user_id, message, "ERROR")
+    send_message_async(
+        ctx.user_id,
+        f"*Automatic Trading Paused - Order Reconciliation*\n"
+        f"Side: `{side}`\n"
+        f"Ticker: `{ticker}`\n"
+        f"Status: `{status}`\n"
+        f"Order No: `{order_no or 'UNKNOWN'}`\n\n"
+        "The system will keep checking the broker and resume automatically after all unresolved orders are terminal."
+    )
 
 
 @dataclass
@@ -145,6 +186,16 @@ def prepare_trading_flow_context(
 ) -> TradingFlowContext | None:
     db_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
     if not db_settings or not db_settings.is_running:
+        return None
+    if has_unresolved_orders(db, user_id):
+        db_settings.is_running = False
+        db.commit()
+        log_action(
+            db,
+            user_id,
+            "[ORDER GUARD] Trading was paused because an unresolved broker order exists.",
+            "ERROR",
+        )
         return None
 
     holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
@@ -317,27 +368,27 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             if not parsed:
                 continue
             slot_key, clean_ticker = parsed
-            
+
             # 해당 슬롯의 전략 인스턴스 획득
             strategy_instance = ms_manager.strategies[slot_key]
-            
+
             # 실시간 가격 데이터 획득
             current_data = target_signal_map.get(clean_ticker)
             if not current_data:
                 current_data = ctx.signal_map.get(clean_ticker)
             if not current_data:
                 current_data = await analyze_single_ticker(clean_ticker)
-            
+
             if not current_data:
                 log_action(db, user_id, f"No technical data available for owned ticker {clean_ticker}. Skipping monitoring in this cycle.", "WARNING")
                 continue
-            
+
             current_price = current_data['price']
             # 평가가치 업데이트용 임시 보정
             h.current_price = current_price
-            
+
             profit_rate = ((current_price - h.avg_price) / h.avg_price) * 100
-            
+
             # 보유 전략 인스턴스 기준 재계산된 실시간 스코어 및 익절 신호 판정
             current_score = strategy_instance.calculate_score(current_data['details'] or current_data, sentiment, is_entry=False)
             is_smart_exit = current_data.get('details', {}).get('is_smart_exit', False)
@@ -357,31 +408,31 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             sell_reason = None
             is_breached = False
             breach_reason = ""
-            
+
             if profit_rate <= -stop_loss_pct:
                 is_breached = True
                 breach_reason = f"동적 손절선 이탈 (손절 기준 -{stop_loss_pct:.2f}% 돌파 | 현재 수익률: {profit_rate:.2f}%)"
             elif current_price <= h.highest_price * (1 - trailing_stop_pct / 100) and h.highest_price > h.avg_price:
                 is_breached = True
                 breach_reason = f"동적 트레일링 스탑 이탈 (최고가 ${h.highest_price:.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)"
-            
+
             # 휩쏘 방지 연속 2회 확정 가드
             if is_breached:
                 cache_key = (user_id, h.ticker)
                 BREACH_COUNT_CACHE[cache_key] = BREACH_COUNT_CACHE.get(cache_key, 0) + 1
                 count = BREACH_COUNT_CACHE[cache_key]
-                
+
                 if count >= 2:
                     sell_reason = breach_reason + " [2회 연속 이탈 확정]"
                 else:
                     log_action(db, user_id, f"[Noise Buffer] {h.ticker} first breach detected ({breach_reason}). Delaying sell for noise protection (Count: {count}/2).", "INFO")
             else:
                 BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
-            
+
             # 조기 스마트 익절
             if not sell_reason and profit_rate >= strategy_instance.min_smart_exit_profit and is_smart_exit:
                 sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
-            
+
             # 기술적 강세 시그널 붕괴
             elif not sell_reason and strategy_instance.is_signal_collapsed(current_score, sentiment):
                 sell_reason = f"강세 시그널 붕괴 ({current_score}점 도달)"
@@ -397,21 +448,126 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                         "ERROR"
                     )
                     continue
-                
-                # 브로커 주문 시에는 순수 티커(clean_ticker) 전달
-                res = await safe_broker_call(broker.sell_order, clean_ticker, h.quantity, price=current_price, session=ctx.session)
+
+                is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
+                order_intent = None
+                if is_kis_order:
+                    metadata = await safe_broker_call(
+                        broker.get_order_metadata,
+                        clean_ticker,
+                        ctx.session,
+                    )
+                    order_intent = create_order_intent(
+                        db,
+                        ctx.db_settings,
+                        side="SELL",
+                        ticker=clean_ticker,
+                        prefixed_ticker=h.ticker,
+                        ticker_name=h.ticker_name,
+                        requested_qty=h.quantity,
+                        submitted_price=current_price,
+                        exchange_code=metadata.get("exchange_code"),
+                        order_division=metadata.get("order_division"),
+                        regime_mode=sentiment,
+                        signal_score=current_score,
+                        sell_reason=sell_reason,
+                    )
+                    begin_order_submission(db, order_intent, ctx.db_settings)
+
+                try:
+                    res = await safe_broker_call(
+                        broker.sell_order,
+                        clean_ticker,
+                        h.quantity,
+                        price=current_price,
+                        session=ctx.session,
+                        **({"client_order_id": order_intent.intent_id} if order_intent else {}),
+                    )
+                except Exception as exc:
+                    if not order_intent:
+                        raise
+                    res = {
+                        "success": False,
+                        "order_submitted": True,
+                        "submission_unknown": True,
+                        "status": "ACK_UNKNOWN",
+                        "order_no": "",
+                        "filled_qty": 0,
+                        "filled_price": 0.0,
+                        "fill_confirmed": False,
+                        "message": f"Broker acknowledgement unknown: {exc}",
+                    }
+
+                if order_intent:
+                    application = finalize_order_submission(
+                        db,
+                        order_intent,
+                        ctx.db_settings,
+                        res,
+                    )
+                    if application.applied_qty > 0:
+                        filled_price = application.filled_price
+                        filled_qty = application.applied_qty
+                        realized_pnl = application.realized_pnl or 0.0
+                        calc_return_rate = application.return_rate or 0.0
+                        remaining_qty = application.remaining_qty or 0
+                        BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
+                        fill_label = (
+                            "sold"
+                            if remaining_qty == 0
+                            else f"partially sold ({filled_qty} filled, {remaining_qty} remaining)"
+                        )
+                        log_action(
+                            db,
+                            user_id,
+                            f"SUCCESS: {h.ticker} {fill_label} via {sell_reason} | Order: {res['order_no']}",
+                            "INFO",
+                        )
+
+                        filled_price_krw = filled_price * exchange_rate
+                        total_amount_usd = filled_price * filled_qty
+                        total_amount_krw = total_amount_usd * exchange_rate
+                        pnl_sign = "+" if realized_pnl >= 0 else "-"
+                        pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
+                        send_message_async(
+                            user_id,
+                            f"🔴 *[{strategy_instance.name} 자동매도 체결]*\n"
+                            f"종목: {clean_ticker} ({h.ticker_name})\n"
+                            f"• *체결 단가:* `${filled_price:,.2f}` (약 {filled_price_krw:,.0f}원)\n"
+                            f"• *체결 수량:* `{filled_qty}주`\n"
+                            f"• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n"
+                            f"• *매도 사유:* {sell_reason}\n\n"
+                            f"{pnl_emoji} *실수익률:* `{pnl_sign}{calc_return_rate:.2f}%`\n"
+                            f"💰 *실현 실수익:* `{pnl_sign}${abs(realized_pnl):,.2f}`\n"
+                            f"• *주문 번호:* `{res['order_no']}`",
+                        )
+                    if application.is_unresolved:
+                        halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
+                        return
+                    if application.applied_qty == 0 and not res.get("success"):
+                        log_action(db, user_id, f"SELL FAILED: {h.ticker} | {res['message']}", "ERROR")
+                    continue
+
+                requires_review = bool(res.get("order_submitted")) and not bool(res.get("fill_confirmed"))
+                if requires_review and res.get("status") != "PARTIAL":
+                    halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
+                    return
 
                 if res["success"]:
                     filled_price = res["filled_price"]
                     filled_qty = res["filled_qty"]
-                    
+                    if filled_qty <= 0 or filled_qty > h.quantity:
+                        log_action(db, user_id, f"SELL INVALID FILL: {h.ticker} | {res}", "ERROR")
+                        halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
+                        return
+
                     # 수수료 및 SEC Fee 차감 정밀 손익 계산
                     buy_gross = h.avg_price * filled_qty
                     buy_fee = buy_gross * settings.KIS_FEE_RATE
                     sell_gross = filled_price * filled_qty
                     sell_fee = sell_gross * settings.KIS_FEE_RATE
                     sec_fee = sell_gross * settings.SEC_FEE_RATE
-                    
+
                     realized_pnl = sell_gross - buy_gross - buy_fee - sell_fee - sec_fee
                     calc_return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
 
@@ -428,19 +584,24 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                         realized_pnl=round(realized_pnl, 2),
                         return_rate=round(calc_return_rate, 2)
                     ))
-                    db.delete(h)
+                    is_full_fill = filled_qty >= h.quantity
+                    if is_full_fill:
+                        db.delete(h)
+                    else:
+                        h.quantity -= filled_qty
                     db.commit()
                     BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
-                    log_action(db, user_id, f"SUCCESS: {h.ticker} sold via {sell_reason} | Order: {res['order_no']}", "INFO")
-                    
+                    fill_label = "sold" if is_full_fill else f"partially sold ({filled_qty} filled, {h.quantity} remaining)"
+                    log_action(db, user_id, f"SUCCESS: {h.ticker} {fill_label} via {sell_reason} | Order: {res['order_no']}", "INFO")
+
                     filled_price_krw = filled_price * exchange_rate
                     total_amount_usd = filled_price * filled_qty
                     total_amount_krw = total_amount_usd * exchange_rate
-                    
+
                     pnl_sign = "+" if realized_pnl >= 0 else "-"
                     pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
                     realized_pnl_abs = abs(realized_pnl)
-                    
+
                     send_message_async(
                         user_id,
                         f"🔴 *[{strategy_instance.name} 자동매도 체결]*\n"
@@ -453,6 +614,9 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                         f"💰 *실현 실수익:* `{pnl_sign}${realized_pnl_abs:,.2f}`\n"
                         f"• *주문 번호:* `{res['order_no']}`"
                     )
+                    if requires_review:
+                        halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
+                        return
                 else:
                     log_action(db, user_id, f"SELL FAILED: {h.ticker} | {res['message']}", "ERROR")
         except Exception as item_err:
@@ -750,7 +914,96 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 )
                 continue
 
-            res = await safe_broker_call(ctx.broker.buy_order, clean_ticker, final_qty, price=current_price, session=ctx.session)
+            is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
+            order_intent = None
+            if is_kis_order:
+                metadata = await safe_broker_call(
+                    ctx.broker.get_order_metadata,
+                    clean_ticker,
+                    ctx.session,
+                )
+                order_intent = create_order_intent(
+                    db,
+                    ctx.db_settings,
+                    side="BUY",
+                    ticker=clean_ticker,
+                    prefixed_ticker=prefixed_ticker,
+                    ticker_name=signal["name"],
+                    requested_qty=final_qty,
+                    submitted_price=current_price,
+                    exchange_code=metadata.get("exchange_code"),
+                    order_division=metadata.get("order_division"),
+                    buy_stage=next_stage,
+                    regime_mode=ctx.sentiment,
+                    signal_score=score,
+                )
+                begin_order_submission(db, order_intent, ctx.db_settings)
+
+            try:
+                res = await safe_broker_call(
+                    ctx.broker.buy_order,
+                    clean_ticker,
+                    final_qty,
+                    price=current_price,
+                    session=ctx.session,
+                    **({"client_order_id": order_intent.intent_id} if order_intent else {}),
+                )
+            except Exception as exc:
+                if not order_intent:
+                    raise
+                res = {
+                    "success": False,
+                    "order_submitted": True,
+                    "submission_unknown": True,
+                    "status": "ACK_UNKNOWN",
+                    "order_no": "",
+                    "filled_qty": 0,
+                    "filled_price": 0.0,
+                    "fill_confirmed": False,
+                    "message": f"Broker acknowledgement unknown: {exc}",
+                }
+
+            if order_intent:
+                application = finalize_order_submission(
+                    db,
+                    order_intent,
+                    ctx.db_settings,
+                    res,
+                )
+                if application.applied_qty > 0:
+                    filled_price = application.filled_price
+                    filled_qty = application.applied_qty
+                    slot_cash_usd -= (filled_price * filled_qty) * (1 + settings.KIS_FEE_RATE)
+                    if application.created_holding:
+                        slot_holdings_count += 1
+                    log_action(
+                        db,
+                        user_id,
+                        f"SUCCESS: {prefixed_ticker} broker fill applied ({filled_qty} shares)",
+                        "INFO",
+                    )
+                    send_successful_buy_message(
+                        ctx=ctx,
+                        strategy_instance=strategy_instance,
+                        clean_ticker=clean_ticker,
+                        signal=signal,
+                        filled_price=filled_price,
+                        filled_qty=filled_qty,
+                        next_stage=next_stage,
+                        order_no=res["order_no"],
+                    )
+                if application.is_unresolved:
+                    halt_trading_for_order_review(ctx, "BUY", clean_ticker, res)
+                    return False
+                if application.applied_qty == 0 and not res.get("success"):
+                    log_action(db, user_id, f"BUY FAILED: {prefixed_ticker} | {res['message']}", "ERROR")
+                continue
+
+            requires_review = bool(res.get("order_submitted")) and not bool(res.get("fill_confirmed"))
+            if requires_review and res.get("status") != "PARTIAL":
+                halt_trading_for_order_review(ctx, "BUY", clean_ticker, res)
+                return False
+
             if not res["success"]:
                 log_action(db, user_id, f"BUY FAILED: {prefixed_ticker} | {res['message']}", "ERROR")
                 continue
@@ -782,6 +1035,9 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 next_stage=next_stage,
                 order_no=res["order_no"],
             )
+            if requires_review:
+                halt_trading_for_order_review(ctx, "BUY", clean_ticker, res)
+                return False
 
     return True
 
@@ -819,7 +1075,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
     except (RequestsRequestException, httpx.RequestError, ConnectionError, socket.gaierror, socket.timeout, TimeoutError, OSError) as ne:
         db.rollback()
         logger.warning(f"[Scheduler Auto-Recovery] Network disruption detected for User {user_id}. DB rolled back. Error: {ne}")
-        
+
         now = datetime.now()
         last_sent = _user_network_alert_sent.get(user_id)
         if not last_sent or (now - last_sent) > timedelta(minutes=30):
@@ -849,7 +1105,7 @@ async def refresh_scanner_cache():
             logger.info("[Scanner Cache] Previous refresh still running. Skipping duplicate refresh.")
             return
         _scanner_refresh_in_progress = True
-    
+
     try:
         # 장 외 시간 API 비용/호출 낭비 방지 가드
         session = get_market_session()
@@ -941,6 +1197,15 @@ def trading_loop_wrapper():
         else:
             loop.run_until_complete(async_trading_loop())
 
+
+def reconcile_open_orders_wrapper():
+    reconcile_open_orders_once()
+
+
+def discover_orphan_orders_wrapper():
+    discover_orphan_orders_once()
+
+
 def start_scheduler():
     if not scheduler.running:
         # ① 시장 개요 캐시 갱신: 1분 주기 (헤더 API는 캐시만 즉시 반환)
@@ -952,7 +1217,27 @@ def start_scheduler():
         scheduler.add_job(scanner_cache_wrapper, 'interval', minutes=10, id='scanner_cache_job', next_run_time=datetime.now())
         # ④ 자동매매 루프: 1분 주기 (캐시된 시그널로 봇 실행 사용자 처리)
         scheduler.add_job(trading_loop_wrapper, 'interval', minutes=1, id='main_trade_job', next_run_time=datetime.now() + timedelta(seconds=20))
-        # ⑤ 텔레그램 일일 리포트 발송: 매일 한국시간 17:10 (미국장 마감 직후)
+        # ⑤ 주문 응답 저장 전 장애로 남은 고아 주문 탐색: 1분 주기
+        scheduler.add_job(
+            discover_orphan_orders_wrapper,
+            'interval',
+            minutes=1,
+            id='orphan_order_discovery_job',
+            next_run_time=datetime.now() + timedelta(seconds=2),
+            max_instances=1,
+            coalesce=True,
+        )
+        # ⑥ 미해결 증권사 주문 재조정: 30초 주기, 중복 실행 금지
+        scheduler.add_job(
+            reconcile_open_orders_wrapper,
+            'interval',
+            seconds=30,
+            id='broker_order_reconciliation_job',
+            next_run_time=datetime.now() + timedelta(seconds=5),
+            max_instances=1,
+            coalesce=True,
+        )
+        # ⑦ 텔레그램 일일 리포트 발송: 매일 한국시간 17:10 (미국장 마감 직후)
         scheduler.add_job(send_daily_report_to_all_users_sync, 'cron', hour=17, minute=10, id='daily_telegram_report_job')
         scheduler.start()
         print("[Scheduler] APScheduler Background Trading Engine Started.")

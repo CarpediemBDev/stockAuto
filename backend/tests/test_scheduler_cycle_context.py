@@ -125,3 +125,11 @@ def test_start_scheduler_registers_swing_prediction_jobs(monkeypatch):
     assert job_by_id["swing_prediction_daily_job"]["hour"] == 8
     assert job_by_id["swing_prediction_daily_job"]["minute"] == 0
     assert job_by_id["swing_prediction_daily_job"]["func"] is scheduler.swing_prediction_cache_wrapper
+    assert job_by_id["broker_order_reconciliation_job"]["trigger"] == "interval"
+    assert job_by_id["broker_order_reconciliation_job"]["seconds"] == 30
+    assert job_by_id["broker_order_reconciliation_job"]["max_instances"] == 1
+    assert job_by_id["broker_order_reconciliation_job"]["func"] is scheduler.reconcile_open_orders_wrapper
+    assert job_by_id["orphan_order_discovery_job"]["trigger"] == "interval"
+    assert job_by_id["orphan_order_discovery_job"]["minutes"] == 1
+    assert job_by_id["orphan_order_discovery_job"]["max_instances"] == 1
+    assert job_by_id["orphan_order_discovery_job"]["func"] is scheduler.discover_orphan_orders_wrapper
