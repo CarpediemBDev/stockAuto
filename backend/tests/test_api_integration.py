@@ -234,3 +234,67 @@ def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, int
         assert db.query(WatchList).count() == 1
     finally:
         db.close()
+
+
+def test_brute_force_defense_and_lockout_reset(integration_app, test_session_factory):
+    from datetime import timedelta
+    from app.core.models import utc_now_naive
+
+    with TestClient(integration_app) as client:
+        # 1. 회원가입
+        signup_response = client.post(
+            "/api/v1/auth/signup",
+            json={"username": "bruteforce_tester", "password": "correctpassword"},
+        )
+        assert signup_response.status_code == 201
+
+        # 2. 4회 로그인 실패 -> 401 리턴
+        for _ in range(4):
+            response = client.post(
+                "/api/v1/auth/login",
+                json={"username": "bruteforce_tester", "password": "wrongpassword"},
+            )
+            assert response.status_code == 401
+
+        # 3. 5번째 로그인 실패 -> 401 리턴 & 계정 잠금 설정됨
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "bruteforce_tester", "password": "wrongpassword"},
+        )
+        assert response.status_code == 401
+
+        # 4. 6번째 로그인 시도 -> 403 잠금 상태 에러 리턴
+        locked_response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "bruteforce_tester", "password": "wrongpassword"},
+        )
+        assert locked_response.status_code == 403
+        assert "잠겼습니다" in locked_response.json()["detail"]
+
+        # 5. DB에서 강제로 locked_until을 과거로 설정 (잠금 시간 만료 모사)
+        db = test_session_factory()
+        try:
+            user = db.query(User).filter(User.username == "bruteforce_tester").first()
+            assert user.failed_login_attempts == 5
+            assert user.locked_until is not None
+            user.locked_until = utc_now_naive() - timedelta(minutes=1)
+            db.commit()
+        finally:
+            db.close()
+
+        # 6. 잠금 만료 후 첫 시도 (잘못된 패스워드) -> 401 리턴 (403이 아님!)
+        # 온디맨드로 리셋되어 실패 건수가 0이 되고 다시 1로 오르며 locked_until이 지워져야 함
+        retry_response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "bruteforce_tester", "password": "wrongpassword"},
+        )
+        assert retry_response.status_code == 401
+
+        # 7. DB 최종 상태 검증
+        db = test_session_factory()
+        try:
+            user = db.query(User).filter(User.username == "bruteforce_tester").first()
+            assert user.failed_login_attempts == 1
+            assert user.locked_until is None
+        finally:
+            db.close()

@@ -127,7 +127,7 @@ async def scan_market_expert() -> list:
     """
     # 0. 시장 감정 분석 및 시드 종목 확보
     sentiment = await check_market_sentiment()
-    tickers = await get_seed_tickers()
+    tickers, source_map = await get_seed_tickers()
     if not tickers: return []
     
     # 1. 지수 데이터 확보 (Relative Strength 계산용)
@@ -231,9 +231,12 @@ async def scan_market_expert() -> list:
                     if is_near_recent_high and momentum_candles and premarket_gap_pct >= 5.0:
                         s1_score += 10
                         
-                    if s1_score >= 30 or rvol >= 2.5:
+                    # 관심종목(WATCHLIST)은 Stage 1 필터 면제: 점수 무관하게 무조건 Stage 2 진입
+                    is_watchlist = "WATCHLIST" in source_map.get(ticker, [])
+                    if s1_score >= 30 or rvol >= 2.5 or is_watchlist:
                         all_results.append({
                             "ticker": ticker,
+                            "source": source_map.get(ticker, ["MARKET"]),
                             "s1_score": s1_score,
                             "df_15m": df,
                             "gap_pct": round(gap_pct, 2),
@@ -401,6 +404,7 @@ async def scan_market_expert() -> list:
                 
                 final_results.append({
                     "ticker": ticker,
+                    "source": cand.get("source", ["MARKET"]),
                     "name": get_ticker_name(ticker),
                     "price": last_close,
                     "signal_score": final_score,

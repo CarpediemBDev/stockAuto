@@ -32,6 +32,7 @@ interface ScoreCardFactor {
 interface ScanResult {
   ticker: string;
   name: string;
+  source?: string[];
   price: number;
   signal_score: number;
   signal_type: "STRONG_BUY" | "BUY" | "WATCH" | "NEUTRAL";
@@ -306,7 +307,7 @@ export function OverseasScanner({
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/30">
-              {results.map((item, idx) => {
+              {results.filter((r) => !r.source || r.source.includes("MARKET")).map((item, idx) => {
                 const signal = SIGNAL_CONFIG[item.signal_type] || SIGNAL_CONFIG.NEUTRAL;
                 const SignalIcon = signal.icon;
                 const isInWatchlist = watchlistTickers.includes(item.ticker);

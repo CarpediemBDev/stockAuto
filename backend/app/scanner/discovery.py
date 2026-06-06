@@ -3,6 +3,9 @@ import asyncio
 from app.core.database import SessionLocal
 from app.core.models import WatchList
 
+# 고정 미국 주요 종목군 (모든 외부 소스 실패 시 최후의 안전망)
+SAFETY_TECH_LIST = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "AMD", "NFLX", "TSM"]
+
 def fetch_db_watchlist() -> list:
     """DB에서 사용자의 관심종목 리스트를 가져옵니다."""
     db = SessionLocal()
@@ -16,45 +19,6 @@ def fetch_db_watchlist() -> list:
         return []
     finally:
         db.close()
-
-async def fetch_kis_rankings() -> list:
-    """KIS API를 통해 실시간 순위 종목을 가져옵니다."""
-    tickers = []
-    try:
-        # DB에서 자동매매 중인 사용자 설정을 가져와 KISClient 생성
-        from app.core.models import UserSettings
-        from app.bot.kis_api import KISClient
-
-        db = SessionLocal()
-        try:
-            db_settings = db.query(UserSettings).filter(
-                UserSettings.is_running == True,
-                UserSettings.trade_mode.in_(["MOCK", "REAL"]),
-                UserSettings.kis_verification_status == "verified",
-                UserSettings.kis_app_key.isnot(None),
-                UserSettings.kis_app_secret.isnot(None),
-                UserSettings.kis_account_no.isnot(None),
-            ).first()
-
-            if not db_settings:
-                return []
-
-            kis_client = KISClient(db_settings)
-        finally:
-            db.close()
-
-        exchanges = ["NAS", "NYS"]
-        rank_types = ["2", "3"] # 2: 거래대금, 3: 등락률
-        for ex in exchanges:
-            for rt in rank_types:
-                res = await asyncio.to_thread(kis_client.get_overseas_ranking, ex, rt)
-                if res:
-                    tickers.extend([item.get("symb") for item in res if item.get("symb")])
-        if tickers: print(f"[Discovery] Found {len(tickers)} tickers via KIS API.")
-        return list(set(tickers))
-    except Exception as e:
-        print(f"[Discovery] KIS API failed: {e}")
-        return []
 
 async def fetch_yahoo_most_active() -> list:
     """Yahoo Finance API를 통해 실시간 활성 종목을 가져옵니다."""
@@ -73,28 +37,45 @@ async def fetch_yahoo_most_active() -> list:
         print(f"[Discovery] Yahoo Screener failed: {e}")
     return []
 
-async def get_seed_tickers():
+async def get_seed_tickers() -> tuple[list, dict[str, list[str]]]:
     """
     여러 소스에서 분석 대상 종목(Seed Tickers)을 병렬로 수집하고 병합합니다.
+    Returns: (tickers, source_map)
+      - tickers: 중복 제거된 전체 종목 리스트
+      - source_map: {ticker: ["MARKET"|"WATCHLIST", ...]} 출처 꼬리표 맵
     """
     print("\n[Discovery] Starting parallel ticker discovery process...")
 
-    # 1. 병렬 수집 예약 (KIS + Yahoo)
-    kis_task = fetch_kis_rankings()
+    source_map: dict[str, set[str]] = {}
+
+    # 1. 병렬 수집 예약 (Yahoo Finance)
     yahoo_task = fetch_yahoo_most_active()
 
     # 2. DB 관심종목 수집 (동기)
     db_list = fetch_db_watchlist()
 
-    # 3. 모든 소스 결과 대기 및 병합
-    kis_list, yahoo_list = await asyncio.gather(kis_task, yahoo_task)
-    final_universe = list(set(kis_list + db_list + yahoo_list))
+    # 3. 모든 소스 결과 대기
+    yahoo_list = await yahoo_task
+
+    # 4. 출처 꼬리표(Source Tag) 부착
+    for t in yahoo_list:
+        source_map.setdefault(t, set()).add("MARKET")
+    for t in SAFETY_TECH_LIST:
+        source_map.setdefault(t, set()).add("MARKET")
+    for t in db_list:
+        source_map.setdefault(t, set()).add("WATCHLIST")
+
+    final_universe = list(source_map.keys())
 
     if not final_universe:
         print("[Discovery] All sources failed. Using safety tech list.")
-        return ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "AMD", "NFLX", "TSM"]
+        fallback_map = {t: ["MARKET"] for t in SAFETY_TECH_LIST}
+        return list(SAFETY_TECH_LIST), fallback_map
+
+    # set → sorted list 변환 (JSON 직렬화 호환)
+    final_source_map = {t: sorted(s) for t, s in source_map.items()}
 
     print(f"[Discovery] Process complete. Final universe size: {len(final_universe)}")
-    print(f" - KIS: {len(kis_list)} | Yahoo: {len(yahoo_list)} | Watchlist: {len(db_list)}")
+    print(f" - Yahoo: {len(yahoo_list)} | Watchlist: {len(db_list)} | Safety: {len(SAFETY_TECH_LIST)}")
 
-    return final_universe
+    return final_universe, final_source_map

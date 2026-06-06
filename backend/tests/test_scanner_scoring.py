@@ -37,7 +37,7 @@ async def test_scan_market_expert_maps_realtime_strategy_fields(monkeypatch):
     df_qqq = make_ohlcv(qqq_index, [100 + (i * 0.1) for i in range(60)], [1000000] * 60)
 
     async def fake_get_seed_tickers():
-        return ["NVDA"]
+        return ["NVDA"], {"NVDA": ["MARKET"]}
 
     async def fake_check_market_sentiment():
         return "BULLISH"

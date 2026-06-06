@@ -22,6 +22,7 @@ interface TranslationItem {
 interface ScannerSignal {
   ticker: string;
   signal_score: number;
+  source?: string[];
 }
 
 const ManualWatchList = () => {
@@ -262,7 +263,7 @@ const ManualWatchList = () => {
                     <td className="px-2 py-3">
                       {/* Premium Score Visualization */}
                       {(() => {
-                        const sig = signals.find(s => s.ticker.toUpperCase() === item.ticker.toUpperCase());
+                        const sig = signals.find(s => s.ticker.toUpperCase() === item.ticker.toUpperCase() && (!s.source || s.source.includes("WATCHLIST")));
                         if (sig) {
                           const score = sig.signal_score;
                           const scoreColor = score >= 80 ? 'text-rose-500 bg-rose-500/10 border-rose-500/20' : 

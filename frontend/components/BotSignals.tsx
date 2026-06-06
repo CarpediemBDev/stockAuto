@@ -16,6 +16,7 @@ interface Signal {
   reason?: string;
   rsi?: number;
   rvol?: number;
+  source?: string[];
 }
 
 interface BotSignalsProps {
@@ -31,7 +32,8 @@ const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
     try {
       // 1. 최신 감지 시그널 조회
       const res = await scannerAPI.getLatest({ signal });
-      setSignals(res.data);
+      const marketSignals = res.data.filter((s: Signal) => !s.source || s.source.includes("MARKET"));
+      setSignals(marketSignals);
 
       // 2. 실시간 돌파 레이더 종목 조회
       const resBalance = await accountAPI.getBalance({ signal });
