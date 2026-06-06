@@ -18,6 +18,9 @@ class SettingsUpdateSchema(BaseModel):
     broker_provider: str
     telegram_chat_id: Optional[str] = None
     telegram_enabled: Optional[bool] = False
+    kis_app_key: Optional[str] = None
+    kis_app_secret: Optional[str] = None
+    kis_account_no: Optional[str] = None
 
 
 class KisCredentialsSchema(BaseModel):
@@ -370,7 +373,7 @@ def update_user_settings(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """현재 로그인한 사용자의 일반 설정을 저장합니다. KIS 원문 인증정보는 처리하지 않습니다."""
+    """현재 로그인한 사용자의 일반 설정 및 KIS 인증정보를 통합 저장합니다."""
     trade_mode = _normalize_trade_mode(payload.trade_mode)
     current_settings = current_user.settings
     if (
@@ -382,24 +385,58 @@ def update_user_settings(
             status_code=status.HTTP_409_CONFLICT,
             detail="미해결 주문 재조정 중에는 거래 모드를 변경할 수 없습니다.",
         )
-    if trade_mode in {"MOCK", "REAL"}:
-        if not _has_usable_kis_credentials(current_settings):
+        
+    db_settings = _ensure_db_settings(current_user, db)
+
+    # 1. KIS 인증키가 새로 들어왔을 경우 실시간 통신 검증 후 암호화 저장 처리
+    # (빈 문자열이 아니면서 PLACEHOLDER 값이 하나라도 존재하지 않는 새로운 입력값일 때)
+    has_new_kis_inputs = not all(_is_missing_or_placeholder(v) for v in (payload.kis_app_key, payload.kis_app_secret, payload.kis_account_no))
+    
+    if has_new_kis_inputs:
+        if trade_mode == "SIMULATED":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="MOCK/REAL 모드를 사용하려면 KIS 인증정보를 먼저 검증 및 저장하세요.",
+                detail="SIMULATED 모드는 KIS 인증정보 저장이 필요하지 않습니다.",
             )
-        if getattr(current_settings, "kis_verification_status", None) != "verified":
+            
+        success, message = _verify_kis_values(
+            trade_mode,
+            payload.kis_app_key,
+            payload.kis_app_secret,
+            payload.kis_account_no,
+            current_user.id,
+        )
+        if not success:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+            
+        try:
+            db_settings.kis_app_key = encrypt_credential(payload.kis_app_key)
+            db_settings.kis_app_secret = encrypt_credential(payload.kis_app_secret)
+            db_settings.kis_account_no = encrypt_credential(payload.kis_account_no)
+        except CredentialCryptoError:
+            _raise_crypto_http_error()
+            
+        db_settings.kis_verification_status = "verified"
+        db_settings.kis_verified_trade_mode = trade_mode
+        db_settings.kis_verified_at = utc_now_naive()
+
+    if trade_mode in {"MOCK", "REAL"}:
+        if not _has_usable_kis_credentials(db_settings):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="MOCK/REAL 모드를 사용하려면 KIS 인증정보를 입력 및 검증해야 합니다.",
+            )
+        if getattr(db_settings, "kis_verification_status", None) != "verified":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="KIS 인증정보 검증 상태가 verified가 아닙니다. 다시 검증하세요.",
             )
-        if getattr(current_settings, "kis_verified_trade_mode", None) != trade_mode:
+        if getattr(db_settings, "kis_verified_trade_mode", None) != trade_mode:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"{trade_mode} 모드용 KIS 인증정보 검증이 필요합니다.",
             )
 
-    db_settings = _ensure_db_settings(current_user, db)
     db_settings.trade_mode = trade_mode
     db_settings.broker_provider = payload.broker_provider
     db_settings.telegram_chat_id = payload.telegram_chat_id
@@ -408,7 +445,7 @@ def update_user_settings(
     db.commit()
     db.refresh(db_settings)
 
-    print(f"[*] Telegram settings updated dynamically for User ID: {current_user.id} (Global Bot Architecture)")
+    print(f"[*] Settings updated dynamically for User ID: {current_user.id} (Trade Mode: {trade_mode})")
 
     return _settings_response(db_settings)
 

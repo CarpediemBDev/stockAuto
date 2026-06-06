@@ -84,6 +84,8 @@ export default function PersonalSettingsPage() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [showLiquidateModal, setShowLiquidateModal] = useState(false);
   const [isDangerActionLoading, setIsDangerActionLoading] = useState(false);
+  const [isPersonalReportSending, setIsPersonalReportSending] = useState(false);
+  const [isKisVerified, setIsKisVerified] = useState(false);
 
   useEffect(() => {
     if (isInitialized) {
@@ -154,7 +156,7 @@ export default function PersonalSettingsPage() {
     return "미저장";
   }, [dbSettings.has_kis_credentials, dbSettings.kis_verification_status, isVerifiedForSelectedMode]);
 
-  const handleVerifyAndSaveKisCredentials = async () => {
+  const handleVerifyKis = async () => {
     if (!isKisMode) {
       toast.info("SIMULATED 모드는 KIS 인증정보가 필요하지 않습니다.");
       return;
@@ -167,18 +169,18 @@ export default function PersonalSettingsPage() {
 
     setIsCredentialSaving(true);
     try {
-      const res = await api.post("/admin/kis-credentials/verify-and-save", {
+      const res = await api.post("/admin/verify-kis", {
         trade_mode: dbSettings.trade_mode,
         ...kisForm,
       });
-      if (res.data?.settings) {
-        applySettings(res.data.settings);
+      if (res.data?.success) {
+        setIsKisVerified(true);
+        toast.success("검증 성공! 오른쪽의 '설정 저장' 버튼을 눌러 적용해주세요.");
       } else {
-        await fetchSettings();
+        toast.error(res.data?.message || "KIS 인증정보 검증에 실패했습니다.");
       }
-      toast.success(res.data?.message || "KIS 인증정보가 검증 및 저장되었습니다.");
     } catch (err) {
-      toast.error((err as Error).message || "KIS 인증정보 검증 및 저장에 실패했습니다.");
+      toast.error((err as Error).message || "KIS 인증정보 검증에 실패했습니다.");
     } finally {
       setIsCredentialSaving(false);
     }
@@ -207,23 +209,39 @@ export default function PersonalSettingsPage() {
       return;
     }
 
-    if (isKisMode && !isVerifiedForSelectedMode) {
-      toast.error(`${dbSettings.trade_mode} 모드를 저장하려면 KIS 인증정보를 먼저 검증 및 저장하세요.`);
-      return;
+    const hasNewKisInput = Boolean(kisForm.kis_app_key.trim() || kisForm.kis_app_secret.trim() || kisForm.kis_account_no.trim());
+
+    if (isKisMode) {
+      if (hasNewKisInput && !isKisVerified) {
+         toast.error("새로 입력된 KIS 키가 있습니다. 좌측의 'KIS 검증' 버튼을 먼저 눌러주세요.");
+         return;
+      }
+      if (!hasNewKisInput && !isVerifiedForSelectedMode) {
+         toast.error(`${dbSettings.trade_mode} 모드를 저장하려면 KIS 인증정보를 입력 후 검증해주세요.`);
+         return;
+      }
     }
 
     setShowRealWarning(false);
     setIsSaving(true);
 
     try {
-      const res = await api.post("/admin/", {
+      const payload: Record<string, unknown> = {
         trade_mode: dbSettings.trade_mode,
         broker_provider: dbSettings.broker_provider,
         telegram_chat_id: dbSettings.telegram_chat_id,
         telegram_enabled: dbSettings.telegram_enabled,
-      });
+      };
+      
+      if (hasNewKisInput) {
+        payload.kis_app_key = kisForm.kis_app_key.trim();
+        payload.kis_app_secret = kisForm.kis_app_secret.trim();
+        payload.kis_account_no = kisForm.kis_account_no.trim();
+      }
+
+      const res = await api.post("/admin/", payload);
       applySettings(res.data);
-      toast.success("설정이 저장되었습니다.");
+      toast.success("설정이 통합 저장되었습니다.");
     } catch (err) {
       toast.error((err as Error).message || "설정 저장에 실패했습니다.");
     } finally {
@@ -255,6 +273,18 @@ export default function PersonalSettingsPage() {
       toast.error((err as Error).message || "강제 청산 중 오류가 발생했습니다.");
     } finally {
       setIsDangerActionLoading(false);
+    }
+  };
+
+  const handleTriggerPersonalReport = async () => {
+    setIsPersonalReportSending(true);
+    try {
+      await api.post('/report/trigger-personal-report');
+      toast.success("본인 텔레그램으로 성적표가 발송되었습니다.");
+    } catch (err) {
+      toast.error((err as Error).message || "리포트 발송 중 오류가 발생했습니다.");
+    } finally {
+      setIsPersonalReportSending(false);
     }
   };
 
@@ -426,13 +456,21 @@ export default function PersonalSettingsPage() {
                         </div>
                       )}
 
-                      <div className="grid grid-cols-1 gap-3">
+                      <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-5 space-y-4">
+                        <div className="flex flex-col gap-1 border-b border-zinc-800/50 pb-3">
+                          <h3 className="text-xs font-extrabold text-zinc-200 flex items-center gap-2">
+                            <Key className="w-4 h-4 text-emerald-400" />
+                            KIS 인증키 전용 관리
+                          </h3>
+                          <p className="text-[10px] text-zinc-500">인증키는 KIS 서버를 통해 실시간 검증을 거친 후 암호화되어 분리 저장됩니다.</p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3">
                         <div>
                           <label className="block text-xs font-semibold text-zinc-400 mb-1.5">APP KEY</label>
                           <input
                             type="text"
                             value={kisForm.kis_app_key}
-                            onChange={(e) => setKisForm((prev) => ({ ...prev, kis_app_key: e.target.value }))}
+                            onChange={(e) => { setKisForm((prev) => ({ ...prev, kis_app_key: e.target.value })); setIsKisVerified(false); }}
                             placeholder={dbSettings.has_kis_credentials ? "•••••••••••••••• (새로 입력 시 덮어쓰기)" : "Enter APP KEY"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="off"
@@ -444,7 +482,7 @@ export default function PersonalSettingsPage() {
                           <input
                             type="password"
                             value={kisForm.kis_app_secret}
-                            onChange={(e) => setKisForm((prev) => ({ ...prev, kis_app_secret: e.target.value }))}
+                            onChange={(e) => { setKisForm((prev) => ({ ...prev, kis_app_secret: e.target.value })); setIsKisVerified(false); }}
                             placeholder={dbSettings.has_kis_credentials ? "•••••••••••••••• (새로 입력 시 덮어쓰기)" : "Enter APP SECRET"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="new-password"
@@ -456,7 +494,7 @@ export default function PersonalSettingsPage() {
                           <input
                             type="text"
                             value={kisForm.kis_account_no}
-                            onChange={(e) => setKisForm((prev) => ({ ...prev, kis_account_no: e.target.value }))}
+                            onChange={(e) => { setKisForm((prev) => ({ ...prev, kis_account_no: e.target.value })); setIsKisVerified(false); }}
                             placeholder={dbSettings.has_kis_credentials ? `${dbSettings.kis_account_no_masked || "••••••••"} (새로 입력 시 덮어쓰기)` : "12345678-01"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="off"
@@ -480,25 +518,26 @@ export default function PersonalSettingsPage() {
                             인증정보 삭제
                           </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={handleVerifyAndSaveKisCredentials}
-                          disabled={isCredentialSaving || isCredentialDeleting}
-                          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-4 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
-                        >
-                          {isCredentialSaving ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <ShieldCheck className="w-3.5 h-3.5" />
-                          )}
-                          KIS 검증 및 저장
-                        </button>
+
+                      </div>
                       </div>
                     </div>
                   )}
                 </div>
 
-                <div className="flex justify-end pt-6 border-t border-zinc-900">
+                <div className="flex justify-between items-center pt-6 border-t border-zinc-900">
+                  <button
+                    onClick={handleVerifyKis}
+                    disabled={isCredentialSaving || isSaving || dbSettings.trade_mode === "SIMULATED"}
+                    className={`px-5 py-2.5 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center gap-2 cursor-pointer shadow-md ${
+                      isKisVerified 
+                        ? "bg-zinc-800 text-emerald-400 border border-emerald-500/30" 
+                        : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30 disabled:opacity-50"
+                    }`}
+                  >
+                    {isCredentialSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                    {isKisVerified ? "검증 완료됨" : "KIS 검증"}
+                  </button>
                   <button
                     onClick={() => handleSave(false)}
                     disabled={isSaving}
@@ -572,16 +611,35 @@ export default function PersonalSettingsPage() {
                       className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono text-xs disabled:opacity-40 transition-all"
                     />
                   </div>
+
+                  <div className="p-4 rounded-lg border border-indigo-500/20 bg-indigo-500/5 space-y-3">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs font-bold text-indigo-400">내 성적표 수동 발송</span>
+                      <p className="text-[10px] text-zinc-400">최근 24시간 거래 성적을 내 텔레그램으로 즉시 발송합니다.</p>
+                    </div>
+                    <button
+                      onClick={handleTriggerPersonalReport}
+                      disabled={!dbSettings.telegram_enabled || isPersonalReportSending}
+                      className={`inline-flex w-full items-center justify-center gap-2 px-4 py-3 rounded-lg text-xs font-black transition-all active:scale-[0.98] shadow-md ${
+                        dbSettings.telegram_enabled && !isPersonalReportSending
+                          ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/20"
+                          : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                      }`}
+                    >
+                      {isPersonalReportSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                      내 성적표 지금 받기
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex justify-end pt-6 border-t border-zinc-900">
                   <button
                     onClick={() => handleSave(false)}
                     disabled={isSaving}
-                    className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer"
+                    className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-900/30"
                   >
                     {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                    저장
+                    텔레그램 설정 저장
                   </button>
                 </div>
               </div>
