@@ -1,27 +1,22 @@
 "use client";
 
-import React, { useEffect, useState, startTransition } from "react";
+import React, { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useAuthStore } from "@/store/authStore";
 import { Dashboard } from "@/components/Dashboard";
 import MarketHeader from "@/components/MarketHeader";
 
 export default function Home() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const { isAuthenticated, isInitialized } = useAuthStore();
 
   useEffect(() => {
-    const token = localStorage.getItem("stockauto_token");
-    if (!token) {
+    if (isInitialized && !isAuthenticated) {
       router.push("/login");
-    } else {
-      startTransition(() => {
-        setIsAuthenticated(true);
-      });
     }
-  }, [router]);
+  }, [isInitialized, isAuthenticated, router]);
 
-
-  if (!isAuthenticated) {
+  if (!isInitialized || !isAuthenticated) {
     return (
       <div className="min-h-[calc(100vh-4rem)] bg-black flex items-center justify-center text-zinc-400 text-sm">
         인증 정보 확인 중...

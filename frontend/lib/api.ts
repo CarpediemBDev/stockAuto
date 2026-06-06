@@ -1,20 +1,48 @@
-import axios, { AxiosRequestConfig } from 'axios';
+import axios, { AxiosRequestConfig, AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { useAuthStore } from '../store/authStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE,
   timeout: 15000,
+  withCredentials: true, // HttpOnly 쿠키 통신을 위한 필수 설정
 });
 
-// Request Interceptor: JWT 토큰 자동 바인딩 (로컬스토리지 토큰 주입)
+let isRefreshing = false;
+interface PendingRequest {
+  resolve: (token: string | null) => void;
+  reject: (reason: unknown) => void;
+}
+
+interface RetryableRequestConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean;
+}
+
+interface ApiErrorPayload {
+  error?: { message?: string };
+  detail?: string;
+}
+
+let failedQueue: PendingRequest[] = [];
+
+const processQueue = (error: unknown, token: string | null = null) => {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
+
+// Request Interceptor: Zustand 메모리에서 토큰 주입
 api.interceptors.request.use(
   (config) => {
-    if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('stockauto_token');
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
+    const token = useAuthStore.getState().accessToken;
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
@@ -23,44 +51,88 @@ api.interceptors.request.use(
   }
 );
 
-// Response Interceptor: 데이터 추출 및 에러 메시지 통일
+// Response Interceptor: 만료 처리 및 Silent Refresh
 api.interceptors.response.use(
   (response) => {
-    // 성공 시 data 필드만 반환 (FastAPI APIResponse 구조 분해)
     if (response.data && response.data.code === 'SUCCESS') {
       return { ...response, data: response.data.data };
     }
     return response;
   },
-  (error) => {
+  async (error: unknown) => {
     if (axios.isCancel(error)) {
         return Promise.reject(error);
     }
-    
-    // 401 Unauthorized 에러 감지 시 로컬스토리지 정리 및 로그인 이동
-    if (error.response && error.response.status === 401) {
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('stockauto_token');
-        localStorage.removeItem('stockauto_username');
-        // 현재 로그인 페이지가 아니라면 리다이렉트
-        if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/signup')) {
-          window.location.href = '/login';
+    if (!axios.isAxiosError<ApiErrorPayload>(error)) {
+      return Promise.reject(error);
+    }
+
+    const axiosError = error as AxiosError<ApiErrorPayload>;
+    const originalRequest = axiosError.config as RetryableRequestConfig | undefined;
+
+    // 401 에러이고, 아직 재시도하지 않은 요청이며, /auth/refresh 로 가는 요청이 아닐 때
+    if (
+      axiosError.response?.status === 401
+      && originalRequest
+      && !originalRequest._retry
+      && !originalRequest.url?.includes('/auth/refresh')
+    ) {
+      if (isRefreshing) {
+        return new Promise<string | null>(function(resolve, reject) {
+          failedQueue.push({ resolve, reject });
+        }).then(token => {
+          if (token) {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+          }
+          return api(originalRequest);
+        }).catch(err => {
+          return Promise.reject(err);
+        });
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        // 인터셉터를 타지 않는 axios 인스턴스로 refresh 호출 (무한루프 방지)
+        const refreshResponse = await axios.post(`${API_BASE}/auth/refresh`, {}, { withCredentials: true });
+        const newToken = refreshResponse.data.data ? refreshResponse.data.data.access_token : refreshResponse.data.access_token;
+        const newUsername = refreshResponse.data.data ? refreshResponse.data.data.username : refreshResponse.data.username;
+
+        // Zustand 업데이트
+        useAuthStore.getState().setAuth(newToken, newUsername);
+
+        processQueue(null, newToken);
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        return api(originalRequest);
+      } catch (refreshError: unknown) {
+        processQueue(refreshError, null);
+        useAuthStore.getState().clearAuth();
+        if (typeof window !== 'undefined') {
+          if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/signup')) {
+            window.location.href = '/login';
+          }
         }
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
       }
     }
 
-    if (error.response && error.response.data && error.response.data.error) {
-      error.message = error.response.data.error.message;
-    } else if (error.response && error.response.data && error.response.data.detail) {
-      error.message = error.response.data.detail;
+    if (axiosError.response?.data?.error?.message) {
+      axiosError.message = axiosError.response.data.error.message;
+    } else if (axiosError.response?.data?.detail) {
+      axiosError.message = axiosError.response.data.detail;
     }
-    return Promise.reject(error);
+    return Promise.reject(axiosError);
   }
 );
 
 export const authAPI = {
   signup: (username: string, password: string) => api.post('/auth/signup', { username, password }),
   login: (username: string, password: string) => api.post('/auth/login', { username, password }),
+  refresh: () => api.post('/auth/refresh'),
+  logout: () => api.post('/auth/logout'),
   getMe: (config?: AxiosRequestConfig) => api.get('/auth/me', config),
 };
 

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authAPI } from "@/lib/api";
+import { useAuthStore } from "@/store/authStore";
 import { toast } from "sonner";
 
 export default function SignupPage() {
@@ -13,12 +14,14 @@ export default function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  const { isAuthenticated, setAuth } = useAuthStore();
+
   // 이미 로그인되어 있으면 대시보드로 이동
   useEffect(() => {
-    if (localStorage.getItem("stockauto_token")) {
+    if (isAuthenticated) {
       router.push("/");
     }
-  }, [router]);
+  }, [isAuthenticated, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,8 +48,10 @@ export default function SignupPage() {
     setIsLoading(true);
     try {
       const res = await authAPI.signup(username, password);
-      localStorage.setItem("stockauto_token", res.data.access_token);
-      localStorage.setItem("stockauto_username", res.data.username);
+      const newToken = res.data.access_token;
+      const newUsername = res.data.username;
+
+      setAuth(newToken, newUsername);
       toast.success("회원가입이 완료되었으며, 성공적으로 로그인되었습니다!");
       router.push("/");
     } catch (err: unknown) {

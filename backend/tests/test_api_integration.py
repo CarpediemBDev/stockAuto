@@ -70,7 +70,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
     config = make_alembic_config(db_url)
 
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "c4f5a6b7c8d9"
+    assert script.get_current_head() == "bd07f17fb172"
 
     command.upgrade(config, "head")
 
@@ -86,14 +86,20 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             "stock_translations",
             "market_overview_snapshots",
             "swing_prediction_snapshots",
+            "refresh_tokens",
             "alembic_version",
         }
 
         user_settings_columns = {column["name"] for column in inspector.get_columns("user_settings")}
+        user_columns = {column["name"] for column in inspector.get_columns("users")}
+        refresh_token_columns = {column["name"] for column in inspector.get_columns("refresh_tokens")}
         trade_log_columns = {column["name"] for column in inspector.get_columns("trade_logs")}
         market_overview_columns = {column["name"] for column in inspector.get_columns("market_overview_snapshots")}
         swing_prediction_columns = {column["name"] for column in inspector.get_columns("swing_prediction_snapshots")}
         assert "strategy_type" in user_settings_columns
+        assert "role" in user_columns
+        assert {"failed_login_attempts", "locked_until"} <= user_columns
+        assert {"user_id", "token", "expires_at", "is_revoked"} <= refresh_token_columns
         assert {
             "kis_verification_status",
             "kis_verified_trade_mode",
@@ -119,6 +125,35 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
         engine.dispose()
 
 
+def test_role_migration_upgrades_existing_user_database(tmp_path):
+    db_path = tmp_path / "stockauto_existing_user_test.db"
+    db_url = f"sqlite:///{db_path}"
+    config = make_alembic_config(db_url)
+
+    command.upgrade(config, "c4f5a6b7c8d9")
+    engine = create_engine(db_url)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "INSERT INTO users (username, hashed_password, created_at) "
+                "VALUES ('admin', 'hash', CURRENT_TIMESTAMP)"
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(db_url)
+    try:
+        with engine.connect() as connection:
+            role = connection.exec_driver_sql(
+                "SELECT role FROM users WHERE username = 'admin'"
+            ).scalar_one()
+            assert role == "ADMIN"
+    finally:
+        engine.dispose()
+
+
 def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, integration_app, test_session_factory):
     async def fake_fetch_ohlcv(ticker, interval="1d", period="1d"):
         return SimpleNamespace(empty=False)
@@ -131,6 +166,7 @@ def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, int
             json={"username": "tester", "password": "pass1234"},
         )
         assert signup_response.status_code == 201
+        assert signup_response.cookies.get("refresh_token")
         token = signup_response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
 
@@ -164,6 +200,17 @@ def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, int
         list_response = client.get("/api/v1/watchlist/", headers=headers)
         assert list_response.status_code == 200
         assert [item["ticker"] for item in list_response.json()["data"]] == ["AAPL"]
+
+        refresh_response = client.post("/api/v1/auth/refresh")
+        assert refresh_response.status_code == 200
+        assert refresh_response.json()["username"] == "tester"
+
+        refresh_token = signup_response.cookies.get("refresh_token")
+        refresh_as_access = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {refresh_token}"},
+        )
+        assert refresh_as_access.status_code == 401
 
     db = test_session_factory()
     try:

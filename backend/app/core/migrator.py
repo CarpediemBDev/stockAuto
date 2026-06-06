@@ -6,6 +6,16 @@ from alembic import command
 from app.core.database import engine
 from app.core.logging import logger
 
+
+def competitive_seed_enabled() -> bool:
+    return os.getenv("SEED_COMPETITIVE_USERS", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def run_migrations_programmatically():
     """Alembic 마이그레이션을 애플리케이션 시작 시 프로그램적으로 자동 실행하는 부트스트래퍼"""
     # migrator.py의 위치를 기준으로 backend 루트 디렉터리에 있는 alembic.ini 경로 도출
@@ -13,15 +23,15 @@ def run_migrations_programmatically():
     app_dir = os.path.dirname(core_dir)
     backend_dir = os.path.dirname(app_dir)
     ini_path = os.path.join(backend_dir, "alembic.ini")
-    
+
     # Alembic 설정 객체 로드
     alembic_cfg = Config(ini_path)
-    
+
     # DB 테이블 현황 검사
     inspector = inspect(engine)
     has_users = inspector.has_table("users")
     has_alembic = inspector.has_table("alembic_version")
-    
+
     # 💡 [안전 조치] 기존에 존재하던 옛날 Alembic 버전 번호(e10797b8bd90)가 버전 테이블에 박혀 있는 경우 보정
     if has_alembic:
         from sqlalchemy import text
@@ -56,10 +66,12 @@ def run_migrations_programmatically():
             # 이미 Alembic으로 관리되고 있는 경우 새로운 마이그레이션이 있으면 자동 업데이트 적용
             command.upgrade(alembic_cfg, "head")
             logger.info("[Migration] 데이터베이스 변경사항 체크 및 업그레이드 완료.")
-            
-        # 💡 경쟁 유저 시딩 실행
-        seed_competitive_users()
-        
+
+        if competitive_seed_enabled():
+            seed_competitive_users()
+        else:
+            logger.info("[Seeder] 경쟁용 사용자 자동 생성을 건너뜁니다.")
+
     except Exception as e:
         logger.error(f"[Migration] 마이그레이션 중 오류 발생: {e}", exc_info=True)
         raise e
@@ -69,9 +81,29 @@ def seed_competitive_users():
     from app.core.database import SessionLocal
     from app.core.models import User, UserSettings
     from app.core.security import get_password_hash
-    
+
     db = SessionLocal()
     try:
+        import secrets
+
+        # 관리자 초기 비밀번호 설정 (환경변수 없으면 난수 생성)
+        initial_admin_pw = os.getenv("INITIAL_ADMIN_PASSWORD")
+        if not initial_admin_pw:
+            initial_admin_pw = secrets.token_urlsafe(9)
+            logger.info(f"==================================================")
+            logger.info(f"👑 [Seeder] 관리자용 임시 비밀번호가 생성되었습니다!")
+            logger.info(f"   PASSWORD: {initial_admin_pw}")
+            logger.info(f"   주의: 환경 변수에 INITIAL_ADMIN_PASSWORD를 설정하면 고정할 수 있습니다.")
+            logger.info(f"==================================================")
+
+        initial_competitor_pw = os.getenv("INITIAL_COMPETITOR_PASSWORD")
+        if not initial_competitor_pw:
+            initial_competitor_pw = secrets.token_urlsafe(9)
+            logger.info("[Seeder] 경쟁용 사용자 임시 비밀번호가 무작위로 생성되었습니다.")
+
+        hashed_pw_admin = get_password_hash(initial_admin_pw)
+        hashed_pw_others = get_password_hash(initial_competitor_pw)
+
         competitors = [
             {"username": "admin", "strategy": "regime_switching"},
             {"username": "admin2", "strategy": "senior_simple"},
@@ -84,24 +116,28 @@ def seed_competitive_users():
             {"username": "admin9", "strategy": "bb_squeeze"},
             {"username": "admin10", "strategy": "rsi2_connors"},
         ]
-        
+
         for comp in competitors:
             # 유저 존재 여부 검사
             existing_user = db.query(User).filter(User.username == comp["username"]).first()
             if not existing_user:
-                logger.info(f"[Seeder] 신규 경쟁 유저 생성 중: {comp['username']} (전략: {comp['strategy']})")
-                hashed_pw = get_password_hash("admin123") # 기본 공용 비밀번호
-                new_user = User(username=comp["username"], hashed_password=hashed_pw)
+                logger.info(f"[Seeder] 신규 유저 생성 중: {comp['username']} (전략: {comp['strategy']})")
+
+                is_admin = (comp["username"] == "admin")
+                hashed_pw = hashed_pw_admin if is_admin else hashed_pw_others
+                user_role = "ADMIN" if is_admin else "USER"
+
+                new_user = User(username=comp["username"], hashed_password=hashed_pw, role=user_role)
                 db.add(new_user)
                 db.commit()
                 db.refresh(new_user)
-                
-                # 유저 설정 생성 및 시뮬레이션 가동 설정
+
+                # 시딩 계정도 명시적으로 시작하기 전까지 자동매매를 정지 상태로 둡니다.
                 new_settings = UserSettings(
                     user_id=new_user.id,
                     strategy_type=comp["strategy"],
                     trade_mode="SIMULATED",
-                    is_running=True, # 자동매매 봇 바로 가동!
+                    is_running=False,
                     is_real_enabled=False
                 )
                 db.add(new_settings)
@@ -115,28 +151,12 @@ def seed_competitive_users():
                         user_id=existing_user.id,
                         strategy_type=comp["strategy"],
                         trade_mode="SIMULATED",
-                        is_running=True,
+                        is_running=False,
                         is_real_enabled=False
                     )
                     db.add(settings)
                     db.commit()
-                else:
-                    # 기존 유저의 전략 및 시뮬레이션 상태 보정 (대결을 위해 강제 활성화)
-                    updated = False
-                    if settings.strategy_type != comp["strategy"]:
-                        settings.strategy_type = comp["strategy"]
-                        updated = True
-                    if settings.trade_mode != "SIMULATED":
-                        settings.trade_mode = "SIMULATED"
-                        updated = True
-                    if not settings.is_running:
-                        settings.is_running = True
-                        updated = True
-                    
-                    if updated:
-                        db.commit()
-                        logger.info(f"[Seeder] 기존 경쟁 유저 {comp['username']} 설정 보정 완료.")
-                        
+
     except Exception as seed_err:
         logger.error(f"[Seeder] 데이터베이스 시딩 실패: {seed_err}")
         db.rollback()

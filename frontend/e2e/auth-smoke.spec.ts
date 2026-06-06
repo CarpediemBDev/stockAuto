@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/v1/auth/refresh", async (route) => {
+    await route.fulfill({
+      status: 401,
+      json: { detail: "No refresh session" },
+    });
+  });
+});
+
 test("anonymous root visits are redirected to the login screen", async ({ page }) => {
   await page.goto("/");
 

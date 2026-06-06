@@ -2,6 +2,7 @@
 
 import React, { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuthStore } from "@/store/authStore";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -70,7 +71,7 @@ function normalizeTradeMode(value: unknown): TradeMode {
 
 export default function PersonalSettingsPage() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const { isAuthenticated, isInitialized, username: storedUsername } = useAuthStore();
   const [dbSettings, setDbSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [kisForm, setKisForm] = useState<KisCredentialForm>(EMPTY_KIS_FORM);
   const [username, setUsername] = useState<string>("");
@@ -85,19 +86,17 @@ export default function PersonalSettingsPage() {
   const [isDangerActionLoading, setIsDangerActionLoading] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("stockauto_token");
-    const storedUsername = localStorage.getItem("stockauto_username");
+    if (isInitialized) {
+      if (!isAuthenticated) {
+        router.push("/login");
+        return;
+      }
 
-    if (!token) {
-      router.push("/login");
-      return;
+      startTransition(() => {
+        setUsername(storedUsername || "");
+      });
     }
-
-    startTransition(() => {
-      setIsAuthenticated(true);
-      setUsername(storedUsername || "");
-    });
-  }, [router]);
+  }, [isInitialized, isAuthenticated, storedUsername, router]);
 
   const applySettings = useCallback((data: Partial<UserSettings>) => {
     setDbSettings({
@@ -289,7 +288,7 @@ export default function PersonalSettingsPage() {
     },
   ];
 
-  if (isLoading || !isAuthenticated) {
+  if (isLoading || !isInitialized || !isAuthenticated) {
     return (
       <div className="min-h-[calc(100vh-4rem)] bg-zinc-950 text-white flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />

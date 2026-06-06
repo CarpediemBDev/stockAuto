@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState, startTransition } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
+import { useAuthStore } from '@/store/authStore';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
-import { 
+import {
   TrendingUp, Target, Activity, DollarSign
 } from 'lucide-react';
 import { reportAPI, tradeAPI } from '@/lib/api';
@@ -35,24 +36,21 @@ interface StatsData {
 
 export default function ReportPage() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const { isAuthenticated, isInitialized } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<StatsData | null>(null);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
   const [logs, setLogs] = useState<TradeLog[]>([]);
 
   useEffect(() => {
-    const token = localStorage.getItem('stockauto_token');
-    if (!token) {
+    if (isInitialized && !isAuthenticated) {
       router.push('/login');
-    } else {
-      startTransition(() => setIsAuthenticated(true));
     }
-  }, [router]);
+  }, [isInitialized, isAuthenticated, router]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    
+
     let isMounted = true;
     async function fetchStatsAndLogs() {
       try {
@@ -70,12 +68,12 @@ export default function ReportPage() {
         if (isMounted) setLoading(false);
       }
     }
-    
+
     fetchStatsAndLogs();
     return () => { isMounted = false; };
   }, [isAuthenticated]);
 
-  if (!isAuthenticated || loading) {
+  if (!isInitialized || !isAuthenticated || loading) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500"></div>
@@ -97,7 +95,7 @@ export default function ReportPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in zoom-in duration-500">
-      
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400 tracking-tight">
@@ -111,7 +109,7 @@ export default function ReportPage() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        
+
         {/* Total PnL */}
         <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-2xl relative overflow-hidden group">
           <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-br ${isProfitable ? 'from-emerald-500/10 to-teal-500/0' : 'from-rose-500/10 to-pink-500/0'} rounded-full blur-2xl -mr-10 -mt-10 transition-transform group-hover:scale-150 duration-700`}></div>
@@ -194,34 +192,34 @@ export default function ReportPage() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                <XAxis 
-                  dataKey="date" 
-                  stroke="#94a3b8" 
-                  fontSize={12} 
+                <XAxis
+                  dataKey="date"
+                  stroke="#94a3b8"
+                  fontSize={12}
                   tickLine={false}
                   axisLine={false}
                   tickMargin={12}
                 />
-                <YAxis 
-                  stroke="#94a3b8" 
-                  fontSize={12} 
+                <YAxis
+                  stroke="#94a3b8"
+                  fontSize={12}
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={(val) => `$${val}`}
                 />
-                <Tooltip 
+                <Tooltip
                   contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '12px', color: '#fff', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)' }}
                   itemStyle={{ color: '#fff', fontWeight: 'bold' }}
                   labelStyle={{ color: '#94a3b8', marginBottom: '8px' }}
                 />
-                <Area 
-                  type="monotone" 
-                  dataKey="cumulative_pnl" 
+                <Area
+                  type="monotone"
+                  dataKey="cumulative_pnl"
                   name="누적 실수익금"
-                  stroke={isProfitable ? '#10b981' : '#f43f5e'} 
+                  stroke={isProfitable ? '#10b981' : '#f43f5e'}
                   strokeWidth={4}
-                  fillOpacity={1} 
-                  fill="url(#colorPnL)" 
+                  fillOpacity={1}
+                  fill="url(#colorPnL)"
                   animationDuration={1500}
                   animationEasing="ease-out"
                 />
@@ -249,7 +247,7 @@ export default function ReportPage() {
 
       {/* 프리미엄 다크 글래스모피즘 모달 (전체 거래 내역 상세 조회) */}
       {isLogsModalOpen && (
-        <div 
+        <div
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsLogsModalOpen(false);
           }}
@@ -257,7 +255,7 @@ export default function ReportPage() {
         >
           <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-5xl w-full p-6 relative shadow-2xl animate-in zoom-in-95 duration-300 overflow-hidden max-h-[85vh] flex flex-col">
             {/* 닫기 버튼 */}
-            <button 
+            <button
               onClick={() => setIsLogsModalOpen(false)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-white p-2 rounded-full hover:bg-zinc-900 active:scale-95 transition-all z-10 font-bold"
               aria-label="닫기"

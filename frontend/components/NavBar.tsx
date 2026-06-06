@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useEffect, useState, useCallback, startTransition } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 
 import { cn } from "@/lib/utils";
-import { botAPI } from "@/lib/api";
+import { authAPI, botAPI } from "@/lib/api";
+import { useAuthStore } from "@/store/authStore";
 import { toast } from "sonner";
 
 const navItems = [
@@ -21,22 +22,13 @@ export function NavBar() {
   const [isRealEnabled, setIsRealEnabled] = useState(false);
   const [isBotRunning, setIsBotRunning] = useState(false);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
-  const [username, setUsername] = useState<string | null>(null);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-
-  // 현재 사용자명 읽기
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      startTransition(() => {
-        setUsername(localStorage.getItem("stockauto_username"));
-      });
-    }
-  }, [pathname]); // 경로 이동 시 갱신
+  const { accessToken, username, clearAuth } = useAuthStore();
 
 
   const fetchStatus = useCallback(async () => {
-    // 토큰이 있을 때만 API 호출 (무한 401 및 리다이렉트 방지)
-    if (!localStorage.getItem("stockauto_token")) {
+    // 토큰이 있을 때만 API 호출
+    if (!accessToken) {
       return;
     }
     try {
@@ -48,14 +40,14 @@ export function NavBar() {
       // Silently fail in navbar background fetches
     }
 
-  }, []);
+  }, [accessToken]);
 
   useEffect(() => {
     const initFetch = async () => {
       await fetchStatus();
     };
     initFetch();
-    
+
     const interval = setInterval(fetchStatus, 8000); // 8초 주기로 전역 상태 동기화
     return () => clearInterval(interval);
   }, [fetchStatus]);
@@ -82,10 +74,13 @@ export function NavBar() {
 
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("stockauto_token");
-    localStorage.removeItem("stockauto_username");
-    setUsername(null);
+  const handleLogout = async () => {
+    try {
+      await authAPI.logout();
+    } catch {
+      // 무시
+    }
+    clearAuth();
     toast.success("성공적으로 로그아웃되었습니다.");
     router.push("/login");
   };
@@ -108,14 +103,14 @@ export function NavBar() {
             </div>
             {!isAuthPage && username && (
               <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider transition-colors duration-500 select-none ${
-                tradeMode === 'REAL' 
-                  ? (isRealEnabled ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-red-900/40 text-red-300 border border-red-700/50') 
+                tradeMode === 'REAL'
+                  ? (isRealEnabled ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-red-900/40 text-red-300 border border-red-700/50')
                   : tradeMode === 'MOCK'
                   ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                   : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
               }`}>
-                {tradeMode === 'REAL' 
-                  ? (isRealEnabled ? '🔥 PREMIUM / LIVE' : '🔒 PREMIUM / REAL (LOCKED)') 
+                {tradeMode === 'REAL'
+                  ? (isRealEnabled ? '🔥 PREMIUM / LIVE' : '🔒 PREMIUM / REAL (LOCKED)')
                   : tradeMode === 'MOCK'
                   ? '⚡ PRO / MOCK'
                   : '📝 FREE / SIMULATED'}
@@ -176,14 +171,14 @@ export function NavBar() {
                     <>
                       {/* 클릭 오프 감지 백드롭 */}
                       <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)}></div>
-                      
+
                       <div className="absolute right-0 top-10 mt-2 w-52 rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                         {/* 계정 정보 */}
                         <div className="px-3 py-2 border-b border-zinc-800/60 mb-1.5">
                           <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">User Account</p>
                           <p className="text-xs text-white font-bold truncate mt-0.5">{username}</p>
                         </div>
-                        
+
                         {/* 실시간 상태 정보 */}
                         <div className="px-3 py-1.5 space-y-1 text-[11px] text-zinc-400">
                           <div className="flex justify-between items-center">
@@ -200,7 +195,7 @@ export function NavBar() {
                             </span>
                           </div>
                         </div>
-                        
+
                         {/* 원클릭 퀵 봇 제어 버튼 */}
                         <div className="px-2 py-1.5">
                           <button
@@ -208,8 +203,8 @@ export function NavBar() {
                             disabled={isTogglingBot}
                             className={cn(
                               "w-full py-2 rounded-xl font-bold text-[10px] transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98]",
-                              isBotRunning 
-                                ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20" 
+                              isBotRunning
+                                ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20"
                                 : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20"
                             )}
                           >
@@ -228,7 +223,7 @@ export function NavBar() {
                             )}
                           </button>
                         </div>
-                        
+
                         <div className="border-t border-zinc-800/60 my-1"></div>
 
                         {/* 어드민 패널 단축 링크 (어드민 전용) */}
@@ -257,7 +252,7 @@ export function NavBar() {
                           </svg>
                           <span>⚙️ 개인 투자 설정</span>
                         </Link>
-                        
+
                         {/* 로그아웃 */}
                         <button
                           onClick={() => {

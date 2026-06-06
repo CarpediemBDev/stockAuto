@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useState, useEffect, startTransition } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { 
-  Globe, 
-  Key, 
-  Users, 
-  ShieldAlert, 
-  Loader2, 
+import { useAuthStore } from "@/store/authStore";
+import {
+  Globe,
+  Key,
+  Users,
+  ShieldAlert,
+  Loader2,
   HelpCircle,
   Trophy
 } from "lucide-react";
@@ -19,26 +20,18 @@ import { BacktestTournament } from "@/components/admin/BacktestTournament";
 export default function AdminPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<string>("translation");
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const { isAuthenticated, isInitialized, username } = useAuthStore();
+  const isAdmin = isAuthenticated && username === "admin";
 
   useEffect(() => {
-    const token = localStorage.getItem("stockauto_token");
-    const storedUsername = localStorage.getItem("stockauto_username");
-
-    if (!token) {
-      router.push("/login");
-    } else {
-      startTransition(() => {
-        setIsAuthenticated(true);
-        if (storedUsername === "admin") {
-          setIsAdmin(true);
-        } else {
-          router.push("/");
-        }
-      });
+    if (isInitialized) {
+      if (!isAuthenticated) {
+        router.push("/login");
+      } else if (!isAdmin) {
+        router.push("/");
+      }
     }
-  }, [router]);
+  }, [isInitialized, isAuthenticated, isAdmin, router]);
 
   const menuItems = [
     { id: "users", label: "👥 전체 사용자 관리", icon: Users, enabled: true },
@@ -48,7 +41,7 @@ export default function AdminPage() {
     { id: "access_logs", label: "🔑 보안 접속 로그", icon: Key, enabled: false },
   ];
 
-  if (!isAuthenticated || !isAdmin) {
+  if (!isInitialized || !isAuthenticated || !isAdmin) {
     return (
       <div className="min-h-[calc(100vh-4rem)] bg-[#090d16] text-white flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
@@ -59,7 +52,7 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-[#090d16] text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-[1400px] mx-auto">
-        
+
         <div className="mb-8 border-b border-zinc-800 pb-5">
           <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-zinc-200 via-slate-100 to-zinc-400 bg-clip-text text-transparent">
             ⚙️ 마스터 관리자 패널
@@ -70,14 +63,14 @@ export default function AdminPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          
+
           {/* 사이드바 메뉴 */}
           <div className="space-y-2 lg:col-span-1">
             <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-4 space-y-1.5 shadow-xl">
               <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 px-3 mb-2 block">
                 Menu Directories
               </span>
-              
+
               {menuItems.map((item) => {
                 const IconComponent = item.icon;
                 return (
@@ -86,8 +79,8 @@ export default function AdminPage() {
                     onClick={() => item.enabled && setActiveTab(item.id)}
                     disabled={!item.enabled}
                     className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-300 group
-                      ${!item.enabled 
-                        ? "text-zinc-600 cursor-not-allowed bg-transparent" 
+                      ${!item.enabled
+                        ? "text-zinc-600 cursor-not-allowed bg-transparent"
                         : activeTab === item.id
                           ? "bg-zinc-800 text-white shadow-lg border border-zinc-700/50"
                           : "text-zinc-400 hover:text-slate-100 hover:bg-zinc-800/30"
@@ -106,7 +99,7 @@ export default function AdminPage() {
                 );
               })}
             </div>
-            
+
             <div className="bg-gradient-to-br from-blue-950/20 to-zinc-900/40 rounded-2xl border border-blue-900/20 p-5 space-y-3 shadow-md">
               <div className="flex items-center gap-2 text-blue-400">
                 <HelpCircle size={18} />
@@ -124,7 +117,7 @@ export default function AdminPage() {
             {activeTab === "users" && <UserManagement />}
             {activeTab === "system" && <SystemHealth />}
             {activeTab === "backtest" && <BacktestTournament />}
-            
+
             {activeTab !== "translation" && activeTab !== "users" && activeTab !== "system" && activeTab !== "backtest" && (
               <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-12 text-center shadow-xl">
                 <Loader2 size={48} className="mx-auto text-zinc-600 mb-4 animate-pulse" />

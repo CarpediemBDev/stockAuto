@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authAPI } from "@/lib/api";
+import { useAuthStore } from "@/store/authStore";
 import { toast } from "sonner";
 
 export default function LoginPage() {
@@ -12,12 +13,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  const { isAuthenticated, setAuth } = useAuthStore();
+
   // 이미 로그인되어 있으면 대시보드로 이동
   useEffect(() => {
-    if (localStorage.getItem("stockauto_token")) {
+    if (isAuthenticated) {
       router.push("/");
     }
-  }, [router]);
+  }, [isAuthenticated, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,8 +32,11 @@ export default function LoginPage() {
     setIsLoading(true);
     try {
       const res = await authAPI.login(username, password);
-      localStorage.setItem("stockauto_token", res.data.access_token);
-      localStorage.setItem("stockauto_username", res.data.username);
+      // api.ts response interceptor가 data.data를 반환
+      const newToken = res.data.access_token;
+      const newUsername = res.data.username;
+
+      setAuth(newToken, newUsername);
       toast.success("성공적으로 로그인되었습니다!");
       router.push("/");
     } catch (err: unknown) {

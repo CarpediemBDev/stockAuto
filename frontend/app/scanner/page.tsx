@@ -3,7 +3,8 @@
 import { OverseasScanner } from "@/components/OverseasScanner";
 import { SwingPredictorCard } from "@/components/SwingPredictorCard";
 import ManualWatchList from "@/components/ManualWatchList";
-import { useState, useCallback, useEffect, startTransition } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useAuthStore } from "@/store/authStore";
 import { watchlistAPI } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { reportHandledError } from "@/lib/utils";
@@ -16,27 +17,22 @@ interface WatchItem {
 
 export default function ScannerPage() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const { isAuthenticated, isInitialized } = useAuthStore();
   const [watchlistKey, setWatchlistKey] = useState(0);
   const [watchlistTickers, setWatchlistTickers] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<"15m" | "swing">("15m");
 
   // Auth Guard
   useEffect(() => {
-    const token = localStorage.getItem("stockauto_token");
-    if (!token) {
+    if (isInitialized && !isAuthenticated) {
       router.push("/login");
-    } else {
-      startTransition(() => {
-        setIsAuthenticated(true);
-      });
     }
-  }, [router]);
+  }, [isInitialized, isAuthenticated, router]);
 
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    
+
     let isMounted = true;
 
     async function loadWatchlist() {
@@ -66,7 +62,7 @@ export default function ScannerPage() {
     }
   }, []);
 
-  if (!isAuthenticated) {
+  if (!isInitialized || !isAuthenticated) {
     return (
       <div className="min-h-[calc(100vh-4rem)] bg-black flex items-center justify-center text-zinc-400 text-sm">
         인증 정보 확인 중...
@@ -89,14 +85,14 @@ export default function ScannerPage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <div className="lg:col-span-9 min-w-0">
             {activeTab === "15m" ? (
-              <OverseasScanner 
-                onAddToWatchlist={handleAddToWatchlist} 
+              <OverseasScanner
+                onAddToWatchlist={handleAddToWatchlist}
                 watchlistTickers={watchlistTickers}
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
               />
             ) : (
-              <SwingPredictorCard 
+              <SwingPredictorCard
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
               />

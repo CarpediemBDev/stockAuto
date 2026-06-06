@@ -21,7 +21,7 @@ if not JWT_SECRET_KEY or JWT_SECRET_KEY in INSECURE_DEFAULT_KEYS:
         "[⚠️ SECURITY CRITICAL] JWT_SECRET_KEY가 설정되지 않았거나 취약한 디폴트 키를 사용 중입니다! "
         "보안을 위해 .env 파일에 안전한 JWT_SECRET_KEY를 생성해 주십시오."
     )
-    
+
     # 실거래 모드 또는 프로덕션 프로필인 경우 시스템 기동을 중단하여 자산 완벽 보호
     if settings.IS_REAL or settings.PROFILE == "prod":
         logger.error(f"[🔥 BLOCKING STARTUP] {warning_msg}")
@@ -32,7 +32,8 @@ if not JWT_SECRET_KEY or JWT_SECRET_KEY in INSECURE_DEFAULT_KEYS:
         JWT_SECRET_KEY = "stockauto_super_secret_key_2026_change_me_in_production"
 
 JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30 # 30일 동안 유효한 토큰 발급
+ACCESS_TOKEN_EXPIRE_MINUTES = 30 # 단기 생존 (30분)
+REFRESH_TOKEN_EXPIRE_DAYS = 14   # 장기 생존 (14일)
 
 
 def get_password_hash(password: str) -> str:
@@ -54,10 +55,26 @@ def create_access_token(subject: Union[str, Any], expires_delta: timedelta = Non
         expire = datetime.now(UTC) + expires_delta
     else:
         expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    
+
     to_encode = {
         "exp": expire,
-        "sub": str(subject)
+        "sub": str(subject),
+        "type": "access",
+    }
+    encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    return encoded_jwt
+
+def create_refresh_token(subject: Union[str, Any], expires_delta: timedelta = None) -> str:
+    """Refresh JWT 토큰 발행"""
+    if expires_delta:
+        expire = datetime.now(UTC) + expires_delta
+    else:
+        expire = datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+
+    to_encode = {
+        "exp": expire,
+        "sub": str(subject),
+        "type": "refresh"
     }
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
     return encoded_jwt
@@ -66,6 +83,19 @@ def decode_access_token(token: str) -> Union[str, None]:
     """Access JWT 토큰 해독 및 검증"""
     try:
         decoded_token = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        if decoded_token.get("type") != "access":
+            return None
+        return decoded_token["sub"]
+    except jwt.PyJWTError:
+        return None
+
+
+def decode_refresh_token(token: str) -> Union[str, None]:
+    """Refresh JWT 토큰 해독 및 타입 검증"""
+    try:
+        decoded_token = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        if decoded_token.get("type") != "refresh":
+            return None
         return decoded_token["sub"]
     except jwt.PyJWTError:
         return None

@@ -14,6 +14,11 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime, default=utc_now_naive)
+    role = Column(String, default="USER", nullable=False)
+
+    # 보안 강화를 위한 로그인 잠금 및 브루트포스 방어 필드
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime, nullable=True)
 
     # Relationships
     settings = relationship("UserSettings", back_populates="user", uselist=False, cascade="all, delete-orphan")
@@ -21,6 +26,21 @@ class User(Base):
     trade_logs = relationship("TradeLog", back_populates="user", cascade="all, delete-orphan")
     action_logs = relationship("ActionLog", back_populates="user", cascade="all, delete-orphan")
     watch_lists = relationship("WatchList", back_populates="user", cascade="all, delete-orphan")
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
+
+class RefreshToken(Base):
+    """안전한 토큰 갱신 및 다중 기기 강제 로그아웃을 위한 세션 테이블"""
+    __tablename__ = "refresh_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token = Column(String, unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    is_revoked = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=utc_now_naive)
+
+    # Relationships
+    user = relationship("User", back_populates="refresh_tokens")
 
 class UserSettings(Base):
     """사용자별 트레이딩 모드, 증권사 API Key 및 텔레그램 연동 정보 통합 테이블"""
@@ -28,7 +48,7 @@ class UserSettings(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
-    
+
     # 트레이딩 모드 및 설정
     trade_mode = Column(String, default="SIMULATED") # SIMULATED, MOCK, REAL
     broker_provider = Column(String, default="KIS")
@@ -38,17 +58,17 @@ class UserSettings(Base):
     kis_verification_status = Column(String, default="unverified", nullable=False)
     kis_verified_trade_mode = Column(String, nullable=True)
     kis_verified_at = Column(DateTime, nullable=True)
-    
+
     # 텔레그램 설정
     telegram_chat_id = Column(String, nullable=True)
     telegram_enabled = Column(Boolean, default=False)
-    
+
     # 봇 기동 제어 스위치
     is_running = Column(Boolean, default=False)
     is_real_enabled = Column(Boolean, default=False)
-    
+
     strategy_type = Column(String, default="regime_switching", nullable=False)
-    
+
     updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
 
     # Relationships
@@ -77,7 +97,7 @@ class TradeLog(Base):
 class Holding(Base):
     """현재 사용자별 보유 중인 종목 상태 (트레일링 스탑용)"""
     __tablename__ = "holdings"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     ticker = Column(String, index=True)
@@ -98,7 +118,7 @@ class Holding(Base):
 class ActionLog(Base):
     """봇의 실시간 사용자별 활동 기록 (스캔, 판단, 시스템 메시지 등)"""
     __tablename__ = "action_logs"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     level = Column(String, default="INFO") # INFO, WARN, ERROR, SIGNAL

@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 import { EnvironmentBadge } from "@/components/EnvironmentBadge";
+import { AuthProvider } from "@/components/AuthProvider";
 
 export const metadata: Metadata = {
   title: "StockAuto - 자동매매 대시보드",
@@ -32,14 +33,16 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-black text-white relative">
-        {/* 글로벌 상단 네비게이션 바 */}
-        <NavBar />
-        
-        {/* 메인 컨텐츠 영역 */}
-        <div className="flex-1 w-full">
-          {children}
-        </div>
-        
+        <AuthProvider>
+          {/* 글로벌 상단 네비게이션 바 */}
+          <NavBar />
+
+          {/* 메인 컨텐츠 영역 */}
+          <div className="flex-1 w-full">
+            {children}
+          </div>
+        </AuthProvider>
+
         {/* 환경 식별 뱃지 (좌측 하단 띠) */}
         <EnvironmentBadge />
 

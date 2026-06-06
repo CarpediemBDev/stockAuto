@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.credentials import CredentialCryptoError, decrypt_credential, encrypt_credential
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_current_admin_user
 from app.core.models import ActionLog, User, UserSettings, utc_now_naive
 
 router = APIRouter()
@@ -395,13 +395,10 @@ def update_user_settings(
 
 @router.get("/users")
 def list_users(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     """관리자용 가입자 목록과 봇 상태 조회."""
-    if current_user.username != "admin":
-        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
-
     users = db.query(User).all()
     result = []
     for user in users:
@@ -422,13 +419,10 @@ def list_users(
 @router.post("/users/{user_id}/toggle-bot")
 def toggle_user_bot(
     user_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     """관리자용 사용자 봇 기동/중지 제어."""
-    if current_user.username != "admin":
-        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
-
     target_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
     if not target_settings:
         raise HTTPException(status_code=404, detail="사용자 설정을 찾을 수 없습니다.")
@@ -444,12 +438,10 @@ def toggle_user_bot(
 @router.post("/users/{user_id}/delete")
 def delete_user(
     user_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     """관리자용 사용자 계정 삭제."""
-    if current_user.username != "admin":
-        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="자기 자신은 삭제할 수 없습니다.")
 
@@ -464,13 +456,10 @@ def delete_user(
 
 @router.get("/system-logs")
 def get_system_logs(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
     """관리자용 최신 시스템 로그 조회."""
-    if current_user.username != "admin":
-        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
-
     return db.query(ActionLog).order_by(ActionLog.created_at.desc()).limit(100).all()
 
 
@@ -478,12 +467,9 @@ def get_system_logs(
 async def get_backtest_tournament_results(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin_user),
 ):
     """지정 기간의 백테스트 토너먼트 결과를 조회합니다."""
-    if current_user.username != "admin":
-        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
-
     if not start_date or not end_date:
         import json
         import os

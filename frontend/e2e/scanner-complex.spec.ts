@@ -11,12 +11,40 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
       status: 200,
       json: {
         code: "SUCCESS",
-        data: { access_token: "fake_magic_token", token_type: "bearer" },
+        data: {
+          access_token: "fake_magic_token",
+          token_type: "bearer",
+          username: "MagicUser",
+        },
       },
     });
   });
 
-  // 1-2. 가짜 내 정보 응답
+  // 1-2. 전체 페이지 이동 후 HttpOnly refresh 기반 세션 복구
+  let refreshAttempts = 0;
+  await page.route("**/api/v1/auth/refresh", async (route) => {
+    refreshAttempts += 1;
+    if (refreshAttempts === 1) {
+      await route.fulfill({
+        status: 401,
+        json: { detail: "No refresh session yet" },
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      json: {
+        code: "SUCCESS",
+        data: {
+          access_token: "fake_magic_token_refreshed",
+          token_type: "bearer",
+          username: "MagicUser",
+        },
+      },
+    });
+  });
+
+  // 1-3. 가짜 내 정보 응답
   await page.route("**/api/v1/auth/me", async (route) => {
     await route.fulfill({
       status: 200,
@@ -27,7 +55,7 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
     });
   });
 
-  // 1-3. 스캐너 초기 목록 (마켓 스캐너)
+  // 1-4. 스캐너 초기 목록 (마켓 스캐너)
   await page.route("**/api/v1/scanner/latest", async (route) => {
     await route.fulfill({
       status: 200,
@@ -47,7 +75,7 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
     });
   });
 
-  // 1-4. 스윙 예측 갱신 API (수동 스캔 클릭 시)
+  // 1-5. 스윙 예측 갱신 API (수동 스캔 클릭 시)
   await page.route("**/api/v1/scanner/swing-predict/refresh", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await route.fulfill({
@@ -72,7 +100,7 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
     });
   });
 
-  // 1-5. 스윙 예측 리스트 (폴링으로 가져올 때)
+  // 1-6. 스윙 예측 리스트 (폴링으로 가져올 때)
   await page.route("**/api/v1/scanner/swing-predict", async (route) => {
     await route.fulfill({
       status: 200,
