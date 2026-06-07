@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Literal, Optional
 from datetime import datetime
 from app.core.dependencies import get_current_user
 from app.core.models import User
@@ -12,7 +12,7 @@ class BacktestRequest(BaseModel):
     tickers: List[str] = Field(..., description="백테스트 대상 티커 리스트", example=["TSLA", "NVDA", "AAPL"])
     start_date: str = Field(..., description="시작일 (YYYY-MM-DD)", example="2026-04-01")
     end_date: str = Field(..., description="종료일 (YYYY-MM-DD)", example="2026-05-30")
-    interval: Optional[str] = Field("1h", description="차트 분봉 인터벌 (1m, 15m, 1h, 1d)", example="1h")
+    interval: Literal["15m", "1h", "1d"] = Field("1h", description="차트 분봉 인터벌 (15m, 1h, 1d)", example="1h")
     initial_cash: Optional[float] = Field(10000.0, description="가상 투자 예수금 (USD)", example=10000.0)
 
 @router.post("/run")
