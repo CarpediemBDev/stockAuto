@@ -258,18 +258,50 @@ def check_frontend_e2e(root: Path) -> bool:
     return True
 
 
+def should_run_full_harness(root: Path) -> bool:
+    """
+    Check if full harness should run based on staged files.
+    If only safe non-code files (like .md, .txt) are modified, skip heavy tests.
+    """
+    result = run_command(["git", "diff", "--cached", "--name-only"], cwd=root)
+    if result.returncode != 0:
+        return True # Fallback to full harness if git fails
+    
+    staged_files = result.stdout.decode("utf-8", errors="ignore").splitlines()
+    if not staged_files:
+        return True # Not a git commit context (e.g., manual run), run full
+        
+    code_extensions = ('.py', '.ts', '.tsx', '.js', '.jsx', '.json', '.html', '.css')
+    
+    for f in staged_files:
+        # If any file has a code extension or modifies core configs/migrations
+        if f.endswith(code_extensions) or "alembic/" in f or "requirements" in f or "package" in f:
+            return True
+            
+    # If we get here, only .md, .txt, .gitignore, etc. were found
+    return False
+
+
 def main() -> int:
     root = project_root()
     print_banner()
 
-    checks = [
-        check_backend_compile,
-        check_nfc_encoding,
-        check_alembic_migrations,
-        check_backend_tests,
-        check_frontend_static,
-        check_frontend_e2e,
-    ]
+    run_full = should_run_full_harness(root)
+    
+    if run_full:
+        checks = [
+            check_backend_compile,
+            check_nfc_encoding,
+            check_alembic_migrations,
+            check_backend_tests,
+            check_frontend_static,
+            check_frontend_e2e,
+        ]
+    else:
+        safe_print(f"  {YELLOW}[SMART SKIP] 단순 문서(Markdown 등) 수정만 감지되었습니다. 무거운 5가지 테스트를 건너뜁니다.{RESET}\n")
+        checks = [
+            check_nfc_encoding, # 문서를 수정했어도 한글 자소 분리 방어선은 무조건 가동
+        ]
 
     all_passed = True
     for check_func in checks:
