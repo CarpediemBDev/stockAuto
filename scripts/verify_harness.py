@@ -88,13 +88,15 @@ def print_result_output(result) -> None:
 
 
 def check_backend_compile(root: Path) -> bool:
-    safe_print(f"{BOLD}[1/4] [BACKEND] Python compile check...{RESET}")
-    app_dir = root / "backend" / "app"
+    safe_print(f"{BOLD}[1/6] [BACKEND] Python compile check (Expanded)...{RESET}")
+    backend_dir = root / "backend"
     python_exe = backend_python(root)
     failed_files: list[tuple[Path, str]] = []
     success_count = 0
 
-    for file_path in app_dir.rglob("*.py"):
+    for file_path in backend_dir.rglob("*.py"):
+        if "venv" in file_path.parts or ".pytest_cache" in file_path.parts or "__pycache__" in file_path.parts:
+            continue
         result = run_command(
             [python_exe, "-m", "py_compile", str(file_path)],
             cwd=root,
@@ -116,8 +118,65 @@ def check_backend_compile(root: Path) -> bool:
     return True
 
 
+def check_nfc_encoding(root: Path) -> bool:
+    safe_print(f"{BOLD}[2/6] [CORE] NFC Encoding check (Korean)...{RESET}")
+    failed_files = []
+    import unicodedata
+    
+    result = run_command(["git", "ls-files"], cwd=root)
+    if result.returncode != 0:
+        safe_print(f"  {YELLOW}[WARN] git ls-files failed. Skipping NFC check.{RESET}\n")
+        return True
+        
+    files = result.stdout.decode("utf-8", errors="ignore").splitlines()
+    checked_count = 0
+    for f in files:
+        if f.endswith(('.py', '.md', '.tsx', '.ts')):
+            file_path = root / f
+            if not file_path.exists():
+                continue
+            try:
+                content = file_path.read_text(encoding='utf-8')
+                if not unicodedata.is_normalized('NFC', content):
+                    failed_files.append(f)
+                checked_count += 1
+            except UnicodeDecodeError:
+                pass
+                
+    if failed_files:
+        safe_print(f"  {RED}[FAIL] NFC Encoding failed for {len(failed_files)} file(s).{RESET}")
+        safe_print(f"  {RED}Please convert these files to NFC (e.g. using a normalization script).{RESET}")
+        for f in failed_files:
+            safe_print(f"    - {f}")
+        return False
+
+    safe_print(f"  {GREEN}[OK] NFC Encoding passed ({checked_count} files).{RESET}\n")
+    return True
+
+
+def check_alembic_migrations(root: Path) -> bool:
+    safe_print(f"{BOLD}[3/6] [BACKEND] Alembic migrations check...{RESET}")
+    backend_dir = root / "backend"
+    python_exe = backend_python(root)
+    
+    # First, ensure DB is upgraded to head so check doesn't fail on missing tables
+    run_command([python_exe, "-m", "alembic", "upgrade", "head"], cwd=backend_dir, timeout=60)
+    
+    # Run alembic check to find missing migrations
+    result = run_command([python_exe, "-m", "alembic", "check"], cwd=backend_dir, timeout=60)
+    
+    if result.returncode != 0:
+        safe_print(f"  {RED}[FAIL] Alembic check failed.{RESET}")
+        safe_print(f"  {RED}Missing migrations detected! Did you forget to run 'alembic revision --autogenerate'?{RESET}")
+        print_result_output(result)
+        return False
+
+    safe_print(f"  {GREEN}[OK] Alembic migrations are up to date.{RESET}\n")
+    return True
+
+
 def check_backend_tests(root: Path) -> bool:
-    safe_print(f"{BOLD}[2/4] [BACKEND] pytest scenario harness...{RESET}")
+    safe_print(f"{BOLD}[4/6] [BACKEND] pytest scenario harness...{RESET}")
     backend_dir = root / "backend"
     tests_dir = backend_dir / "tests"
 
@@ -145,7 +204,7 @@ def check_backend_tests(root: Path) -> bool:
 
 
 def check_frontend_static(root: Path) -> bool:
-    safe_print(f"{BOLD}[3/4] [FRONTEND] TypeScript and ESLint checks...{RESET}")
+    safe_print(f"{BOLD}[5/6] [FRONTEND] TypeScript and ESLint checks...{RESET}")
     frontend_dir = root / "frontend"
 
     if not frontend_dir.exists():
@@ -176,7 +235,7 @@ def check_frontend_static(root: Path) -> bool:
 
 
 def check_frontend_e2e(root: Path) -> bool:
-    safe_print(f"{BOLD}[4/4] [FRONTEND] Playwright E2E smoke checks...{RESET}")
+    safe_print(f"{BOLD}[6/6] [FRONTEND] Playwright E2E smoke checks...{RESET}")
     frontend_dir = root / "frontend"
     playwright_config = frontend_dir / "playwright.config.ts"
 
@@ -203,13 +262,22 @@ def main() -> int:
     root = project_root()
     print_banner()
 
-    backend_compile_pass = check_backend_compile(root)
-    backend_tests_pass = check_backend_tests(root)
-    frontend_static_pass = check_frontend_static(root)
-    frontend_e2e_pass = check_frontend_e2e(root)
+    checks = [
+        check_backend_compile,
+        check_nfc_encoding,
+        check_alembic_migrations,
+        check_backend_tests,
+        check_frontend_static,
+        check_frontend_e2e,
+    ]
+
+    all_passed = True
+    for check_func in checks:
+        if not check_func(root):
+            all_passed = False
 
     safe_print("=" * 65)
-    if backend_compile_pass and backend_tests_pass and frontend_static_pass and frontend_e2e_pass:
+    if all_passed:
         safe_print(f"  {GREEN}{BOLD}[SUCCESS] Verification harness passed.{RESET}")
         safe_print("=" * 65)
         return 0
