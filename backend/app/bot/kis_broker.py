@@ -129,6 +129,7 @@ class KISBroker(BaseBroker):
         price: float,
         session: str = "REGULAR_MARKET",
         client_order_id: str | None = None,
+        skip_poll: bool = False,
     ) -> dict:
         """
         KIS API를 통한 해외주식 매수 주문.
@@ -144,6 +145,18 @@ class KISBroker(BaseBroker):
             )
             if res and res.get("rt_cd") == "0":
                 order_no = res.get("output", {}).get("ODNO", "")
+
+                if skip_poll:
+                    return {
+                        "success": False,
+                        "order_submitted": True,
+                        "status": "PENDING",
+                        "order_no": order_no,
+                        "filled_qty": 0,
+                        "filled_price": 0.0,
+                        "fill_confirmed": False,
+                        "message": f"KIS buy order submitted: {ticker} x{quantity} (Polling skipped)"
+                    }
 
                 # 💡 체결 확인 폴링 — 실제 체결 수량/가격 확인
                 fill_info = self._confirm_fill(order_no, quantity, price)
@@ -204,6 +217,7 @@ class KISBroker(BaseBroker):
         price: float,
         session: str = "REGULAR_MARKET",
         client_order_id: str | None = None,
+        skip_poll: bool = False,
     ) -> dict:
         """
         KIS API를 통한 해외주식 매도 주문.
@@ -219,6 +233,18 @@ class KISBroker(BaseBroker):
             )
             if res and res.get("rt_cd") == "0":
                 order_no = res.get("output", {}).get("ODNO", "")
+
+                if skip_poll:
+                    return {
+                        "success": False,
+                        "order_submitted": True,
+                        "status": "PENDING",
+                        "order_no": order_no,
+                        "filled_qty": 0,
+                        "filled_price": 0.0,
+                        "fill_confirmed": False,
+                        "message": f"KIS sell order submitted: {ticker} x{quantity} (Polling skipped)"
+                    }
 
                 # 💡 체결 확인 폴링 — 실제 체결 수량/가격 확인
                 fill_info = self._confirm_fill(order_no, quantity, price)

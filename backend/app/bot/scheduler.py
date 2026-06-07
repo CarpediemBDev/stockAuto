@@ -26,11 +26,11 @@ from app.bot.order_reconciler import (
     reconcile_open_orders_once,
 )
 from app.bot.order_discovery import discover_orphan_orders_once
+import time
 
 # 💡 네트워크 일시 장애에 따른 텔레그램 경고 도배 방지용 시간 기록 저장소
 _user_network_alert_sent = {}
 
-import time
 # 매수 실패(단가 초과, 예수금 부족) 알림 도배 방지용 쿨타임 캐시 (1시간)
 WARNING_COOLDOWN_CACHE = {}
 MARKET_CLOSED_LOG_CACHE = {}
@@ -75,6 +75,46 @@ async def safe_broker_call(func, *args, **kwargs):
         # 호출 사이에 아주 미세한 지연(40ms)을 주어 고르게 배분
         await asyncio.sleep(0.04)
         return await asyncio.to_thread(func, *args, **kwargs)
+
+async def execute_and_poll_order(broker, func, *args, **kwargs):
+    """
+    주문을 비동기로 발송하고 즉시 반환(skip_poll=True)받은 뒤,
+    비동기 타이머(await asyncio.sleep)를 활용하여 체결 상태를 폴링합니다.
+    다른 유저들의 주문 처리를 전혀 블로킹하지 않습니다.
+    """
+    kwargs["skip_poll"] = True
+    res = await safe_broker_call(func, *args, **kwargs)
+    
+    if res.get("status") == "PENDING" and res.get("order_no"):
+        order_no = res["order_no"]
+        quantity = kwargs.get("quantity")
+        price = kwargs.get("price")
+        
+        # 최대 5회 x 2초 = 10초 대기 (비동기로 대기)
+        for attempt in range(1, 6):
+            await asyncio.sleep(2.0)
+            status_res = await safe_broker_call(broker.check_order_status, order_no)
+            
+            status_code = status_res.get("status")
+            if status_code == "FILLED":
+                res["status"] = "FILLED"
+                res["filled_qty"] = status_res.get("filled_qty", quantity)
+                res["filled_price"] = status_res.get("filled_price", price)
+                res["success"] = True
+                res["fill_confirmed"] = True
+                break
+            elif status_code == "PARTIAL":
+                filled_qty = status_res.get("filled_qty", 0)
+                if filled_qty > 0:
+                    res["status"] = "PARTIAL"
+                    res["filled_qty"] = filled_qty
+                    res["filled_price"] = status_res.get("filled_price", price)
+                    res["success"] = True
+                    res["fill_confirmed"] = False
+                    break
+            elif status_code == "ERROR":
+                break
+    return res
 
 ET = ZoneInfo("America/New_York") # 미국 동부 표준시(ET)는 DST를 자동으로 반영합니다
 
@@ -360,22 +400,18 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
     sentiment = ctx.sentiment
     exchange_rate = ctx.exchange_rate
 
-    # ------------------ (Part A) 보유 종목 실시간 감시 및 매도 주문 ------------------
+    sell_tasks_args = []
+
+    # ------------------ (Part A) 매도 조건 판별 및 인텐트 생성 (순차) ------------------
     for h in holdings:
         try:
-            # 보유 종목의 접두사에서 슬롯과 순수 티커 파싱
             parsed = ms_manager.get_slot_by_holding_ticker(h.ticker)
             if not parsed:
                 continue
             slot_key, clean_ticker = parsed
-
-            # 해당 슬롯의 전략 인스턴스 획득
             strategy_instance = ms_manager.strategies[slot_key]
 
-            # 실시간 가격 데이터 획득
-            current_data = target_signal_map.get(clean_ticker)
-            if not current_data:
-                current_data = ctx.signal_map.get(clean_ticker)
+            current_data = target_signal_map.get(clean_ticker) or ctx.signal_map.get(clean_ticker)
             if not current_data:
                 current_data = await analyze_single_ticker(clean_ticker)
 
@@ -384,27 +420,21 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                 continue
 
             current_price = current_data['price']
-            # 평가가치 업데이트용 임시 보정
             h.current_price = current_price
-
             profit_rate = ((current_price - h.avg_price) / h.avg_price) * 100
 
-            # 보유 전략 인스턴스 기준 재계산된 실시간 스코어 및 익절 신호 판정
             current_score = strategy_instance.calculate_score(current_data['details'] or current_data, sentiment, is_entry=False)
             is_smart_exit = current_data.get('details', {}).get('is_smart_exit', False)
 
-            # 최고가(Peak) 갱신
             if current_price > h.highest_price:
                 h.highest_price = current_price
                 log_action(db, user_id, f"[{strategy_instance.name}] New Peak for {clean_ticker}: ${current_price}", "SIGNAL")
                 db.commit()
 
-            # ATR 기반 동적 익절/손절선 계산
             atr = current_data.get('details', {}).get('atr', 0.0)
             stop_loss_pct = strategy_instance.get_stop_loss_pct(atr, current_price)
             trailing_stop_pct = strategy_instance.get_trailing_stop_pct(atr, current_price)
 
-            # 매도 조건 체크
             sell_reason = None
             is_breached = False
             breach_reason = ""
@@ -416,7 +446,6 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                 is_breached = True
                 breach_reason = f"동적 트레일링 스탑 이탈 (최고가 ${h.highest_price:.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)"
 
-            # 휩쏘 방지 연속 2회 확정 가드
             if is_breached:
                 cache_key = (user_id, h.ticker)
                 BREACH_COUNT_CACHE[cache_key] = BREACH_COUNT_CACHE.get(cache_key, 0) + 1
@@ -429,11 +458,9 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             else:
                 BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
 
-            # 조기 스마트 익절
             if not sell_reason and profit_rate >= strategy_instance.min_smart_exit_profit and is_smart_exit:
                 sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
 
-            # 기술적 강세 시그널 붕괴
             elif not sell_reason and strategy_instance.is_signal_collapsed(current_score, sentiment):
                 sell_reason = f"강세 시그널 붕괴 ({current_score}점 도달)"
 
@@ -441,187 +468,159 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                 log_action(db, user_id, f"[{strategy_instance.name}] EXIT SIGNAL: {h.ticker} ({clean_ticker}) | Reason: {sell_reason}", "SIGNAL")
 
                 if real_order_locked:
-                    log_action(
-                        db,
-                        user_id,
-                        f"[REAL SAFETY LOCK] SELL BLOCKED for {clean_ticker}. Turn on the live trading safety switch before sending REAL orders.",
-                        "ERROR"
-                    )
+                    log_action(db, user_id, f"[REAL SAFETY LOCK] SELL BLOCKED for {clean_ticker}. Turn on the live trading safety switch before sending REAL orders.", "ERROR")
                     continue
 
                 is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
                 order_intent = None
                 if is_kis_order:
-                    metadata = await safe_broker_call(
-                        broker.get_order_metadata,
-                        clean_ticker,
-                        ctx.session,
-                    )
+                    metadata = await safe_broker_call(broker.get_order_metadata, clean_ticker, ctx.session)
                     order_intent = create_order_intent(
-                        db,
-                        ctx.db_settings,
-                        side="SELL",
-                        ticker=clean_ticker,
-                        prefixed_ticker=h.ticker,
-                        ticker_name=h.ticker_name,
-                        requested_qty=h.quantity,
-                        submitted_price=current_price,
-                        exchange_code=metadata.get("exchange_code"),
-                        order_division=metadata.get("order_division"),
-                        regime_mode=sentiment,
-                        signal_score=current_score,
-                        sell_reason=sell_reason,
+                        db, ctx.db_settings, side="SELL", ticker=clean_ticker,
+                        prefixed_ticker=h.ticker, ticker_name=h.ticker_name,
+                        requested_qty=h.quantity, submitted_price=current_price,
+                        exchange_code=metadata.get("exchange_code"), order_division=metadata.get("order_division"),
+                        regime_mode=sentiment, signal_score=current_score, sell_reason=sell_reason,
                     )
                     begin_order_submission(db, order_intent, ctx.db_settings)
+                    
+                sell_tasks_args.append((h, order_intent, current_price, sell_reason, clean_ticker, strategy_instance, current_score))
 
-                try:
-                    res = await safe_broker_call(
-                        broker.sell_order,
-                        clean_ticker,
-                        h.quantity,
-                        price=current_price,
-                        session=ctx.session,
-                        **({"client_order_id": order_intent.intent_id} if order_intent else {}),
-                    )
-                except Exception as exc:
-                    if not order_intent:
-                        raise
-                    res = {
-                        "success": False,
-                        "order_submitted": True,
-                        "submission_unknown": True,
-                        "status": "ACK_UNKNOWN",
-                        "order_no": "",
-                        "filled_qty": 0,
-                        "filled_price": 0.0,
-                        "fill_confirmed": False,
-                        "message": f"Broker acknowledgement unknown: {exc}",
-                    }
-
-                if order_intent:
-                    application = finalize_order_submission(
-                        db,
-                        order_intent,
-                        ctx.db_settings,
-                        res,
-                    )
-                    if application.applied_qty > 0:
-                        filled_price = application.filled_price
-                        filled_qty = application.applied_qty
-                        realized_pnl = application.realized_pnl or 0.0
-                        calc_return_rate = application.return_rate or 0.0
-                        remaining_qty = application.remaining_qty or 0
-                        BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
-                        fill_label = (
-                            "sold"
-                            if remaining_qty == 0
-                            else f"partially sold ({filled_qty} filled, {remaining_qty} remaining)"
-                        )
-                        log_action(
-                            db,
-                            user_id,
-                            f"SUCCESS: {h.ticker} {fill_label} via {sell_reason} | Order: {res['order_no']}",
-                            "INFO",
-                        )
-
-                        filled_price_krw = filled_price * exchange_rate
-                        total_amount_usd = filled_price * filled_qty
-                        total_amount_krw = total_amount_usd * exchange_rate
-                        pnl_sign = "+" if realized_pnl >= 0 else "-"
-                        pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
-                        send_message_async(
-                            user_id,
-                            f"🔴 *[{strategy_instance.name} 자동매도 체결]*\n"
-                            f"종목: {clean_ticker} ({h.ticker_name})\n"
-                            f"• *체결 단가:* `${filled_price:,.2f}` (약 {filled_price_krw:,.0f}원)\n"
-                            f"• *체결 수량:* `{filled_qty}주`\n"
-                            f"• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n"
-                            f"• *매도 사유:* {sell_reason}\n\n"
-                            f"{pnl_emoji} *실수익률:* `{pnl_sign}{calc_return_rate:.2f}%`\n"
-                            f"💰 *실현 실수익:* `{pnl_sign}${abs(realized_pnl):,.2f}`\n"
-                            f"• *주문 번호:* `{res['order_no']}`",
-                        )
-                    if application.is_unresolved:
-                        halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
-                        return
-                    if application.applied_qty == 0 and not res.get("success"):
-                        log_action(db, user_id, f"SELL FAILED: {h.ticker} | {res['message']}", "ERROR")
-                    continue
-
-                requires_review = bool(res.get("order_submitted")) and not bool(res.get("fill_confirmed"))
-                if requires_review and res.get("status") != "PARTIAL":
-                    halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
-                    return
-
-                if res["success"]:
-                    filled_price = res["filled_price"]
-                    filled_qty = res["filled_qty"]
-                    if filled_qty <= 0 or filled_qty > h.quantity:
-                        log_action(db, user_id, f"SELL INVALID FILL: {h.ticker} | {res}", "ERROR")
-                        halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
-                        return
-
-                    # 수수료 및 SEC Fee 차감 정밀 손익 계산
-                    buy_gross = h.avg_price * filled_qty
-                    buy_fee = buy_gross * settings.KIS_FEE_RATE
-                    sell_gross = filled_price * filled_qty
-                    sell_fee = sell_gross * settings.KIS_FEE_RATE
-                    sec_fee = sell_gross * settings.SEC_FEE_RATE
-
-                    realized_pnl = sell_gross - buy_gross - buy_fee - sell_fee - sec_fee
-                    calc_return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
-
-                    db.add(TradeLog(
-                        user_id=user_id,
-                        ticker=h.ticker,  # DB 로그에는 접두사가 붙은 티커 기록
-                        ticker_name=h.ticker_name,
-                        trade_type="SELL",
-                        price=filled_price,
-                        quantity=filled_qty,
-                        order_no=res["order_no"],
-                        regime_mode=sentiment,
-                        signal_score=current_score,
-                        realized_pnl=round(realized_pnl, 2),
-                        return_rate=round(calc_return_rate, 2)
-                    ))
-                    is_full_fill = filled_qty >= h.quantity
-                    if is_full_fill:
-                        db.delete(h)
-                    else:
-                        h.quantity -= filled_qty
-                    db.commit()
-                    BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
-                    fill_label = "sold" if is_full_fill else f"partially sold ({filled_qty} filled, {h.quantity} remaining)"
-                    log_action(db, user_id, f"SUCCESS: {h.ticker} {fill_label} via {sell_reason} | Order: {res['order_no']}", "INFO")
-
-                    filled_price_krw = filled_price * exchange_rate
-                    total_amount_usd = filled_price * filled_qty
-                    total_amount_krw = total_amount_usd * exchange_rate
-
-                    pnl_sign = "+" if realized_pnl >= 0 else "-"
-                    pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
-                    realized_pnl_abs = abs(realized_pnl)
-
-                    send_message_async(
-                        user_id,
-                        f"🔴 *[{strategy_instance.name} 자동매도 체결]*\n"
-                        f"종목: {clean_ticker} ({h.ticker_name})\n"
-                        f"• *체결 단가:* `${filled_price:,.2f}` (약 {filled_price_krw:,.0f}원)\n"
-                        f"• *체결 수량:* `{filled_qty}주`\n"
-                        f"• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n"
-                        f"• *매도 사유:* {sell_reason}\n\n"
-                        f"{pnl_emoji} *실수익률:* `{pnl_sign}{calc_return_rate:.2f}%`\n"
-                        f"💰 *실현 실수익:* `{pnl_sign}${realized_pnl_abs:,.2f}`\n"
-                        f"• *주문 번호:* `{res['order_no']}`"
-                    )
-                    if requires_review:
-                        halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
-                        return
-                else:
-                    log_action(db, user_id, f"SELL FAILED: {h.ticker} | {res['message']}", "ERROR")
         except Exception as item_err:
             log_action(db, user_id, f"Error processing holding {h.ticker}: {item_err}", "ERROR")
 
+    if not sell_tasks_args:
+        return
+
+    # ------------------ (Part B) 브로커 비동기 병렬 주문 및 체결 처리 ------------------
+    async def _execute_single_sell(h, order_intent, current_price, sell_reason, clean_ticker, strategy_instance, current_score):
+        try:
+            is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
+            if is_kis_order:
+                res = await execute_and_poll_order(
+                    broker, broker.sell_order, clean_ticker, h.quantity,
+                    price=current_price, session=ctx.session,
+                    **({"client_order_id": order_intent.intent_id} if order_intent else {}),
+                )
+            else:
+                res = await safe_broker_call(
+                    broker.sell_order, clean_ticker, h.quantity,
+                    price=current_price, session=ctx.session,
+                    **({"client_order_id": order_intent.intent_id} if order_intent else {}),
+                )
+        except Exception as exc:
+            if not order_intent:
+                log_action(db, user_id, f"Error during sell order for {h.ticker}: {exc}", "ERROR")
+                return
+            res = {
+                "success": False, "order_submitted": True, "submission_unknown": True,
+                "status": "ACK_UNKNOWN", "order_no": "", "filled_qty": 0, "filled_price": 0.0,
+                "fill_confirmed": False, "message": f"Broker acknowledgement unknown: {exc}",
+            }
+
+        if order_intent:
+            application = finalize_order_submission(db, order_intent, ctx.db_settings, res)
+            if application.applied_qty > 0:
+                filled_price = application.filled_price
+                filled_qty = application.applied_qty
+                realized_pnl = application.realized_pnl or 0.0
+                calc_return_rate = application.return_rate or 0.0
+                remaining_qty = application.remaining_qty or 0
+                BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
+                fill_label = "sold" if remaining_qty == 0 else f"partially sold ({filled_qty} filled, {remaining_qty} remaining)"
+                log_action(db, user_id, f"SUCCESS: {h.ticker} {fill_label} via {sell_reason} | Order: {res['order_no']}", "INFO")
+
+                filled_price_krw = filled_price * exchange_rate
+                total_amount_usd = filled_price * filled_qty
+                total_amount_krw = total_amount_usd * exchange_rate
+                pnl_sign = "+" if realized_pnl >= 0 else "-"
+                pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
+                send_message_async(
+                    user_id,
+                    f"🔴 *[{strategy_instance.name} 자동매도 체결]*\n"
+                    f"종목: {clean_ticker} ({h.ticker_name})\n"
+                    f"• *체결 단가:* `${filled_price:,.2f}` (약 {filled_price_krw:,.0f}원)\n"
+                    f"• *체결 수량:* `{filled_qty}주`\n"
+                    f"• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n"
+                    f"• *매도 사유:* {sell_reason}\n\n"
+                    f"{pnl_emoji} *실수익률:* `{pnl_sign}{calc_return_rate:.2f}%`\n"
+                    f"💰 *실현 실수익:* `{pnl_sign}${abs(realized_pnl):,.2f}`\n"
+                    f"• *주문 번호:* `{res['order_no']}`",
+                )
+            if application.is_unresolved:
+                halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
+                return
+            if application.applied_qty == 0 and not res.get("success"):
+                log_action(db, user_id, f"SELL FAILED: {h.ticker} | {res['message']}", "ERROR")
+            return
+
+        requires_review = bool(res.get("order_submitted")) and not bool(res.get("fill_confirmed"))
+        if requires_review and res.get("status") != "PARTIAL":
+            halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
+            return
+
+        if res["success"]:
+            filled_price = res["filled_price"]
+            filled_qty = res["filled_qty"]
+            if filled_qty <= 0 or filled_qty > h.quantity:
+                log_action(db, user_id, f"SELL INVALID FILL: {h.ticker} | {res}", "ERROR")
+                halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
+                return
+
+            buy_gross = h.avg_price * filled_qty
+            buy_fee = buy_gross * settings.KIS_FEE_RATE
+            sell_gross = filled_price * filled_qty
+            sell_fee = sell_gross * settings.KIS_FEE_RATE
+            sec_fee = sell_gross * settings.SEC_FEE_RATE
+
+            realized_pnl = sell_gross - buy_gross - buy_fee - sell_fee - sec_fee
+            calc_return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
+
+            db.add(TradeLog(
+                user_id=user_id, ticker=h.ticker, ticker_name=h.ticker_name,
+                trade_type="SELL", price=filled_price, quantity=filled_qty,
+                order_no=res["order_no"], regime_mode=sentiment, signal_score=current_score,
+                realized_pnl=round(realized_pnl, 2), return_rate=round(calc_return_rate, 2)
+            ))
+            is_full_fill = filled_qty >= h.quantity
+            if is_full_fill:
+                db.delete(h)
+            else:
+                h.quantity -= filled_qty
+            db.commit()
+            BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
+            fill_label = "sold" if is_full_fill else f"partially sold ({filled_qty} filled, {h.quantity} remaining)"
+            log_action(db, user_id, f"SUCCESS: {h.ticker} {fill_label} via {sell_reason} | Order: {res['order_no']}", "INFO")
+
+            filled_price_krw = filled_price * exchange_rate
+            total_amount_usd = filled_price * filled_qty
+            total_amount_krw = total_amount_usd * exchange_rate
+
+            pnl_sign = "+" if realized_pnl >= 0 else "-"
+            pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
+            realized_pnl_abs = abs(realized_pnl)
+
+            send_message_async(
+                user_id,
+                f"🔴 *[{strategy_instance.name} 자동매도 체결]*\n"
+                f"종목: {clean_ticker} ({h.ticker_name})\n"
+                f"• *체결 단가:* `${filled_price:,.2f}` (약 {filled_price_krw:,.0f}원)\n"
+                f"• *체결 수량:* `{filled_qty}주`\n"
+                f"• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n"
+                f"• *매도 사유:* {sell_reason}\n\n"
+                f"{pnl_emoji} *실수익률:* `{pnl_sign}{calc_return_rate:.2f}%`\n"
+                f"💰 *실현 실수익:* `{pnl_sign}${realized_pnl_abs:,.2f}`\n"
+                f"• *주문 번호:* `{res['order_no']}`"
+            )
+            if requires_review:
+                halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
+                return
+        else:
+            log_action(db, user_id, f"SELL FAILED: {h.ticker} | {res['message']}", "ERROR")
+
+    # 병렬 대기 및 실행
+    tasks = [_execute_single_sell(*args) for args in sell_tasks_args]
+    await asyncio.gather(*tasks)
 
 def resolve_entry_stage(ctx: TradingFlowContext, strategy_instance, clean_ticker: str, signal: dict, existing_holding):
     proposed_alloc_factor = 1.0
@@ -821,6 +820,9 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
     focused_tickers = ms_manager.get_focused_tickers(ctx.all_signals)
     log_action(db, user_id, f"[Focusing Filter] Selected {len(focused_tickers)} elite tickers for compressed investment: {', '.join(focused_tickers)}", "INFO")
 
+    buy_tasks_args = []
+
+    # ------------------ (Part A) 매수 조건 판별 및 인텐트 생성 (순차) ------------------
     for slot_key, slot_info in slot_allocations.items():
         if slot_key == "regime_switching" and ctx.sentiment != "BULLISH":
             log_action(db, user_id, f"[Regime Sluice] Regime Switching V2 slot DEACTIVATED in {ctx.sentiment} market to protect 100% cash.", "INFO")
@@ -892,154 +894,118 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 reason_title = "Budget exceeded - below minimum quantity" if is_budget_exceeded else "Insufficient cash"
                 reason_desc = "Slot cash is not enough for this order." if not is_budget_exceeded else "One share costs more than the slot allocation allows."
                 send_entry_budget_warning(
-                    ctx=ctx,
-                    strategy_instance=strategy_instance,
-                    clean_ticker=clean_ticker,
-                    signal=signal,
-                    prefixed_ticker=prefixed_ticker,
-                    reason_title=reason_title,
-                    reason_desc=reason_desc,
-                    current_price=current_price,
-                    proposed_value_usd=proposed_value_usd,
+                    ctx=ctx, strategy_instance=strategy_instance, clean_ticker=clean_ticker,
+                    signal=signal, prefixed_ticker=prefixed_ticker, reason_title=reason_title,
+                    reason_desc=reason_desc, current_price=current_price, proposed_value_usd=proposed_value_usd,
                     slot_cash_usd=slot_cash_usd,
                 )
                 continue
 
             if ctx.real_order_locked:
-                log_action(
-                    db,
-                    user_id,
-                    f"[REAL SAFETY LOCK] BUY BLOCKED for {clean_ticker}. Turn on the live trading safety switch before sending REAL orders.",
-                    "ERROR"
-                )
+                log_action(db, user_id, f"[REAL SAFETY LOCK] BUY BLOCKED for {clean_ticker}. Turn on the live trading safety switch before sending REAL orders.", "ERROR")
                 continue
 
             is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
             order_intent = None
             if is_kis_order:
-                metadata = await safe_broker_call(
-                    ctx.broker.get_order_metadata,
-                    clean_ticker,
-                    ctx.session,
-                )
+                metadata = await safe_broker_call(ctx.broker.get_order_metadata, clean_ticker, ctx.session)
                 order_intent = create_order_intent(
-                    db,
-                    ctx.db_settings,
-                    side="BUY",
-                    ticker=clean_ticker,
-                    prefixed_ticker=prefixed_ticker,
-                    ticker_name=signal["name"],
-                    requested_qty=final_qty,
-                    submitted_price=current_price,
-                    exchange_code=metadata.get("exchange_code"),
-                    order_division=metadata.get("order_division"),
-                    buy_stage=next_stage,
-                    regime_mode=ctx.sentiment,
-                    signal_score=score,
+                    db, ctx.db_settings, side="BUY", ticker=clean_ticker,
+                    prefixed_ticker=prefixed_ticker, ticker_name=signal["name"],
+                    requested_qty=final_qty, submitted_price=current_price,
+                    exchange_code=metadata.get("exchange_code"), order_division=metadata.get("order_division"),
+                    buy_stage=next_stage, regime_mode=ctx.sentiment, signal_score=score,
                 )
                 begin_order_submission(db, order_intent, ctx.db_settings)
 
-            try:
-                res = await safe_broker_call(
-                    ctx.broker.buy_order,
-                    clean_ticker,
-                    final_qty,
-                    price=current_price,
-                    session=ctx.session,
-                    **({"client_order_id": order_intent.intent_id} if order_intent else {}),
-                )
-            except Exception as exc:
-                if not order_intent:
-                    raise
-                res = {
-                    "success": False,
-                    "order_submitted": True,
-                    "submission_unknown": True,
-                    "status": "ACK_UNKNOWN",
-                    "order_no": "",
-                    "filled_qty": 0,
-                    "filled_price": 0.0,
-                    "fill_confirmed": False,
-                    "message": f"Broker acknowledgement unknown: {exc}",
-                }
-
-            if order_intent:
-                application = finalize_order_submission(
-                    db,
-                    order_intent,
-                    ctx.db_settings,
-                    res,
-                )
-                if application.applied_qty > 0:
-                    filled_price = application.filled_price
-                    filled_qty = application.applied_qty
-                    slot_cash_usd -= (filled_price * filled_qty) * (1 + settings.KIS_FEE_RATE)
-                    if application.created_holding:
-                        slot_holdings_count += 1
-                    log_action(
-                        db,
-                        user_id,
-                        f"SUCCESS: {prefixed_ticker} broker fill applied ({filled_qty} shares)",
-                        "INFO",
-                    )
-                    send_successful_buy_message(
-                        ctx=ctx,
-                        strategy_instance=strategy_instance,
-                        clean_ticker=clean_ticker,
-                        signal=signal,
-                        filled_price=filled_price,
-                        filled_qty=filled_qty,
-                        next_stage=next_stage,
-                        order_no=res["order_no"],
-                    )
-                if application.is_unresolved:
-                    halt_trading_for_order_review(ctx, "BUY", clean_ticker, res)
-                    return False
-                if application.applied_qty == 0 and not res.get("success"):
-                    log_action(db, user_id, f"BUY FAILED: {prefixed_ticker} | {res['message']}", "ERROR")
-                continue
-
-            requires_review = bool(res.get("order_submitted")) and not bool(res.get("fill_confirmed"))
-            if requires_review and res.get("status") != "PARTIAL":
-                halt_trading_for_order_review(ctx, "BUY", clean_ticker, res)
-                return False
-
-            if not res["success"]:
-                log_action(db, user_id, f"BUY FAILED: {prefixed_ticker} | {res['message']}", "ERROR")
-                continue
-
-            filled_price = res["filled_price"]
-            filled_qty = res["filled_qty"]
-            slot_cash_usd -= (filled_price * filled_qty) * (1 + settings.KIS_FEE_RATE)
-
-            created_new_holding = record_successful_buy(
-                ctx=ctx,
-                strategy_instance=strategy_instance,
-                existing_holding=existing_holding,
-                prefixed_ticker=prefixed_ticker,
-                signal=signal,
-                filled_price=filled_price,
-                filled_qty=filled_qty,
-                next_stage=next_stage,
-            )
-            if created_new_holding:
+            buy_tasks_args.append((
+                clean_ticker, prefixed_ticker, strategy_instance, signal, score, next_stage,
+                current_price, final_qty, existing_holding, order_intent
+            ))
+            slot_cash_usd -= (current_price * final_qty) * (1 + settings.KIS_FEE_RATE)
+            if not existing_holding:
                 slot_holdings_count += 1
 
-            send_successful_buy_message(
-                ctx=ctx,
-                strategy_instance=strategy_instance,
-                clean_ticker=clean_ticker,
-                signal=signal,
-                filled_price=filled_price,
-                filled_qty=filled_qty,
-                next_stage=next_stage,
-                order_no=res["order_no"],
-            )
-            if requires_review:
+    if not buy_tasks_args:
+        return True
+
+    # ------------------ (Part B) 브로커 비동기 병렬 주문 및 체결 처리 ------------------
+    async def _execute_single_buy(clean_ticker, prefixed_ticker, strategy_instance, signal, score, next_stage, current_price, final_qty, existing_holding, order_intent):
+        try:
+            is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
+            if is_kis_order:
+                res = await execute_and_poll_order(
+                    ctx.broker, ctx.broker.buy_order, clean_ticker, final_qty,
+                    price=current_price, session=ctx.session,
+                    **({"client_order_id": order_intent.intent_id} if order_intent else {}),
+                )
+            else:
+                res = await safe_broker_call(
+                    ctx.broker.buy_order, clean_ticker, final_qty,
+                    price=current_price, session=ctx.session,
+                    **({"client_order_id": order_intent.intent_id} if order_intent else {}),
+                )
+        except Exception as exc:
+            if not order_intent:
+                log_action(db, user_id, f"Error during buy order for {clean_ticker}: {exc}", "ERROR")
+                return False
+            res = {
+                "success": False, "order_submitted": True, "submission_unknown": True,
+                "status": "ACK_UNKNOWN", "order_no": "", "filled_qty": 0, "filled_price": 0.0,
+                "fill_confirmed": False, "message": f"Broker acknowledgement unknown: {exc}",
+            }
+
+        if order_intent:
+            application = finalize_order_submission(db, order_intent, ctx.db_settings, res)
+            if application.applied_qty > 0:
+                filled_price = application.filled_price
+                filled_qty = application.applied_qty
+                log_action(db, user_id, f"SUCCESS: {prefixed_ticker} broker fill applied ({filled_qty} shares)", "INFO")
+                send_successful_buy_message(
+                    ctx=ctx, strategy_instance=strategy_instance, clean_ticker=clean_ticker,
+                    signal=signal, filled_price=filled_price, filled_qty=filled_qty,
+                    next_stage=next_stage, order_no=res["order_no"],
+                )
+            if application.is_unresolved:
                 halt_trading_for_order_review(ctx, "BUY", clean_ticker, res)
                 return False
+            if application.applied_qty == 0 and not res.get("success"):
+                log_action(db, user_id, f"BUY FAILED: {prefixed_ticker} | {res['message']}", "ERROR")
+            return True
 
-    return True
+        requires_review = bool(res.get("order_submitted")) and not bool(res.get("fill_confirmed"))
+        if requires_review and res.get("status") != "PARTIAL":
+            halt_trading_for_order_review(ctx, "BUY", clean_ticker, res)
+            return False
+
+        if not res["success"]:
+            log_action(db, user_id, f"BUY FAILED: {prefixed_ticker} | {res['message']}", "ERROR")
+            return True
+
+        filled_price = res["filled_price"]
+        filled_qty = res["filled_qty"]
+
+        record_successful_buy(
+            ctx=ctx, strategy_instance=strategy_instance, existing_holding=existing_holding,
+            prefixed_ticker=prefixed_ticker, signal=signal, filled_price=filled_price,
+            filled_qty=filled_qty, next_stage=next_stage,
+        )
+
+        send_successful_buy_message(
+            ctx=ctx, strategy_instance=strategy_instance, clean_ticker=clean_ticker,
+            signal=signal, filled_price=filled_price, filled_qty=filled_qty,
+            next_stage=next_stage, order_no=res["order_no"],
+        )
+        if requires_review:
+            halt_trading_for_order_review(ctx, "BUY", clean_ticker, res)
+            return False
+            
+        return True
+
+    tasks = [_execute_single_buy(*args) for args in buy_tasks_args]
+    results = await asyncio.gather(*tasks)
+
+    return all(results)
 
 async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: list, exchange_rate: float, sentiment: str, session: str):
     """Runs one user's automated trading flow using cycle-level market context."""
