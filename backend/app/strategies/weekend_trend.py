@@ -26,7 +26,8 @@ class WeekendTrend(BaseStrategy):
             return 0.0
         else:
             ema120 = self._safe_get(row, 'EMA120')
-            # 장기 추세선인 EMA 120 붕괴 시 청산
-            if close < ema120:
+            
+            # 장기 추세선인 EMA 120 붕괴 시 청산 (신규 상장주 NaN 방어)
+            if not pd.isna(ema120) and close < ema120:
                 return 100.0
             return 30.0

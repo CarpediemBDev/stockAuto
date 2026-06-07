@@ -24,7 +24,8 @@ def calculate_vwap(df: pd.DataFrame) -> pd.Series:
     if isinstance(volume, pd.DataFrame): volume = volume.iloc[:, 0]
     
     # 당일 데이터만 추출 (일자별로 초기화되는 방식)
-    temp_df['Date'] = pd.to_datetime(temp_df.index).date
+    session_date_column = "_vwap_session_date"
+    temp_df[session_date_column] = pd.to_datetime(temp_df.index).date
     
     # 각 날짜별로 누적 계산
     typical_price = (high + low + close) / 3
@@ -34,7 +35,7 @@ def calculate_vwap(df: pd.DataFrame) -> pd.Series:
     temp_df['TP_V'] = tp_v
     temp_df['Volume_Squeezed'] = volume
     
-    grouped = temp_df.groupby('Date')
+    grouped = temp_df.groupby(session_date_column)
     cum_tp_v = grouped['TP_V'].cumsum()
     cum_vol = grouped['Volume_Squeezed'].cumsum()
     
@@ -431,5 +432,4 @@ def calculate_obv_divergence(df: pd.DataFrame, window: int = 10) -> pd.Series:
             scores[i] = 0.0
             
     return pd.Series(scores, index=df.index)
-
 

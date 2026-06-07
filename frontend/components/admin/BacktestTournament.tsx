@@ -38,6 +38,7 @@ interface EquityPoint {
 }
 
 interface StrategyResult {
+  strategy_type?: string;
   name: string;
   final_value: number;
   total_pnl: number;
@@ -45,6 +46,15 @@ interface StrategyResult {
   mdd: number;
   total_trades: number;
   win_rate: number;
+  sharpe_ratio?: number;
+  sortino_ratio?: number;
+  calmar_ratio?: number;
+  selection_score?: number;
+  selection_eligible?: boolean;
+  confidence_grade?: string;
+  data_basis?: string;
+  data_quality_reason?: string;
+  selection_exclusion_reasons?: string[];
   ticker_stats: Record<string, TickerStat>;
   equity_curve: EquityPoint[];
 }
@@ -175,6 +185,8 @@ export function BacktestTournament() {
       '#10b981', // 3위: Emerald-500
       '#ec4899', // 4위: Pink-500
       '#8b5cf6', // 5위: Purple-500
+      '#06b6d4', // 6위: Cyan-500
+      '#f43f5e', // 7위: Rose-500
     ];
     return colors[index] || '#64748b';
   };
@@ -323,6 +335,7 @@ export function BacktestTournament() {
                         <tr className="bg-zinc-900/60 border-b border-zinc-800/60 text-zinc-400 font-semibold text-[11px] uppercase tracking-wider">
                           <th className="py-3 px-4 text-center w-12">순위</th>
                           <th className="py-3 px-4">전략 명칭</th>
+                          <th className="py-3 px-4 text-right">선발 점수</th>
                           <th className="py-3 px-4 text-right">최종 자산</th>
                           <th className="py-3 px-4">누적수익률</th>
                           <th className="py-3 px-4 text-right">MDD</th>
@@ -345,7 +358,20 @@ export function BacktestTournament() {
                                 <div className="flex justify-center">{getRankBadge(rank)}</div>
                               </td>
                               <td className="py-3.5 px-4 font-semibold text-slate-200">
-                                {r.name}
+                                <div className="flex items-center gap-2">
+                                  <span>{r.name}</span>
+                                  {r.confidence_grade && (
+                                    <span className={`rounded px-1.5 py-0.5 text-[9px] font-black
+                                      ${r.selection_eligible
+                                        ? 'bg-blue-500/10 text-blue-300 border border-blue-500/20'
+                                        : 'bg-amber-500/10 text-amber-300 border border-amber-500/20'}`}>
+                                      {r.confidence_grade}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-4 text-right font-mono font-bold text-blue-300">
+                                {r.selection_score !== undefined ? r.selection_score.toFixed(2) : '-'}
                               </td>
                               <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-300">
                                 ${r.final_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -423,6 +449,44 @@ export function BacktestTournament() {
                           </div>
                         </div>
                       </div>
+
+                      {selectedStrategy.selection_score !== undefined && (
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="bg-zinc-900/40 rounded-xl p-3 border border-zinc-800/40">
+                            <span className="text-[9px] uppercase font-bold tracking-wider text-zinc-500 block mb-1">
+                              선발 점수
+                            </span>
+                            <span className="text-sm font-mono font-extrabold text-blue-300">
+                              {selectedStrategy.selection_score.toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="bg-zinc-900/40 rounded-xl p-3 border border-zinc-800/40">
+                            <span className="text-[9px] uppercase font-bold tracking-wider text-zinc-500 block mb-1">
+                              Sharpe
+                            </span>
+                            <span className="text-sm font-mono font-extrabold text-slate-200">
+                              {(selectedStrategy.sharpe_ratio ?? 0).toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="bg-zinc-900/40 rounded-xl p-3 border border-zinc-800/40">
+                            <span className="text-[9px] uppercase font-bold tracking-wider text-zinc-500 block mb-1">
+                              데이터 근거
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-300">
+                              {selectedStrategy.data_basis ?? '-'}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedStrategy.selection_eligible === false && (
+                        <div className="flex gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] leading-relaxed text-amber-200">
+                          <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                          <span>
+                            기본 10개 선발에서 제외됩니다. {selectedStrategy.selection_exclusion_reasons?.join(' ')}
+                          </span>
+                        </div>
+                      )}
 
                       <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-zinc-800">
                         <div className="flex text-[10px] uppercase font-bold tracking-wider text-zinc-500 px-3 border-b border-zinc-800/50 pb-2">

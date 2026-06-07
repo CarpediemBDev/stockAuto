@@ -271,8 +271,8 @@ async def scan_market_expert() -> list:
     
     try:
         # 💡 [데이터 프로바이더 대량 수집 이식]
-        async def fetch_1m_data():
-            return await fetch_bulk_ohlcv(candidate_tickers, period="2d", interval="1m")
+        async def fetch_5m_data():
+            return await fetch_bulk_ohlcv(candidate_tickers, period="5d", interval="5m")
             
         async def fetch_daily_data():
             return await fetch_bulk_ohlcv(candidate_tickers, period="1y", interval="1d")
@@ -287,8 +287,8 @@ async def scan_market_expert() -> list:
         news_tasks = [fetch_news_data(t) for t in candidate_tickers]
         fundamental_tasks = [check_fundamental_health(t) for t in candidate_tickers]
         
-        data_1m, data_daily, news_results, fundamental_results = await asyncio.gather(
-            fetch_1m_data(),
+        data_5m, data_daily, news_results, fundamental_results = await asyncio.gather(
+            fetch_5m_data(),
             fetch_daily_data(),
             asyncio.gather(*news_tasks),
             asyncio.gather(*fundamental_tasks)
@@ -300,13 +300,13 @@ async def scan_market_expert() -> list:
         for cand in candidates:
             ticker = cand['ticker']
             try:
-                # 1. 1분봉 데이터 추출
-                if isinstance(data_1m.columns, pd.MultiIndex):
-                    if ticker not in data_1m.columns.get_level_values(0): continue
-                    df_1m = data_1m[ticker].dropna()
+                # 1. 5분봉 데이터 추출
+                if isinstance(data_5m.columns, pd.MultiIndex):
+                    if ticker not in data_5m.columns.get_level_values(0): continue
+                    df_5m = data_5m[ticker].dropna()
                 else:
-                    df_1m = data_1m.dropna()
-                if df_1m.empty or len(df_1m) < 10: continue
+                    df_5m = data_5m.dropna()
+                if df_5m.empty or len(df_5m) < 10: continue
                 
                 # 2. 일봉 데이터 추출 (OBV, VCP, Cup & Handle 연산용)
                 if isinstance(data_daily.columns, pd.MultiIndex):
@@ -315,7 +315,7 @@ async def scan_market_expert() -> list:
                 else:
                     df_daily = data_daily.dropna()
 
-                last_close = float(df_1m['Close'].iloc[-1])
+                last_close = float(df_5m['Close'].iloc[-1])
 
                 is_near_52w_high = False
                 if not df_daily.empty:
@@ -339,16 +339,16 @@ async def scan_market_expert() -> list:
                 news_url = news_analysis["url"]
                 
                 # 기술적 지표 및 퀀트 차트 패턴 감지
-                _, _, is_orb_breakout = detect_orb_high(df_1m)
-                is_rsi_bb_extreme = detect_rsi_bb_extreme(df_1m)
+                _, _, is_orb_breakout = detect_orb_high(df_5m)
+                is_rsi_bb_extreme = detect_rsi_bb_extreme(df_5m)
                 is_obv_accumulation = detect_obv_divergence(df_daily) if not df_daily.empty else False
                 
                 # VCP / Cup & Handle 패턴 인식 적용
                 is_vcp = detect_vcp_pattern(df_daily) if not df_daily.empty else False
                 is_cup = detect_cup_and_handle(df_daily) if not df_daily.empty else False
                 
-                vwap = calculate_vwap(df_1m)
-                risk_level, wick_ratio = detect_fakeout_risk(df_1m)
+                vwap = calculate_vwap(df_5m)
+                risk_level, wick_ratio = detect_fakeout_risk(df_5m)
                 
                 # ----------------- 다이내믹 세부 채점표 (score_card) 구축 -----------------
                 score_card = []
@@ -361,7 +361,7 @@ async def scan_market_expert() -> list:
                 
                 # 채점에 필요한 실시간 필드들을 cand(dict)에 바인딩
                 cand['Close'] = last_close
-                cand['Volume'] = float(df_1m['Volume'].iloc[-1]) if not df_1m.empty else 0.0
+                cand['Volume'] = float(df_5m['Volume'].iloc[-1]) if not df_5m.empty else 0.0
                 cand['VWAP'] = vwap.iloc[-1] if not vwap.empty else float('nan')
                 cand['Wick'] = wick_ratio
                 cand['RVOL'] = cand.get('RVOL', cand.get('rvol', 1.0))
@@ -399,7 +399,7 @@ async def scan_market_expert() -> list:
                 else:
                     sig_type = "STRONG_BUY" if final_score >= 95 else "BUY" if final_score >= 75 else "WATCH"
                 
-                atr_series = calculate_atr(df_1m, period=14)
+                atr_series = calculate_atr(df_5m, period=14)
                 latest_atr = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
                 
                 final_results.append({
@@ -459,18 +459,18 @@ async def analyze_single_ticker(ticker: str) -> dict:
         qqq_perf = (df_qqq['Close'].iloc[-1] / df_qqq['Close'].iloc[0] - 1) if not df_qqq.empty else 0
 
         # 데이터 수집 (데이터 프로바이더 연동으로 강결합 제거)
-        df_15m, df_1m, df_daily = await asyncio.gather(
+        df_15m, df_5m, df_daily = await asyncio.gather(
             fetch_ohlcv(ticker, interval="15m", period="5d"),
-            fetch_ohlcv(ticker, interval="1m", period="2d"),
+            fetch_ohlcv(ticker, interval="5m", period="5d"),
             fetch_ohlcv(ticker, interval="1d", period="200d")
         )
         
-        if df_15m.empty or df_1m.empty or len(df_15m) < 5:
+        if df_15m.empty or df_5m.empty or len(df_15m) < 5:
             return None
 
         # [핵심 가드] yfinance MultiIndex 데이터 유출 방지 및 중복 컬럼 완전 제거 정화
         cleaned_dfs = []
-        for dataframe in (df_15m, df_1m, df_daily):
+        for dataframe in (df_15m, df_5m, df_daily):
             if dataframe.empty:
                 cleaned_dfs.append(dataframe)
                 continue
@@ -480,9 +480,9 @@ async def analyze_single_ticker(ticker: str) -> dict:
             temp = temp.loc[:, ~temp.columns.duplicated()]
             cleaned_dfs.append(temp)
             
-        df_15m, df_1m, df_daily = cleaned_dfs
+        df_15m, df_5m, df_daily = cleaned_dfs
 
-        last_close = float(df_1m['Close'].iloc[-1])
+        last_close = float(df_5m['Close'].iloc[-1])
         rvol = calculate_rvol(df_15m)
         
         ema9 = calculate_ema(df_15m['Close'], 9)
@@ -494,8 +494,8 @@ async def analyze_single_ticker(ticker: str) -> dict:
         stock_perf = float(df_15m['Close'].iloc[-1] / df_15m['Close'].iloc[0] - 1)
         rs = float(stock_perf - qqq_perf)
 
-        _, _, is_orb_breakout = detect_orb_high(df_1m)
-        is_rsi_bb_extreme = detect_rsi_bb_extreme(df_1m)
+        _, _, is_orb_breakout = detect_orb_high(df_5m)
+        is_rsi_bb_extreme = detect_rsi_bb_extreme(df_5m)
         is_obv_accumulation = detect_obv_divergence(df_daily) if not df_daily.empty else False
         is_fundamental_healthy = await check_fundamental_health(ticker)
 
@@ -503,8 +503,8 @@ async def analyze_single_ticker(ticker: str) -> dict:
         if not is_fundamental_healthy:
             fundamental_penalty = 40
 
-        vwap = calculate_vwap(df_1m)
-        risk_level, wick_ratio = detect_fakeout_risk(df_1m)
+        vwap = calculate_vwap(df_5m)
+        risk_level, wick_ratio = detect_fakeout_risk(df_5m)
 
         # 💡 [전략 패턴] 전략 팩토리를 통해 실시간 전략 로드 및 채점
         from app.strategies.strategy_factory import get_strategy
@@ -512,7 +512,7 @@ async def analyze_single_ticker(ticker: str) -> dict:
 
         cand = {
             'Close': last_close,
-            'Volume': float(df_1m['Volume'].iloc[-1]) if not df_1m.empty else 0.0,
+            'Volume': float(df_5m['Volume'].iloc[-1]) if not df_5m.empty else 0.0,
             'VWAP': vwap.iloc[-1] if not vwap.empty else float('nan'),
             'Wick': wick_ratio,
             'is_rsi_bb_extreme': is_rsi_bb_extreme,
@@ -525,7 +525,7 @@ async def analyze_single_ticker(ticker: str) -> dict:
             'EMA9': float(ema9.iloc[-1]) if not ema9.empty else 0.0,
             'EMA20': float(ema20.iloc[-1]) if not ema20.empty else 0.0,
             'ema_aligned': ema_aligned,
-            'dollar_volume': float(df_1m['Close'].iloc[-1] * df_1m['Volume'].iloc[-1]) if not df_1m.empty else 0.0,
+            'dollar_volume': float(df_5m['Close'].iloc[-1] * df_5m['Volume'].iloc[-1]) if not df_5m.empty else 0.0,
             'is_near_52w_high': False,
             'momentum_candles': False,
             'premarket_gap_pct': 0.0,
@@ -552,10 +552,10 @@ async def analyze_single_ticker(ticker: str) -> dict:
         else:
             sig_type = "STRONG_BUY" if final_score >= 95 else "BUY" if final_score >= 75 else "WATCH"
 
-        atr_series = calculate_atr(df_1m, period=14)
+        atr_series = calculate_atr(df_5m, period=14)
         latest_atr = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
         
-        is_smart_exit = detect_smart_exit_signal(df_1m)
+        is_smart_exit = detect_smart_exit_signal(df_5m)
 
         return {
             "ticker": ticker,

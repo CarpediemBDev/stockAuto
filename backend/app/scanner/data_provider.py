@@ -82,20 +82,36 @@ def _run_yfinance_cached(cache: dict, cache_key, ttl: float, fetcher):
         _write_cache(cache, cache_key, value)
         return _clone_cached(value)
 
-async def fetch_ohlcv(ticker: str, interval: str = "1h", period: str = "5d") -> pd.DataFrame:
+async def fetch_ohlcv(
+    ticker: str,
+    interval: str = "1h",
+    period: str = "5d",
+    start=None,
+    end=None,
+) -> pd.DataFrame:
     """
     지정한 단일 종목의 OHLCV 데이터를 비동기로 안전하게 가져오고 MultiIndex 컬럼을 단일화합니다.
     (💡 10초 전역 캐싱 적용 - 중복 요출 원천 차단)
     """
-    cache_key = (ticker, interval, period)
+    cache_key = (ticker, interval, period, str(start), str(end))
     try:
+        download_kwargs = {
+            "interval": interval,
+            "progress": False,
+            "threads": False,
+        }
+        if start is not None or end is not None:
+            download_kwargs.update({"start": start, "end": end})
+        else:
+            download_kwargs["period"] = period
+
         data = await asyncio.to_thread(
             _run_yfinance_cached,
             _ohlcv_cache,
             cache_key,
             OHLCV_CACHE_TTL,
             lambda: _normalize_ohlcv(
-                yf.download(ticker, period=period, interval=interval, progress=False, threads=False)
+                yf.download(ticker, **download_kwargs)
             )
         )
         return data if not data.empty else pd.DataFrame()
@@ -118,28 +134,46 @@ async def fetch_index_data(market_index: str = "QQQ") -> pd.DataFrame:
     """
     return await fetch_ohlcv(market_index, interval="15m", period="10d")
 
-async def fetch_bulk_ohlcv(tickers: list, interval: str, period: str, group_by: str = "ticker") -> pd.DataFrame:
+async def fetch_bulk_ohlcv(
+    tickers: list,
+    interval: str,
+    period: str = "5d",
+    group_by: str = "ticker",
+    start=None,
+    end=None,
+) -> pd.DataFrame:
     """
     여러 종목의 OHLCV 데이터를 벌크(대량)로 다운로드합니다.
     (💡 10초 전역 캐싱 적용)
     """
     if not tickers:
         return pd.DataFrame()
-    cache_key = (tuple(sorted(tickers)), interval, period, group_by)
+    cache_key = (
+        tuple(sorted(tickers)),
+        interval,
+        period,
+        group_by,
+        str(start),
+        str(end),
+    )
     try:
+        download_kwargs = {
+            "interval": interval,
+            "group_by": group_by,
+            "progress": False,
+            "threads": False,
+        }
+        if start is not None or end is not None:
+            download_kwargs.update({"start": start, "end": end})
+        else:
+            download_kwargs["period"] = period
+
         data = await asyncio.to_thread(
             _run_yfinance_cached,
             _bulk_ohlcv_cache,
             cache_key,
             BULK_OHLCV_CACHE_TTL,
-            lambda: yf.download(
-                tickers,
-                period=period,
-                interval=interval,
-                group_by=group_by,
-                progress=False,
-                threads=False
-            )
+            lambda: yf.download(tickers, **download_kwargs)
         )
         return data
     except Exception as e:
@@ -262,4 +296,3 @@ def fetch_ohlcv_sync(ticker: str, interval: str = "1h", period: str = "5d") -> p
     except Exception as e:
         logger.warning(f"[DataProvider] Error sync fetching {ticker} ({interval}): {e}")
         return pd.DataFrame()
-

@@ -1,13 +1,14 @@
 import pandas as pd
 import numpy as np
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.scanner.data_provider import fetch_ohlcv, fetch_bulk_ohlcv
 from app.scanner.indicators import (
     calculate_ema, calculate_rsi, calculate_macd, calculate_atr, 
     calculate_obv_divergence, calculate_rsi_bb, calculate_vwap, calculate_wick_ratio
 )
 from app.core.logging import logger
+from app.bot.backtest_metrics import calculate_performance_metrics
 
 from app.core.config import settings
 
@@ -192,6 +193,22 @@ class BacktestSimulator:
         self.qqq_metrics = None  # DataFrame containing QQQ indicators
         self.timeline = []  # 정렬된 공통 시계열 타임스탬프 리스트
 
+    @staticmethod
+    def _slice_requested_range(
+        frame: pd.DataFrame,
+        start_date: str,
+        end_date: str,
+    ) -> pd.DataFrame:
+        if frame.empty:
+            return frame
+
+        start = pd.Timestamp(start_date)
+        end_exclusive = pd.Timestamp(end_date) + pd.Timedelta(days=1)
+        if frame.index.tz is not None:
+            start = start.tz_localize(frame.index.tz)
+            end_exclusive = end_exclusive.tz_localize(frame.index.tz)
+        return frame[(frame.index >= start) & (frame.index < end_exclusive)]
+
     async def prepare_data(self):
         """QQQ 및 대상 티커들의 데이터를 다운로드하고 모든 기술적 지표를 벡터화 사전 연산하여 타임라인을 구축합니다."""
         logger.info(f"[Backtest prepare_data] Sourcing data from {self.start_date} to {self.end_date} (Interval: {self.interval})")
@@ -199,8 +216,20 @@ class BacktestSimulator:
         # 1. QQQ 지수 데이터 수집 (레짐 스위칭용)
         # 1시간봉/일봉 백테스트 시에는 동일 인터벌을 적용하고, 1분봉 정밀 시에는 1분봉 QQQ 데이터와 15분봉 QQQ 데이터를 적절히 조화시킵니다.
         # 여기서는 주 인터벌 데이터를 기준으로 정합합니다.
-        period_diff = (datetime.strptime(self.end_date, "%Y-%m-%d") - datetime.strptime(self.start_date, "%Y-%m-%d")).days
+        start_datetime = datetime.strptime(self.start_date, "%Y-%m-%d")
+        end_datetime = datetime.strptime(self.end_date, "%Y-%m-%d")
+        period_diff = (end_datetime - start_datetime).days
+        if period_diff < 0:
+            raise ValueError("Backtest start_date must be earlier than end_date.")
         period_str = f"{period_diff + 5}d"  # 주말 마진 추가
+        warmup_days = {
+            "1m": 5,
+            "15m": 15,
+            "1h": 45,
+            "1d": 240,
+        }.get(self.interval, 60)
+        download_start = start_datetime - timedelta(days=warmup_days)
+        download_end = end_datetime + timedelta(days=1)
         
         # 1분봉은 최대 30일 제한이 있으므로 안전하게 period를 제한
         if self.interval == "1m":
@@ -208,25 +237,28 @@ class BacktestSimulator:
             logger.warning("[Backtest] Interval 1m selected. Restricting range to maximum 30 days due to yfinance limit.")
 
         logger.info(f"[Backtest] Fetching QQQ index data...")
-        self.qqq_data = await fetch_ohlcv("QQQ", interval=self.interval, period=period_str)
+        self.qqq_data = await fetch_ohlcv(
+            "QQQ",
+            interval=self.interval,
+            period=period_str,
+            start=download_start,
+            end=download_end,
+        )
         if self.qqq_data.empty:
             raise Exception("Failed to fetch QQQ index data. Backtesting cannot proceed without regime guide.")
-        
-        # 시간 범위 필터 적용
-        self.qqq_data = self.qqq_data[(self.qqq_data.index >= self.start_date) & (self.qqq_data.index <= self.end_date)]
-        
+
         # QQQ 지표 계산 (MA20, MA50)
-        self.qqq_metrics = pd.DataFrame(index=self.qqq_data.index)
-        self.qqq_metrics['Close'] = self.qqq_data['Close']
-        self.qqq_metrics['MA20'] = calculate_ema(self.qqq_data['Close'], 20)
-        self.qqq_metrics['MA50'] = calculate_ema(self.qqq_data['Close'], 50)
+        qqq_metrics = pd.DataFrame(index=self.qqq_data.index)
+        qqq_metrics['Close'] = self.qqq_data['Close']
+        qqq_metrics['MA20'] = calculate_ema(self.qqq_data['Close'], 20)
+        qqq_metrics['MA50'] = calculate_ema(self.qqq_data['Close'], 50)
         
         # QQQ 레짐 모드 판단 열 추가
         regimes = []
-        for i in range(len(self.qqq_metrics)):
-            close = self.qqq_metrics['Close'].iloc[i]
-            ma20 = self.qqq_metrics['MA20'].iloc[i]
-            ma50 = self.qqq_metrics['MA50'].iloc[i]
+        for i in range(len(qqq_metrics)):
+            close = qqq_metrics['Close'].iloc[i]
+            ma20 = qqq_metrics['MA20'].iloc[i]
+            ma50 = qqq_metrics['MA50'].iloc[i]
             if pd.isna(ma20) or pd.isna(ma50):
                 regimes.append("NEUTRAL")
             elif close > ma20 and ma20 > ma50:
@@ -235,12 +267,27 @@ class BacktestSimulator:
                 regimes.append("BEARISH")
             else:
                 regimes.append("NEUTRAL")
-        self.qqq_metrics['regime'] = regimes
+        qqq_metrics['regime'] = regimes
+        self.qqq_metrics = self._slice_requested_range(
+            qqq_metrics,
+            self.start_date,
+            self.end_date,
+        )
+        if self.qqq_metrics.empty:
+            raise Exception(
+                "QQQ data does not cover the requested backtest date range."
+            )
 
         # 2. 개별 종목 데이터 다운로드 및 기술 지표 계산
         # 벌크 다운로드 활용하여 속도 극대화
         logger.info(f"[Backtest] Fetching target tickers data: {self.tickers}")
-        bulk_data = await fetch_bulk_ohlcv(self.tickers, interval=self.interval, period=period_str)
+        bulk_data = await fetch_bulk_ohlcv(
+            self.tickers,
+            interval=self.interval,
+            period=period_str,
+            start=download_start,
+            end=download_end,
+        )
         
         for ticker in self.tickers:
             try:
@@ -256,12 +303,13 @@ class BacktestSimulator:
                     logger.warning(f"[Backtest] Ticker {ticker} has too few data points ({len(df)}). Skipping.")
                     continue
                 
-                # 타임존 필터 정렬
-                df = df[(df.index >= self.start_date) & (df.index <= self.end_date)]
-                if df.empty:
+                requested_df = self._slice_requested_range(
+                    df,
+                    self.start_date,
+                    self.end_date,
+                )
+                if requested_df.empty:
                     continue
-                
-                self.tickers_data[ticker] = df
                 
                 # 지표 벡터화 연산
                 metrics = pd.DataFrame(index=df.index)
@@ -337,8 +385,13 @@ class BacktestSimulator:
                 metrics['is_squeeze_breakout'] = metrics['was_squeeze'] & metrics['bb_breakout']
                 
                 # 💡 [전략 패턴] 지수 대비 강세 (Relative Strength) 사전 연산 및 저장
-                if self.qqq_metrics is not None and not self.qqq_metrics.empty:
-                    qqq_returns = self.qqq_metrics['Close'] / self.qqq_metrics['Close'].iloc[0] - 1
+                if self.qqq_data is not None and not self.qqq_data.empty:
+                    qqq_close_aligned = self.qqq_data['Close'].reindex(df.index).ffill()
+                    first_valid = qqq_close_aligned.first_valid_index()
+                    if first_valid is None:
+                        qqq_returns = pd.Series(0.0, index=df.index)
+                    else:
+                        qqq_returns = qqq_close_aligned / qqq_close_aligned.loc[first_valid] - 1
                     stock_returns = df['Close'] / df['Close'].iloc[0] - 1
                     metrics['relative_strength'] = stock_returns - qqq_returns
                     metrics['relative_strength'] = metrics['relative_strength'].fillna(0.0)
@@ -674,7 +727,10 @@ class BacktestSimulator:
                     metrics['is_relative_strong'] = (rs_20.rolling(5).min() > 0.0).astype(float)
                 else:
                     metrics['is_relative_strong'] = 0.0
-                    
+
+                # 다수 지표 열 추가로 조각난 내부 블록을 정리해 후반 계산 비용을 낮춥니다.
+                metrics = metrics.copy()
+
                 # [3-16] 볼밴 상단 돌파 추세 (볼린저 밴드 상단 돌파 및 대세 밴드 폭 확장)
                 bb_width = std20_p / ma20_p
                 bb_width_expanding = bb_width > bb_width.shift(1)
@@ -729,6 +785,7 @@ class BacktestSimulator:
                 metrics['trendline_support'] = metrics['EMA20']
                 metrics['is_uptrend'] = (metrics['EMA9'] > metrics['EMA20'])
                 
+                self.tickers_data[ticker] = requested_df
                 self.processed_metrics[ticker] = metrics
                 
             except Exception as e:
@@ -736,7 +793,7 @@ class BacktestSimulator:
 
         # 3. 공통 타임라인 결합 (QQQ와 타겟 종목들이 모두 겹치는 공통 거래 시간 추출)
         # 백테스팅은 QQQ 지수 타임스탬프 기준으로 흘러갑니다
-        self.timeline = sorted(list(self.qqq_data.index))
+        self.timeline = sorted(list(self.qqq_metrics.index))
         logger.info(f"[Backtest prepare_data] Complete. Timeline established: {len(self.timeline)} timestamps. Tickers: {list(self.tickers_data.keys())}")
 
     def _calculate_score(self, ticker: str, timestamp: datetime, regime: str, is_entry: bool = True) -> float:
@@ -957,6 +1014,10 @@ class BacktestSimulator:
         qqq_initial = self.qqq_metrics['Close'].iloc[0]
         qqq_final = self.qqq_metrics['Close'].iloc[-1]
         qqq_return_pct = ((qqq_final - qqq_initial) / qqq_initial) * 100
+        performance_metrics = calculate_performance_metrics(
+            self.broker.equity_curve,
+            initial_value=initial_val,
+        )
 
         return {
             "initial_cash": round(initial_val, 2),
@@ -968,6 +1029,7 @@ class BacktestSimulator:
             "win_rate": round(win_rate, 2),
             "profit_factor": round(profit_factor, 2),
             "qqq_bench_return_rate": round(qqq_return_pct, 2),
+            **performance_metrics,
             "trade_logs": self.broker.trade_logs,
             "equity_curve": self.broker.equity_curve
         }

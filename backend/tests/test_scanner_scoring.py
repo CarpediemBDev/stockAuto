@@ -26,8 +26,8 @@ async def test_scan_market_expert_maps_realtime_strategy_fields(monkeypatch):
     volume_15m = [1000] * 28 + [5000, 5200]
     df_15m = make_ohlcv(intraday_index, close_15m, volume_15m)
 
-    one_minute_index = pd.date_range("2026-06-02 09:30", periods=20, freq="min")
-    df_1m = make_ohlcv(one_minute_index, list(range(120, 140)), [4000] * 20)
+    one_minute_index = pd.date_range("2026-06-02 09:30", periods=20, freq="5min")
+    df_5m = make_ohlcv(one_minute_index, list(range(120, 140)), [4000] * 20)
 
     daily_index = pd.date_range("2025-06-02", periods=252, freq="B")
     df_daily = make_ohlcv(daily_index, [100 + (i * 0.15) for i in range(252)], [1000000] * 252)
@@ -48,8 +48,8 @@ async def test_scan_market_expert_maps_realtime_strategy_fields(monkeypatch):
     async def fake_fetch_bulk_ohlcv(tickers, interval, period, group_by="ticker"):
         if interval == "15m":
             return df_15m
-        if interval == "1m":
-            return df_1m
+        if interval == "5m":
+            return df_5m
         if interval == "1d":
             return df_daily
         raise AssertionError(f"unexpected interval: {interval}")

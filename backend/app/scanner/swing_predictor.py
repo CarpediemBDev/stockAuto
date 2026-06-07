@@ -38,7 +38,6 @@ async def analyze_swing_setup(ticker: str) -> dict:
 
         # 3. 추세 필터 (장기 추세가 무너진 역배열 종목은 폭발력이 떨어짐)
         ema50 = calculate_ema(close_series, 50)
-        ema100 = calculate_ema(close_series, 100)
         
         is_bullish_trend = bool(current_close > ema50.iloc[-1])
         

@@ -18,17 +18,31 @@ export function SystemHealth() {
   const [logs, setLogs] = useState<ActionLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [isReportSending, setIsReportSending] = useState(false);
+  const [isGlobalReportSending, setIsGlobalReportSending] = useState(false);
 
   const handleTriggerManualReport = async () => {
     try {
       setIsReportSending(true);
       await reportAPI.triggerManualReport();
-      toast.success("텔레그램 일일 결산 리포트 발송에 성공했습니다.");
+      toast.success("관리자 본인의 텔레그램 일일 결산 리포트 발송에 성공했습니다.");
     } catch (error) {
       const msg = reportHandledError("Failed to trigger manual report", error);
       toast.error(`리포트 발송 실패: ${msg}`);
     } finally {
       setIsReportSending(false);
+    }
+  };
+
+  const handleTriggerGlobalReport = async () => {
+    try {
+      setIsGlobalReportSending(true);
+      await reportAPI.triggerGlobalReport();
+      toast.success("전체 사용자의 텔레그램 일일 결산 리포트 발송에 성공했습니다.");
+    } catch (error) {
+      const msg = reportHandledError("Failed to trigger global report", error);
+      toast.error(`전체 리포트 발송 실패: ${msg}`);
+    } finally {
+      setIsGlobalReportSending(false);
     }
   };
 
@@ -83,10 +97,10 @@ export function SystemHealth() {
                 현재 로그인된 관리자 본인에 한해 손익 및 거래 현황을 즉시 집계하여, 본인의 텔레그램 채널로 결산 보고서를 즉시 발송합니다. (테스트 목적)
               </p>
             </div>
-            <div className="flex items-center justify-end">
+            <div className="flex items-center justify-end space-x-2">
               <button
                 onClick={handleTriggerManualReport}
-                disabled={isReportSending}
+                disabled={isReportSending || isGlobalReportSending}
                 className={cn(
                   "px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 border flex items-center gap-2 shadow-lg",
                   isReportSending
@@ -97,11 +111,33 @@ export function SystemHealth() {
                 {isReportSending ? (
                   <>
                     <Loader2 size={12} className="animate-spin text-zinc-500" />
-                    정산 및 리포트 발송 중...
+                    내게 테스트 발송 중...
                   </>
                 ) : (
                   <>
-                    <span>📨 리포트 즉시 발송</span>
+                    <span>📨 내게 테스트 발송</span>
+                  </>
+                )}
+              </button>
+              
+              <button
+                onClick={handleTriggerGlobalReport}
+                disabled={isReportSending || isGlobalReportSending}
+                className={cn(
+                  "px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 border flex items-center gap-2 shadow-lg",
+                  isGlobalReportSending
+                    ? "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed"
+                    : "bg-emerald-950/60 text-emerald-300 border-emerald-900/60 hover:bg-emerald-900/60 hover:text-white active:scale-95 shadow-emerald-950/20"
+                )}
+              >
+                {isGlobalReportSending ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin text-zinc-500" />
+                    전체 발송 중...
+                  </>
+                ) : (
+                  <>
+                    <span>🚀 전체 사용자 발송</span>
                   </>
                 )}
               </button>

@@ -4,6 +4,10 @@ import json
 import pandas as pd
 from typing import List, Dict, Any
 from app.bot.backtest_engine import BacktestSimulator
+from app.bot.backtest_metrics import (
+    assess_strategy_report,
+    calculate_performance_metrics,
+)
 from app.strategies.strategy_factory import get_strategy
 from app.core.logging import logger
 
@@ -381,7 +385,7 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
     
     # 승률 계산
     sell_trades = [x for x in trade_logs if x["trade_type"] == "SELL"]
-    total_trades = len(trade_logs)
+    total_trades = len(sell_trades)
     winning_trades = [x for x in sell_trades if x["realized_pnl"] > 0]
     win_rate = (len(winning_trades) / len(sell_trades) * 100) if sell_trades else 0.0
     total_pnl = final_value - initial_cash
@@ -417,7 +421,8 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
         "total_trades": total_trades,
         "win_rate": win_rate,
         "ticker_stats": stats,
-        "equity_curve": chart_equity
+        "equity_curve": chart_equity,
+        **calculate_performance_metrics(equity_curve, initial_value=initial_cash),
     }
 
 async def run_dynamic_tournament(start_date: str, end_date: str) -> List[Dict[str, Any]]:
@@ -426,7 +431,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str) -> List[Dict[st
     # 디스크 캐시 체크
     cache_dir = r"C:\Users\Im\.gemini\antigravity\brain\3a7f1012-f111-46d8-8da9-7971ca6063b4\scratch\backtest_cache"
     os.makedirs(cache_dir, exist_ok=True)
-    cache_path = os.path.join(cache_dir, f"tournament_{start_date}_{end_date}.json")
+    cache_path = os.path.join(cache_dir, f"tournament_v2_{start_date}_{end_date}.json")
     
     if os.path.exists(cache_path):
         try:
@@ -485,6 +490,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str) -> List[Dict[st
     curve_ep_c = [{"timestamp": e["timestamp"].strftime('%Y-%m-%d %H:%M:%S') if hasattr(e["timestamp"], 'strftime') else str(e["timestamp"]), "total": e["total"]} for e in sim_ep_c.broker.equity_curve[::24]]
             
     results.append({
+        "strategy_type": "strategy_c_ep",
         "name": "에피소딕피벗 C 표준형 🎯",
         "final_value": report_ep_c["final_value"],
         "total_pnl": report_ep_c["total_pnl"],
@@ -528,6 +534,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str) -> List[Dict[st
     curve_senior = [{"timestamp": e["timestamp"].strftime('%Y-%m-%d %H:%M:%S') if hasattr(e["timestamp"], 'strftime') else str(e["timestamp"]), "total": e["total"]} for e in sim_senior.broker.equity_curve[::24]]
             
     results.append({
+        "strategy_type": "senior_simple",
         "name": "시니어 단순화 (Strategy S) 🥈",
         "final_value": report_senior["final_value"],
         "total_pnl": report_senior["total_pnl"],
@@ -571,6 +578,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str) -> List[Dict[st
     curve_master = [{"timestamp": e["timestamp"].strftime('%Y-%m-%d %H:%M:%S') if hasattr(e["timestamp"], 'strftime') else str(e["timestamp"]), "total": e["total"]} for e in sim_master.broker.equity_curve[::24]]
             
     results.append({
+        "strategy_type": "regime_switching",
         "name": "마스터 레짐스위칭 V2 👑",
         "final_value": report_master["final_value"],
         "total_pnl": report_master["total_pnl"],
@@ -607,6 +615,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str) -> List[Dict[st
     curve_3slot = [{"timestamp": e["timestamp"], "total": e["total"]} for e in report_3slot["equity_curve"]]
     
     results.append({
+        "strategy_type": "multi_slot_3",
         "name": "🔄 격리형 3슬롯 (EP 30% : ASQS 30% : RS 40%)",
         "final_value": report_3slot["final_value"],
         "total_pnl": report_3slot["total_pnl"],
@@ -637,6 +646,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str) -> List[Dict[st
     curve_2slot = [{"timestamp": e["timestamp"], "total": e["total"]} for e in report_2slot["equity_curve"]]
     
     results.append({
+        "strategy_type": "multi_slot",
         "name": "🛡️ 격리형 2슬롯 (EP 50% : RS 50%) [ASQS 배제]",
         "final_value": report_2slot["final_value"],
         "total_pnl": report_2slot["total_pnl"],
@@ -648,8 +658,137 @@ async def run_dynamic_tournament(start_date: str, end_date: str) -> List[Dict[st
         "equity_curve": curve_2slot
     })
 
-    # 성적순 정렬 (수익률 내림차순)
-    results.sort(key=lambda x: x["total_return_rate"], reverse=True)
+    # ------------------ [참가자 6: 프리마켓 고점 돌파] ------------------
+    sim_pb = BacktestSimulator(
+        tickers=tickers_list,
+        start_date=start_date,
+        end_date=end_date,
+        interval=interval,
+        initial_cash=cash,
+        strategy_type="premarket_breakout"
+    )
+    sim_pb.processed_metrics = base_sim.processed_metrics
+    sim_pb.qqq_metrics = base_sim.qqq_metrics
+    sim_pb.timeline = base_sim.timeline
+    sim_pb.tickers_data = base_sim.tickers_data
+    
+    report_pb = sim_pb.run()
+    
+    stats_pb = {}
+    for log in sim_pb.broker.trade_logs:
+        ticker = log["ticker"]
+        t_type = log["trade_type"]
+        pnl = log["realized_pnl"]
+        if ticker not in stats_pb:
+            stats_pb[ticker] = {"buys": 0, "sells": 0, "pnl": 0.0}
+        if t_type == "BUY":
+            stats_pb[ticker]["buys"] += 1
+        elif t_type == "SELL":
+            stats_pb[ticker]["sells"] += 1
+            stats_pb[ticker]["pnl"] += pnl
+            
+    curve_pb = [{"timestamp": e["timestamp"].strftime('%Y-%m-%d %H:%M:%S') if hasattr(e["timestamp"], 'strftime') else str(e["timestamp"]), "total": e["total"]} for e in sim_pb.broker.equity_curve[::24]]
+            
+    results.append({
+        "strategy_type": "premarket_breakout",
+        "name": "프리마켓 고점 돌파 ⚡",
+        "final_value": report_pb["final_value"],
+        "total_pnl": report_pb["total_pnl"],
+        "total_return_rate": report_pb["total_return_rate"],
+        "mdd": report_pb["mdd"],
+        "total_trades": report_pb["total_trades"],
+        "win_rate": report_pb["win_rate"],
+        "ticker_stats": stats_pb,
+        "equity_curve": curve_pb
+    })
+
+    # ------------------ [참가자 7: 추세 안정화 눌림목] ------------------
+    sim_ts = BacktestSimulator(
+        tickers=tickers_list,
+        start_date=start_date,
+        end_date=end_date,
+        interval=interval,
+        initial_cash=cash,
+        strategy_type="trend_stabilization"
+    )
+    sim_ts.processed_metrics = base_sim.processed_metrics
+    sim_ts.qqq_metrics = base_sim.qqq_metrics
+    sim_ts.timeline = base_sim.timeline
+    sim_ts.tickers_data = base_sim.tickers_data
+    
+    report_ts = sim_ts.run()
+    
+    stats_ts = {}
+    for log in sim_ts.broker.trade_logs:
+        ticker = log["ticker"]
+        t_type = log["trade_type"]
+        pnl = log["realized_pnl"]
+        if ticker not in stats_ts:
+            stats_ts[ticker] = {"buys": 0, "sells": 0, "pnl": 0.0}
+        if t_type == "BUY":
+            stats_ts[ticker]["buys"] += 1
+        elif t_type == "SELL":
+            stats_ts[ticker]["sells"] += 1
+            stats_ts[ticker]["pnl"] += pnl
+            
+    curve_ts = [{"timestamp": e["timestamp"].strftime('%Y-%m-%d %H:%M:%S') if hasattr(e["timestamp"], 'strftime') else str(e["timestamp"]), "total": e["total"]} for e in sim_ts.broker.equity_curve[::24]]
+            
+    results.append({
+        "strategy_type": "trend_stabilization",
+        "name": "추세 안정화 눌림목 📉",
+        "final_value": report_ts["final_value"],
+        "total_pnl": report_ts["total_pnl"],
+        "total_return_rate": report_ts["total_return_rate"],
+        "mdd": report_ts["mdd"],
+        "total_trades": report_ts["total_trades"],
+        "win_rate": report_ts["win_rate"],
+        "ticker_stats": stats_ts,
+        "equity_curve": curve_ts
+    })
+
+    report_lookup = {
+        "strategy_c_ep": report_ep_c,
+        "senior_simple": report_senior,
+        "regime_switching": report_master,
+        "multi_slot_3": report_3slot,
+        "multi_slot": report_2slot,
+        "premarket_breakout": report_pb,
+        "trend_stabilization": report_ts,
+    }
+    qqq_initial = float(base_sim.qqq_metrics["Close"].iloc[0])
+    qqq_final = float(base_sim.qqq_metrics["Close"].iloc[-1])
+    qqq_return = (qqq_final / qqq_initial - 1.0) * 100.0
+
+    for result in results:
+        source_report = report_lookup[result["strategy_type"]]
+        for metric_name in (
+            "annualized_return",
+            "annualized_volatility",
+            "sharpe_ratio",
+            "sortino_ratio",
+            "calmar_ratio",
+            "mdd_recovery_days",
+            "mdd_recovered",
+            "max_underwater_days",
+            "observation_days",
+        ):
+            result[metric_name] = source_report.get(metric_name, 0.0)
+        result["qqq_bench_return_rate"] = round(qqq_return, 2)
+        result.update(
+            assess_strategy_report(
+                result["strategy_type"],
+                result,
+                minimum_trades=15,
+            )
+        )
+
+    results.sort(
+        key=lambda result: (
+            result["selection_eligible"],
+            result["selection_score"],
+        ),
+        reverse=True,
+    )
 
     # 캐시 저장
     try:
