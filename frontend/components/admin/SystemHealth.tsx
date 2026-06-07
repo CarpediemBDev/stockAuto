@@ -80,7 +80,7 @@ export function SystemHealth() {
                 수동 결산 및 리포트 즉시 발송
               </h3>
               <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
-                모든 활성 사용자(admin~admin10)에 대해 현재까지의 손익 및 거래 현황을 즉시 집계하여 등록된 모든 텔레그램 채널로 일일 결산 보고서를 즉시 발송합니다.
+                현재 로그인된 관리자 본인에 한해 손익 및 거래 현황을 즉시 집계하여, 본인의 텔레그램 채널로 결산 보고서를 즉시 발송합니다. (테스트 목적)
               </p>
             </div>
             <div className="flex items-center justify-end">

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import User, TradeLog
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_current_admin_user
 from app.core.response import success_response
 from sqlalchemy import asc
 
@@ -74,17 +74,17 @@ def get_report_stats(current_user: User = Depends(get_current_user), db: Session
     })
 
 @router.post("/trigger-manual-report")
-def trigger_manual_report(current_user: User = Depends(get_current_user)):
+def trigger_manual_report(current_user: User = Depends(get_current_admin_user)):
     """
-    관리자가 대시보드 화면에서 원할 때 수동으로 모든 유저의 텔레그램 일일 리포트를 강제 기동합니다.
+    관리자가 대시보드 화면에서 원할 때 수동으로 관리자 본인의 텔레그램 일일 리포트를 강제 기동합니다. (테스트 목적 격리)
     """
-    from app.core.telegram import send_daily_report_to_all_users_sync
+    from app.core.telegram import send_daily_report_to_user_sync
     try:
-        send_daily_report_to_all_users_sync()
-        return success_response(message="전체 유저 대상 텔레그램 리포트 발송 요청이 정상적으로 처리되었습니다.")
+        send_daily_report_to_user_sync(current_user.id)
+        return success_response(message="관리자 본인 계정의 텔레그램 리포트 발송 요청이 정상적으로 처리되었습니다.")
     except Exception as e:
         from fastapi import HTTPException
-        raise HTTPException(status_code=500, detail=f"수동 결산 리포트 일괄 발송 중 장애 발생: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"수동 결산 리포트 테스트 발송 중 장애 발생: {str(e)}")
 
 @router.post("/trigger-personal-report")
 def trigger_personal_report(current_user: User = Depends(get_current_user)):
