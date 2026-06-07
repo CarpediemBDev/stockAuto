@@ -64,9 +64,7 @@ async def get_swing_prediction(
     db: Session = Depends(get_db)
 ):
     """캐시된 스윙 예측 후보를 즉시 반환합니다."""
-    watchlist_items = db.query(models.WatchList).filter(models.WatchList.user_id == current_user.id).all()
-    user_tickers = [item.ticker for item in watchlist_items]
-    return success_response(data=read_swing_prediction_cache(get_swing_cache_key(user_tickers), db))
+    return success_response(data=read_swing_prediction_cache(get_swing_cache_key(), db))
 
 
 @router.post("/swing-predict/refresh")
@@ -75,9 +73,7 @@ async def refresh_swing_prediction(
     db: Session = Depends(get_db)
 ):
     """내일 세력돌파 및 스윙 상승 가능성이 있는 TOP 5 종목군을 수동 갱신합니다."""
-    watchlist_items = db.query(models.WatchList).filter(models.WatchList.user_id == current_user.id).all()
-    user_tickers = [item.ticker for item in watchlist_items]
-    cache_key = get_swing_cache_key(user_tickers)
+    cache_key = get_swing_cache_key()
     if reserve_swing_prediction_refresh(cache_key):
         refreshing_swing_response(cache_key, db)
         threading.Thread(

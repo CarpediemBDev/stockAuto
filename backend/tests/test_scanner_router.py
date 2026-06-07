@@ -115,8 +115,8 @@ def test_swing_prediction_refresh_updates_cached_response(monkeypatch):
     refresh_done = threading.Event()
 
     async def fake_refresh_swing_prediction_cache(cache_key, db_arg=None, refresh_reserved=False):
-        assert "AAPL" in cache_key
-        snapshot = swing_cache_module.write_swing_prediction_snapshot(db, cache_key, expected, swing_cache_module.SWING_SYNC_FRESH)
+        assert "GLOBAL_SWING_POOL" in cache_key
+        snapshot = swing_cache_module.write_swing_prediction_snapshot(db, cache_key, ["AAPL"], expected, swing_cache_module.SWING_SYNC_FRESH)
         response = swing_cache_module.snapshot_to_swing_response(snapshot)
         swing_cache_module.write_swing_prediction_cache(cache_key, response["candidates"], response["sync_status"], response["updated_at"])
         swing_cache_module.release_swing_prediction_refresh(cache_key)
@@ -160,7 +160,7 @@ def test_swing_prediction_refreshing_status_survives_next_poll(monkeypatch):
     app, db, engine = create_authenticated_scanner_app()
     monkeypatch.setattr(scanner_router_module, "refresh_swing_prediction_cache", keep_refresh_reserved)
     try:
-        cache_key = swing_cache_module.get_swing_cache_key(["AAPL"])
+        cache_key = swing_cache_module.get_swing_cache_key()
         db.add(
             SwingPredictionSnapshot(
                 cache_key=swing_cache_module.serialize_swing_cache_key(cache_key),
@@ -194,7 +194,7 @@ def test_swing_prediction_read_falls_back_to_persisted_snapshot():
     swing_cache_module.clear_swing_prediction_cache()
     app, db, engine = create_authenticated_scanner_app()
     try:
-        cache_key = swing_cache_module.get_swing_cache_key(["AAPL"])
+        cache_key = swing_cache_module.get_swing_cache_key()
         db.add(
             SwingPredictionSnapshot(
                 cache_key=swing_cache_module.serialize_swing_cache_key(cache_key),
@@ -228,7 +228,7 @@ def test_swing_prediction_refresh_failure_persists_failed_status(monkeypatch):
     swing_cache_module.clear_swing_prediction_cache()
     app, db, engine = create_authenticated_scanner_app()
     try:
-        cache_key = swing_cache_module.get_swing_cache_key(["AAPL"])
+        cache_key = swing_cache_module.get_swing_cache_key()
         response = asyncio.run(swing_cache_module.refresh_swing_prediction_cache(cache_key, db))
         cached = swing_cache_module.read_swing_prediction_cache(cache_key, db)
 
@@ -255,7 +255,7 @@ def test_swing_prediction_refresh_failure_persists_stale_status(monkeypatch):
     swing_cache_module.clear_swing_prediction_cache()
     app, db, engine = create_authenticated_scanner_app()
     try:
-        cache_key = swing_cache_module.get_swing_cache_key(["AAPL"])
+        cache_key = swing_cache_module.get_swing_cache_key()
         db.add(
             SwingPredictionSnapshot(
                 cache_key=swing_cache_module.serialize_swing_cache_key(cache_key),
@@ -301,7 +301,7 @@ def test_swing_prediction_refresh_failure_returns_stale_snapshot(monkeypatch):
     app, db, engine = create_authenticated_scanner_app()
     monkeypatch.setattr(scanner_router_module, "refresh_swing_prediction_cache", fail_refresh_swing_prediction_cache)
     try:
-        cache_key = swing_cache_module.get_swing_cache_key(["AAPL"])
+        cache_key = swing_cache_module.get_swing_cache_key()
         db.add(
             SwingPredictionSnapshot(
                 cache_key=swing_cache_module.serialize_swing_cache_key(cache_key),

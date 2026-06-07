@@ -16,17 +16,6 @@ SWING_SYNC_FRESH = "fresh"
 SWING_SYNC_REFRESHING = "refreshing"
 SWING_SYNC_STALE = "stale"
 
-DEFAULT_SWING_POOL = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "NFLX", "AMD",
-    "PLTR", "SMCI", "ARM", "QCOM", "MU", "INTC", "ASML", "TSM", "LRCX", "AMAT",
-    "COIN", "MSTR", "MARA", "RIOT", "HOOD", "SQ", "PYPL", "SOFI", "AFRM", "UPST",
-    "CRWD", "PANW", "ZS", "NET", "SNOW", "DDOG", "NOW", "CRM", "ADBE", "INTU",
-    "LLY", "NVO", "V", "MA", "JPM", "WMT", "COST", "HD", "UBER", "ABNB",
-    "RIVN", "LCID", "CVNA", "ROKU", "DOCU", "ZM", "GME", "AMC", "DKNG", "PENN",
-    # Penny / Small-cap / Meme stocks (1$ 미만/소형주)
-    "AKAN", "WNW", "ASTC", "SDA", "HUBC", "MNTS", "ITP", "SES", "AEHL", "ODYS", 
-    "PRFX", "FFIE", "GWAV", "CRKN", "HOLO", "KOSS", "PEGY", "SINT", "LUNR"
-]
 
 _swing_prediction_cache_lock = threading.RLock()
 _swing_prediction_cache: dict[tuple[str, ...], dict] = {}
@@ -34,8 +23,8 @@ _swing_prediction_refresh_lock = threading.Lock()
 _swing_prediction_refreshing: set[tuple[str, ...]] = set()
 
 
-def get_swing_cache_key(user_tickers: list[str]) -> tuple[str, ...]:
-    return tuple(sorted(set(user_tickers + DEFAULT_SWING_POOL)))
+def get_swing_cache_key() -> tuple[str, ...]:
+    return ("GLOBAL_SWING_POOL",)
 
 
 def serialize_swing_cache_key(cache_key: tuple[str, ...]) -> str:
@@ -109,10 +98,10 @@ def write_swing_prediction_cache(cache_key: tuple[str, ...], candidates: list, s
         }
 
 
-def write_swing_prediction_snapshot(db: Session, cache_key: tuple[str, ...], candidates: list, sync_status: str) -> models.SwingPredictionSnapshot:
+def write_swing_prediction_snapshot(db: Session, cache_key: tuple[str, ...], seed_tickers: list[str], candidates: list, sync_status: str) -> models.SwingPredictionSnapshot:
     snapshot = models.SwingPredictionSnapshot(
         cache_key=serialize_swing_cache_key(cache_key),
-        ticker_universe=json.dumps(list(cache_key), ensure_ascii=False),
+        ticker_universe=json.dumps(seed_tickers, ensure_ascii=False),
         candidates_json=json.dumps(candidates, ensure_ascii=False),
         sync_status=sync_status,
     )
@@ -170,8 +159,11 @@ async def refresh_swing_prediction_cache(
     refreshing_swing_response(cache_key, session)
 
     try:
-        candidates = await scan_next_day_candidates(list(cache_key))
-        snapshot = write_swing_prediction_snapshot(session, cache_key, candidates, SWING_SYNC_FRESH)
+        from app.scanner.discovery import get_seed_tickers
+        seed_tickers, _ = await get_seed_tickers()
+        
+        candidates = await scan_next_day_candidates(seed_tickers)
+        snapshot = write_swing_prediction_snapshot(session, cache_key, seed_tickers, candidates, SWING_SYNC_FRESH)
         response = snapshot_to_swing_response(snapshot)
         write_swing_prediction_cache(cache_key, response["candidates"], response["sync_status"], response["updated_at"])
         logger.info("[SwingPrediction] Refresh complete. Cached %s candidates.", len(candidates))
@@ -195,10 +187,10 @@ async def refresh_swing_prediction_cache(
 
 def swing_prediction_cache_wrapper() -> None:
     try:
-        asyncio.run(refresh_swing_prediction_cache(get_swing_cache_key([])))
+        asyncio.run(refresh_swing_prediction_cache(get_swing_cache_key()))
     except RuntimeError:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.ensure_future(refresh_swing_prediction_cache(get_swing_cache_key([])))
+            asyncio.ensure_future(refresh_swing_prediction_cache(get_swing_cache_key()))
         else:
-            loop.run_until_complete(refresh_swing_prediction_cache(get_swing_cache_key([])))
+            loop.run_until_complete(refresh_swing_prediction_cache(get_swing_cache_key()))
