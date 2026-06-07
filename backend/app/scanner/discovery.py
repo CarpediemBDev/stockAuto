@@ -20,22 +20,40 @@ def fetch_db_watchlist() -> list:
     finally:
         db.close()
 
-async def fetch_yahoo_most_active() -> list:
-    """Yahoo Finance API를 통해 실시간 활성 종목을 가져옵니다."""
-    try:
-        url = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=false&scrIds=most_actives&count=100"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        async with httpx.AsyncClient() as client:
+async def fetch_yahoo_market_scanners() -> dict[str, list[str]]:
+    """Yahoo Finance API를 통해 4가지 핵심 스캐너 지표를 병렬로 가져옵니다."""
+    scanners = {
+        "YAHOO_ACTIVE": "most_actives",
+        "YAHOO_GAINER": "day_gainers",
+        "YAHOO_LOSER": "day_losers",
+        "YAHOO_TECH": "growth_technology_stocks"
+    }
+    
+    results = {k: [] for k in scanners.keys()}
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    async def fetch_single_scanner(client, tag, scr_id):
+        url = f"https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=false&scrIds={scr_id}&count=100"
+        try:
             res = await client.get(url, headers=headers, timeout=5.0)
             if res.status_code == 200:
                 data = res.json()
                 quotes = data.get("finance", {}).get("result", [{}])[0].get("quotes", [])
                 tickers = [q.get("symbol") for q in quotes if q.get("symbol")]
-                if tickers: print(f"[Discovery] Found {len(tickers)} tickers via Yahoo Finance.")
-                return tickers
+                if tickers: 
+                    results[tag] = tickers
+                    print(f"[Discovery] {tag} found {len(tickers)} tickers.")
+        except Exception as e:
+            print(f"[Discovery] Yahoo Screener ({tag}) failed: {e}")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            tasks = [fetch_single_scanner(client, tag, scr_id) for tag, scr_id in scanners.items()]
+            await asyncio.gather(*tasks)
     except Exception as e:
-        print(f"[Discovery] Yahoo Screener failed: {e}")
-    return []
+        print(f"[Discovery] Yahoo scanners execution failed: {e}")
+        
+    return results
 
 async def get_seed_tickers() -> tuple[list, dict[str, list[str]]]:
     """
@@ -48,20 +66,22 @@ async def get_seed_tickers() -> tuple[list, dict[str, list[str]]]:
 
     source_map: dict[str, set[str]] = {}
 
-    # 1. 병렬 수집 예약 (Yahoo Finance)
-    yahoo_task = fetch_yahoo_most_active()
+    # 1. 병렬 수집 예약 (Yahoo Finance 단타 4대장)
+    yahoo_task = fetch_yahoo_market_scanners()
 
     # 2. DB 관심종목 수집 (동기)
     db_list = fetch_db_watchlist()
 
     # 3. 모든 소스 결과 대기
-    yahoo_list = await yahoo_task
+    yahoo_results = await yahoo_task
 
     # 4. 출처 꼬리표(Source Tag) 부착
-    for t in yahoo_list:
-        source_map.setdefault(t, set()).add("MARKET")
+    for tag, tickers in yahoo_results.items():
+        for t in tickers:
+            source_map.setdefault(t, set()).add(tag)
+            
     for t in SAFETY_TECH_LIST:
-        source_map.setdefault(t, set()).add("MARKET")
+        source_map.setdefault(t, set()).add("SAFETY_NET")
     for t in db_list:
         source_map.setdefault(t, set()).add("WATCHLIST")
 
@@ -76,6 +96,7 @@ async def get_seed_tickers() -> tuple[list, dict[str, list[str]]]:
     final_source_map = {t: sorted(s) for t, s in source_map.items()}
 
     print(f"[Discovery] Process complete. Final universe size: {len(final_universe)}")
-    print(f" - Yahoo: {len(yahoo_list)} | Watchlist: {len(db_list)} | Safety: {len(SAFETY_TECH_LIST)}")
+    total_yahoo = sum(len(v) for v in yahoo_results.values())
+    print(f" - Yahoo Total: {total_yahoo} | Watchlist: {len(db_list)} | Safety: {len(SAFETY_TECH_LIST)}")
 
     return final_universe, final_source_map
