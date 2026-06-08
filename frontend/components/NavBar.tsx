@@ -7,7 +7,9 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { authAPI, botAPI } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
+import { useTimezoneStore, TIMEZONE_OPTIONS } from "@/store/timezoneStore";
 import { toast } from "sonner";
+import { Globe } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "📈 자동 매매" },
@@ -23,7 +25,9 @@ export function NavBar() {
   const [isBotRunning, setIsBotRunning] = useState(false);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isTimezoneMenuOpen, setIsTimezoneMenuOpen] = useState(false);
   const { accessToken, username, clearAuth } = useAuthStore();
+  const { selectedTimezone, setTimezone } = useTimezoneStore();
 
 
   const fetchStatus = useCallback(async () => {
@@ -146,12 +150,63 @@ export function NavBar() {
                 })}
               </div>
 
-              {/* 사용자 계정 프로필 드롭다운 */}
+              {/* 사용자 계정 프로필 및 타임존 드롭다운 */}
               {username && (
                 <div className="flex items-center space-x-4 border-l border-zinc-800 pl-6">
+                  {/* 타임존 스위처 */}
                   <div className="relative flex items-center">
                     <button
-                      onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                      onClick={() => {
+                        setIsTimezoneMenuOpen(!isTimezoneMenuOpen);
+                        setIsUserMenuOpen(false);
+                      }}
+                      className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-zinc-800/50 text-zinc-400 hover:text-white transition-colors duration-200"
+                      title="타임존 변경"
+                    >
+                      <Globe size={18} />
+                    </button>
+                    
+                    {isTimezoneMenuOpen && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setIsTimezoneMenuOpen(false)}></div>
+                        <div className="absolute right-0 top-10 mt-2 w-48 rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 shadow-2xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                          <div className="px-3 pb-2 border-b border-zinc-800/60 mb-1">
+                            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Timezone</p>
+                          </div>
+                          <div className="px-1.5 space-y-0.5">
+                            {TIMEZONE_OPTIONS.map((tz) => (
+                              <button
+                                key={tz.id}
+                                onClick={() => {
+                                  setTimezone(tz.id);
+                                  setIsTimezoneMenuOpen(false);
+                                  toast.success(`타임존이 ${tz.abbr} 기준으로 변경되었습니다.`);
+                                }}
+                                className={cn(
+                                  "w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-200",
+                                  selectedTimezone.id === tz.id 
+                                    ? "bg-indigo-500/20 text-indigo-400" 
+                                    : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                                )}
+                              >
+                                <span>{tz.label}</span>
+                                {selectedTimezone.id === tz.id && (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]"></span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="relative flex items-center">
+                    <button
+                      onClick={() => {
+                        setIsUserMenuOpen(!isUserMenuOpen);
+                        setIsTimezoneMenuOpen(false);
+                      }}
                       className="flex items-center space-x-2.5 px-3.5 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 hover:bg-zinc-900/50 text-white font-semibold text-xs tracking-tight transition-all duration-200 active:scale-[0.98] cursor-pointer"
                     >
                     <span className={cn("w-1.5 h-1.5 rounded-full animate-pulse", isBotRunning ? "bg-emerald-500" : "bg-zinc-500")}></span>

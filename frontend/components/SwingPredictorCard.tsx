@@ -5,6 +5,7 @@ import { Compass, ShieldCheck, Flame, Layers, TrendingUp, TrendingDown, HelpCirc
 
 import { scannerAPI, isCancel } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
+import { useTimezoneStore } from '@/store/timezoneStore';
 import { toast } from 'sonner';
 import { cn, reportHandledError } from '@/lib/utils';
 
@@ -37,6 +38,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
   const [refreshing, setRefreshing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SwingPredictionResponse["sync_status"]>("empty");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const { selectedTimezone } = useTimezoneStore();
 
   const applySwingPrediction = useCallback((payload: SwingPredictionResponse) => {
     setCandidates(payload.candidates);
@@ -156,8 +158,11 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
             {syncStatus.toUpperCase()} SWING SIGNALS
           </span>
           {updatedAt && (
-            <span className="text-[10px] text-zinc-600 font-mono">
-              {new Date(updatedAt).toLocaleTimeString()}
+            <span className="text-[10px] text-zinc-600 font-mono flex items-center gap-1.5">
+              <span className="bg-zinc-800/80 text-zinc-400 px-1.5 py-0.5 rounded font-black tracking-widest">{selectedTimezone.abbr}</span>
+              {new Date(updatedAt).toLocaleTimeString('ko-KR', {
+                timeZone: selectedTimezone.timeZone,
+              })}
             </span>
           )}
           <button
