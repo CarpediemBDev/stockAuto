@@ -86,23 +86,10 @@ def seed_competitive_users():
     try:
         import secrets
 
-        # 관리자 초기 비밀번호 설정 (환경변수 없으면 난수 생성)
-        initial_admin_pw = os.getenv("INITIAL_ADMIN_PASSWORD")
-        if not initial_admin_pw:
-            initial_admin_pw = secrets.token_urlsafe(9)
-            logger.info(f"==================================================")
-            logger.info(f"👑 [Seeder] 관리자용 임시 비밀번호가 생성되었습니다!")
-            logger.info(f"   PASSWORD: {initial_admin_pw}")
-            logger.info(f"   주의: 환경 변수에 INITIAL_ADMIN_PASSWORD를 설정하면 고정할 수 있습니다.")
-            logger.info(f"==================================================")
-
-        initial_competitor_pw = os.getenv("INITIAL_COMPETITOR_PASSWORD")
-        if not initial_competitor_pw:
-            initial_competitor_pw = secrets.token_urlsafe(9)
-            logger.info("[Seeder] 경쟁용 사용자 임시 비밀번호가 무작위로 생성되었습니다.")
-
-        hashed_pw_admin = get_password_hash(initial_admin_pw)
-        hashed_pw_others = get_password_hash(initial_competitor_pw)
+        # 복잡한 환경 변수 및 난수 분기 로직을 전면 제거하고 기본값 'admin'을 직접 해싱
+        logger.info("[Seeder] 경쟁용 사용자 및 관리자 비밀번호를 'admin'으로 자동 설정합니다.")
+        hashed_pw_admin = get_password_hash("admin")
+        hashed_pw_others = get_password_hash("admin")
 
         competitors = [
             {"username": "admin", "strategy": "regime_switching"},
