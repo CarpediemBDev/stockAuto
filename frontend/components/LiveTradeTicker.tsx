@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { TradeLog } from "./TradeLogs";
 import { cn } from "@/lib/utils";
+import { useTimezone } from "@/store/timezoneStore";
 
 interface LiveTradeTickerProps {
   latestLog?: TradeLog;
@@ -11,6 +12,7 @@ interface LiveTradeTickerProps {
 
 export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
   const [timeAgo, setTimeAgo] = useState<string>("");
+  const { selectedTimezone } = useTimezone();
 
   useEffect(() => {
     if (!latestLog) return;
@@ -61,7 +63,8 @@ export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
   const rate = hasPnL ? latestLog.return_rate! : 0;
   const isProfit = pnl >= 0;
 
-  const timeString = new Date(latestLog.executed_at).toLocaleTimeString(undefined, {
+  const timeString = new Date(latestLog.executed_at).toLocaleTimeString('ko-KR', {
+    timeZone: selectedTimezone.timeZone,
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -137,6 +140,7 @@ export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
 
       {/* 오른쪽: 체결 시간 & 상세보기 배지 */}
       <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-mono shrink-0 sm:self-center">
+        <span className="bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800/50 text-zinc-400 font-semibold">{selectedTimezone.abbr}</span>
         <span>{timeString}</span>
         <span className="text-zinc-700 font-extrabold">•</span>
         <span className="bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800/50 text-zinc-400 font-semibold">{timeAgo}</span>

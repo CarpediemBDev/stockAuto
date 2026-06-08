@@ -7,7 +7,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { authAPI, botAPI } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
-import { useTimezoneStore, TIMEZONE_OPTIONS } from "@/store/timezoneStore";
+import { useTimezone } from "@/store/timezoneStore";
 import { toast } from "sonner";
 import { Globe } from "lucide-react";
 
@@ -27,7 +27,7 @@ export function NavBar() {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isTimezoneMenuOpen, setIsTimezoneMenuOpen] = useState(false);
   const { accessToken, username, clearAuth } = useAuthStore();
-  const { selectedTimezone, setTimezone } = useTimezoneStore();
+  const { selectedTimezone, timezoneOptions, setTimezone } = useTimezone();
 
 
   const fetchStatus = useCallback(async () => {
@@ -174,7 +174,7 @@ export function NavBar() {
                             <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Timezone</p>
                           </div>
                           <div className="px-1.5 space-y-0.5">
-                            {TIMEZONE_OPTIONS.map((tz) => (
+                            {timezoneOptions.map((tz) => (
                               <button
                                 key={tz.id}
                                 onClick={() => {

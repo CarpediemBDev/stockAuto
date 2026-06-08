@@ -1,5 +1,7 @@
 "use client";
 
+import { useTimezone } from "@/store/timezoneStore";
+
 export interface TradeLog {
   id: number;
   ticker: string;
@@ -18,6 +20,7 @@ interface TradeLogsProps {
 }
 
 export function TradeLogs({ logs, isModalMode = false }: TradeLogsProps) {
+  const { selectedTimezone } = useTimezone();
   return (
     <div className={isModalMode 
       ? "bg-transparent w-full h-[75vh] flex flex-col" 
@@ -59,8 +62,11 @@ export function TradeLogs({ logs, isModalMode = false }: TradeLogsProps) {
                 
                 return (
                   <tr key={log.id} className="hover:bg-zinc-800/20 transition-colors">
-                    <td className="p-4 text-xs text-zinc-400 font-mono">
-                      {new Date(log.executed_at).toLocaleString()}
+                    <td className="p-4 text-xs text-zinc-400 font-mono whitespace-nowrap">
+                      <span className="text-[9px] bg-zinc-800/80 text-zinc-500 px-1.5 py-0.5 rounded font-black tracking-widest mr-1.5 select-none">{selectedTimezone.abbr}</span>
+                      {new Date(log.executed_at).toLocaleString('ko-KR', {
+                        timeZone: selectedTimezone.timeZone,
+                      })}
                     </td>
                     <td className="p-4">
                       <div className="font-semibold text-white text-sm">{log.ticker_name || log.ticker}</div>

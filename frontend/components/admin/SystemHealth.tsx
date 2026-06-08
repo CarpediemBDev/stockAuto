@@ -6,6 +6,7 @@ import { adminAPI, reportAPI, isCancel } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
 import { toast } from "sonner";
 import { cn, reportHandledError } from '@/lib/utils';
+import { useTimezone } from '@/store/timezoneStore';
 
 interface ActionLog {
   id: number;
@@ -19,6 +20,7 @@ export function SystemHealth() {
   const [loading, setLoading] = useState(true);
   const [isReportSending, setIsReportSending] = useState(false);
   const [isGlobalReportSending, setIsGlobalReportSending] = useState(false);
+  const { selectedTimezone } = useTimezone();
 
   const handleTriggerManualReport = async () => {
     try {
@@ -188,9 +190,18 @@ export function SystemHealth() {
             ) : (
               logs.map((log) => (
                 <div key={log.id} className="flex items-start space-x-3 group border-l-2 border-transparent hover:border-slate-800 pl-2 transition-colors">
-                  <span className="text-slate-600 shrink-0 flex items-center">
-                    <Clock size={10} className="mr-1" />
-                    {new Date(log.created_at).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  <span className="text-slate-600 shrink-0 flex items-center gap-1 select-none">
+                    <Clock size={10} className="mr-0.5" />
+                    <span className="text-[9px] bg-slate-900 text-slate-500 px-1.5 py-0.5 rounded font-bold tracking-widest mr-1">
+                      {selectedTimezone.abbr}
+                    </span>
+                    {new Date(log.created_at).toLocaleTimeString('ko-KR', {
+                      timeZone: selectedTimezone.timeZone,
+                      hour12: false,
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit'
+                    })}
                   </span>
                   <span className={cn("font-bold shrink-0 w-16", getLevelColor(log.level))}>
                     [{log.level}]

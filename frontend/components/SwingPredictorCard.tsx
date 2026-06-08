@@ -5,7 +5,7 @@ import { Compass, ShieldCheck, Flame, Layers, TrendingUp, TrendingDown, HelpCirc
 
 import { scannerAPI, isCancel } from '@/lib/api';
 import { usePolling } from '@/hooks/usePolling';
-import { useTimezoneStore } from '@/store/timezoneStore';
+import { useTimezone } from '@/store/timezoneStore';
 import { toast } from 'sonner';
 import { cn, reportHandledError } from '@/lib/utils';
 
@@ -38,7 +38,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
   const [refreshing, setRefreshing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SwingPredictionResponse["sync_status"]>("empty");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const { selectedTimezone } = useTimezoneStore();
+  const { selectedTimezone } = useTimezone();
 
   const applySwingPrediction = useCallback((payload: SwingPredictionResponse) => {
     setCandidates(payload.candidates);

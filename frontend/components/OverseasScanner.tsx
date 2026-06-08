@@ -22,6 +22,7 @@ import { cn, reportHandledError } from "@/lib/utils";
 import { scannerAPI, isCancel } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
 import { toast } from "sonner";
+import { useTimezone } from "@/store/timezoneStore";
 
 interface ScoreCardFactor {
   factor: string;
@@ -115,6 +116,7 @@ export function OverseasScanner({
   const [isManualScanning, setIsManualScanning] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isSpinning, setIsSpinning] = useState(false);
+  const { selectedTimezone } = useTimezone();
   
   // 퀀트 스코어 팝업 모달 상태 관리
   const [selectedScoreItem, setSelectedScoreItem] = useState<ScanResult | null>(null);
@@ -222,8 +224,11 @@ export function OverseasScanner({
 
         <div className="flex items-center gap-3">
           {lastUpdated && (
-            <span className="text-[11px] text-zinc-600 font-mono">
-              Last update: {lastUpdated.toLocaleTimeString()}
+            <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1.5 select-none">
+              <span className="bg-zinc-800/80 text-zinc-400 px-1.5 py-0.5 rounded font-black tracking-widest">{selectedTimezone.abbr}</span>
+              Last update: {lastUpdated.toLocaleTimeString('ko-KR', {
+                timeZone: selectedTimezone.timeZone,
+              })}
             </span>
           )}
           <button

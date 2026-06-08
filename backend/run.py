@@ -23,10 +23,21 @@ def bootstrap_venv():
     # 로컬 가상환경이 실제로 존재하고, 현재 프로세스가 해당 가상환경 파이썬이 아닌 경우
     if os.path.exists(venv_python) and os.path.abspath(sys.executable) != os.path.abspath(venv_python):
         print(f"[Launcher] [VENV DETECTED] 프로세스를 공식 백엔드 가상환경(backend/venv) 파이썬으로 자가 재실행합니다...")
-        # os.execv를 사용하여 현재 프로세스를 가상환경 파이썬 프로세스로 투명하게 대체
-        # sys.argv 인자값도 손실 없이 완벽히 넘깁니다.
         try:
-            os.execv(venv_python, [venv_python] + sys.argv)
+            if os.name == "nt":
+                # Windows 환경에서는 os.execv 호출 시 백그라운드로 자식 프로세스가 고아(Orphan)로 방치되는 문제를 예방하기 위해,
+                # subprocess로 자식을 실행하고 KeyboardInterrupt(Ctrl+C) 신호를 자식에게 포워딩합니다.
+                import subprocess
+                p = subprocess.Popen([venv_python] + sys.argv)
+                try:
+                    p.wait()
+                except KeyboardInterrupt:
+                    p.terminate()
+                    p.wait()
+                sys.exit(p.returncode)
+            else:
+                # Unix/Mac 환경에서는 기존대로 네이티브 os.execv로 프로세스 자가를 깔끔히 치환합니다.
+                os.execv(venv_python, [venv_python] + sys.argv)
         except Exception as e:
             print(f"[Launcher] ⚠️ 가상환경 자가 전환 중 실패했습니다. 수동으로 가상환경을 활성화해 주세요. (Error: {e})")
 
