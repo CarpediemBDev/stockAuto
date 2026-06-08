@@ -276,7 +276,7 @@ def _process_command(user_id: int, text: str):
 
         elif cmd == "/status":
             mode = db_settings.trade_mode
-            broker_name = db_settings.broker_provider
+            broker_name = db_settings.broker_provider or ("N/A (Simulated)" if mode == "SIMULATED" else "None")
 
             # 사용자 맞춤형 브로커 인스턴스 획득
             broker = get_broker_client(db_settings)

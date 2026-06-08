@@ -22,8 +22,13 @@ def get_broker_client(db_settings=None) -> BaseBroker:
         return LocalSimulatedBroker(None)
 
     mode = (db_settings.trade_mode or "SIMULATED").upper()
-    provider = (db_settings.broker_provider or "KIS").upper()
-    
+    if mode == "SIMULATED":
+        return LocalSimulatedBroker(db_settings)
+
+    provider = (db_settings.broker_provider or "").upper()
+    if not provider:
+        raise ValueError("MOCK 또는 REAL 모드에서는 증권사(broker_provider)가 반드시 지정되어야 합니다.")
+
     cred = None
     if getattr(db_settings, "credentials", None):
         for c in db_settings.credentials:
@@ -31,7 +36,10 @@ def get_broker_client(db_settings=None) -> BaseBroker:
                 cred = c
                 break
 
-    provider_map = BROKER_REGISTRY.get(provider, BROKER_REGISTRY["KIS"])
+    provider_map = BROKER_REGISTRY.get(provider)
+    if not provider_map:
+        raise ValueError(f"지원하지 않는 증권사입니다: {provider}")
+
     broker_class = provider_map.get(mode, LocalSimulatedBroker)
     return broker_class(db_settings, db_credential=cred)
 

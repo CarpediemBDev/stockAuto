@@ -219,3 +219,28 @@ def test_save_credential_encrypts_and_returns_safe_response(monkeypatch):
     assert result["success"] is True
     assert_safe_settings_response(result["settings"])
     assert result["settings"]["credentials"][0]["has_credentials"] is True
+
+
+def test_broker_factory_simulated_mode_ignores_null_provider():
+    from app.bot.broker_factory import get_broker_client
+    from app.bot.simulated_broker import LocalSimulatedBroker
+    
+    # broker_provider가 None이거나 비어있더라도 SIMULATED 모드이면 가상 브로커를 리턴해야 함
+    settings = make_settings(trade_mode="SIMULATED", broker_provider=None)
+    broker = get_broker_client(settings)
+    assert isinstance(broker, LocalSimulatedBroker)
+
+
+def test_broker_factory_mock_real_mode_raises_value_error_if_provider_is_null():
+    from app.bot.broker_factory import get_broker_client
+    
+    # MOCK/REAL 모드인데 broker_provider가 None이면 ValueError가 나야 함
+    settings_mock = make_settings(trade_mode="MOCK", broker_provider=None)
+    with pytest.raises(ValueError) as exc_info:
+        get_broker_client(settings_mock)
+    assert "broker_provider" in str(exc_info.value)
+
+    settings_real = make_settings(trade_mode="REAL", broker_provider=None)
+    with pytest.raises(ValueError) as exc_info:
+        get_broker_client(settings_real)
+    assert "broker_provider" in str(exc_info.value)

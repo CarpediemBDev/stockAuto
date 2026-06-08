@@ -197,7 +197,7 @@ def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, int
             "id": 1,
             "username": "tester",
             "trade_mode": "SIMULATED",
-            "broker_provider": "KIS",
+            "broker_provider": None,
             "telegram_enabled": False,
         }
 

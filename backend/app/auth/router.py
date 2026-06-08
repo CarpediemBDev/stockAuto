@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
+from typing import Optional
 from app.core.database import get_db
 from app.core.models import User, UserSettings, RefreshToken, utc_now_aware
 from app.core.config import settings
@@ -53,7 +54,7 @@ class UserProfileSchema(BaseModel):
     id: int
     username: str
     trade_mode: str
-    broker_provider: str
+    broker_provider: Optional[str] = None
     telegram_enabled: bool
 
 class ChangePasswordSchema(BaseModel):
@@ -268,6 +269,6 @@ def get_me(current_user: User = Depends(get_current_user)):
         "id": current_user.id,
         "username": current_user.username,
         "trade_mode": current_user.settings.trade_mode if current_user.settings else "SIMULATED",
-        "broker_provider": current_user.settings.broker_provider if current_user.settings else "KIS",
+        "broker_provider": current_user.settings.broker_provider if current_user.settings else None,
         "telegram_enabled": current_user.settings.telegram_enabled if current_user.settings else False
     }

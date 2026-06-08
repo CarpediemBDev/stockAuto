@@ -105,7 +105,7 @@ def _settings_response(db_settings: UserSettings) -> dict:
         "id": getattr(db_settings, "id", None) if db_settings else None,
         "user_id": getattr(db_settings, "user_id", None) if db_settings else None,
         "trade_mode": getattr(db_settings, "trade_mode", None) or "SIMULATED",
-        "broker_provider": getattr(db_settings, "broker_provider", None) or "KIS",
+        "broker_provider": getattr(db_settings, "broker_provider", None),
         "telegram_chat_id": getattr(db_settings, "telegram_chat_id", None) if db_settings else None,
         "telegram_enabled": bool(getattr(db_settings, "telegram_enabled", False)) if db_settings else False,
         "is_running": bool(getattr(db_settings, "is_running", False)) if db_settings else False,
@@ -389,10 +389,16 @@ def list_users(
             {
                 "id": user.id,
                 "username": user.username,
+                "role": user.role,
                 "created_at": user.created_at,
                 "trade_mode": settings.trade_mode if settings else "SIMULATED",
+                "broker_provider": settings.broker_provider if settings else None,
                 "telegram_enabled": settings.telegram_enabled if settings else False,
+                "telegram_chat_id": settings.telegram_chat_id if settings else None,
                 "is_running": settings.is_running if settings else False,
+                "is_real_enabled": settings.is_real_enabled if settings else False,
+                "strategy_type": settings.strategy_type if settings else "regime_switching",
+                "credentials": [_credential_meta(c) for c in settings.credentials] if settings else [],
             }
         )
     return result

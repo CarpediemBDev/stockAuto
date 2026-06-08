@@ -71,7 +71,7 @@ class UserSettings(Base):
 
     # 트레이딩 모드 및 설정
     trade_mode = Column(String, default="SIMULATED") # SIMULATED, MOCK, REAL
-    broker_provider = Column(String, default="KIS")
+    broker_provider = Column(String, nullable=True)
 
     # 텔레그램 설정
     telegram_chat_id = Column(String, nullable=True)
