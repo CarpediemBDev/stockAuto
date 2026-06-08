@@ -8,7 +8,7 @@ from app.bot.order_reconciler import (
 )
 from app.core.database import SessionLocal
 from app.core.logging import logger
-from app.core.models import ActionLog, BrokerOrder, UserSettings, utc_now_naive
+from app.core.models import ActionLog, BrokerOrder, UserSettings, utc_now_aware
 from app.core.telegram import send_message_async
 
 
@@ -31,7 +31,7 @@ def _broker_order_timestamp_utc(broker_order: dict) -> datetime | None:
         ).replace(tzinfo=ET)
     except ValueError:
         return None
-    return local_timestamp.astimezone(UTC).replace(tzinfo=None)
+    return local_timestamp.astimezone(UTC)
 
 
 def _matches_intent(order: BrokerOrder, broker_order: dict) -> bool:
@@ -59,7 +59,7 @@ def _matches_intent(order: BrokerOrder, broker_order: dict) -> bool:
 
 
 def _abort_stale_unsubmitted_intents(db) -> int:
-    cutoff = utc_now_naive() - INTENT_ABORT_GRACE
+    cutoff = utc_now_aware() - INTENT_ABORT_GRACE
     orders = db.query(BrokerOrder).filter(
         BrokerOrder.status == "INTENT_CREATED",
         BrokerOrder.submitted_at <= cutoff,
@@ -71,7 +71,7 @@ def _abort_stale_unsubmitted_intents(db) -> int:
         ).first()
         order.status = "ABORTED"
         order.last_error = "The process stopped before broker submission began."
-        order.resolved_at = utc_now_naive()
+        order.resolved_at = utc_now_aware()
         if db_settings:
             _resume_user_if_safe(db, order, db_settings)
         db.add(ActionLog(
@@ -143,7 +143,7 @@ def discover_orphan_orders_once(session_factory=SessionLocal) -> int:
                     )
                     history_cache[cache_key] = None
                     order.discovery_attempts += 1
-                    order.last_discovery_at = utc_now_naive()
+                    order.last_discovery_at = utc_now_aware()
                     order.status = "ACK_UNKNOWN"
                     order.last_error = f"Order history lookup failed: {exc}"
                     continue
@@ -159,7 +159,7 @@ def discover_orphan_orders_once(session_factory=SessionLocal) -> int:
                 and _matches_intent(order, item)
             ]
             order.discovery_attempts += 1
-            order.last_discovery_at = utc_now_naive()
+            order.last_discovery_at = utc_now_aware()
 
             if len(candidates) == 0:
                 order.status = "ACK_UNKNOWN"
@@ -191,7 +191,7 @@ def discover_orphan_orders_once(session_factory=SessionLocal) -> int:
 
             candidate = candidates[0]
             order.broker_order_no = candidate["order_no"]
-            order.response_received_at = utc_now_naive()
+            order.response_received_at = utc_now_aware()
             order.last_error = None
             linked_order_numbers.add(candidate["order_no"])
             application = apply_broker_report(db, order, candidate)

@@ -70,7 +70,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
     config = make_alembic_config(db_url)
 
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "7f1c4286ef02"
+    assert script.get_current_head() == "5b86ba90d475"
 
     command.upgrade(config, "head")
 
@@ -244,7 +244,7 @@ def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, int
 
 def test_brute_force_defense_and_lockout_reset(integration_app, test_session_factory):
     from datetime import timedelta
-    from app.core.models import utc_now_naive
+    from app.core.models import utc_now_aware
 
     with TestClient(integration_app) as client:
         # 1. 회원가입
@@ -283,7 +283,7 @@ def test_brute_force_defense_and_lockout_reset(integration_app, test_session_fac
             user = db.query(User).filter(User.username == "bruteforce_tester").first()
             assert user.failed_login_attempts == 5
             assert user.locked_until is not None
-            user.locked_until = utc_now_naive() - timedelta(minutes=1)
+            user.locked_until = utc_now_aware() - timedelta(minutes=1)
             db.commit()
         finally:
             db.close()

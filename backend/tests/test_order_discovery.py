@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 import app.bot.order_discovery as discovery
 from app.bot.order_reconciler import begin_order_submission, create_order_intent
 from app.core.database import Base
-from app.core.models import BrokerOrder, Holding, User, UserSettings, BrokerCredential, utc_now_naive
+from app.core.models import BrokerOrder, Holding, User, UserSettings, BrokerCredential, utc_now_aware
 
 
 ET = ZoneInfo("America/New_York")
@@ -187,7 +187,7 @@ def test_stale_intent_created_before_submission_is_aborted(session_factory, monk
         exchange_code="NASD",
         order_division="00",
     )
-    order.submitted_at = utc_now_naive() - timedelta(minutes=2)
+    order.submitted_at = utc_now_aware() - timedelta(minutes=2)
     db.commit()
     db.close()
     monkeypatch.setattr(discovery, "send_message_async", lambda *_args, **_kwargs: None)

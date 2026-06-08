@@ -7,7 +7,7 @@ from app.bot.broker_factory import get_broker_client
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.logging import logger
-from app.core.models import ActionLog, BrokerOrder, Holding, TradeLog, UserSettings, utc_now_naive
+from app.core.models import ActionLog, BrokerOrder, Holding, TradeLog, UserSettings, utc_now_aware
 from app.core.telegram import send_message_async
 
 
@@ -237,7 +237,7 @@ def apply_broker_report(db, order: BrokerOrder, report: dict) -> FillApplication
     order.status = status
     order.last_error = report.get("message") if status == "ERROR" else None
     if status in TERMINAL_ORDER_STATUSES:
-        order.resolved_at = utc_now_naive()
+        order.resolved_at = utc_now_aware()
     else:
         order.resolved_at = None
 
@@ -302,7 +302,7 @@ def create_order_intent(
             if resume_after_resolution is None
             else resume_after_resolution
         ),
-        submitted_at=utc_now_naive(),
+        submitted_at=utc_now_aware(),
     )
     db.add(order)
     db.commit()
@@ -315,7 +315,7 @@ def begin_order_submission(db, order: BrokerOrder, db_settings: UserSettings) ->
         raise ValueError(f"Order intent {order.intent_id} cannot be submitted from {order.status}.")
     order.status = "SUBMITTING"
     order.submission_attempts += 1
-    order.submission_started_at = utc_now_naive()
+    order.submission_started_at = utc_now_aware()
     db_settings.is_running = False
     db.commit()
 
@@ -326,7 +326,7 @@ def finalize_order_submission(
     db_settings: UserSettings,
     order_result: dict,
 ) -> FillApplication:
-    order.response_received_at = utc_now_naive()
+    order.response_received_at = utc_now_aware()
     order_no = str(order_result.get("order_no") or "").strip()
     if order_no:
         order.broker_order_no = order_no
@@ -344,7 +344,7 @@ def finalize_order_submission(
     if not order_result.get("order_submitted"):
         order.status = "REJECTED"
         order.last_error = order_result.get("message")
-        order.resolved_at = utc_now_naive()
+        order.resolved_at = utc_now_aware()
         application = FillApplication(order=order)
         _resume_user_if_safe(db, order, db_settings)
         db.commit()
@@ -404,7 +404,7 @@ def record_submitted_order(
             signal_score=signal_score,
             sell_reason=sell_reason,
             resume_after_resolution=False,
-            submitted_at=utc_now_naive(),
+            submitted_at=utc_now_aware(),
         )
         db.add(order)
         db.flush()
@@ -428,7 +428,7 @@ def record_submitted_order(
 def _should_send_stale_alert(order: BrokerOrder) -> bool:
     if order.retry_count < STALE_ALERT_AFTER_RETRIES and order.status != "ERROR":
         return False
-    now = utc_now_naive()
+    now = utc_now_aware()
     return not order.last_alerted_at or now - order.last_alerted_at >= ALERT_COOLDOWN
 
 
@@ -452,7 +452,7 @@ def _reconcile_one_order(db, order: BrokerOrder) -> tuple[FillApplication, bool,
     else:
         broker = get_broker_client(db_settings)
         order.retry_count += 1
-        order.last_checked_at = utc_now_naive()
+        order.last_checked_at = utc_now_aware()
         try:
             report = broker.check_order_status(order.broker_order_no, order.broker_order_date)
         except Exception as exc:
@@ -467,7 +467,7 @@ def _reconcile_one_order(db, order: BrokerOrder) -> tuple[FillApplication, bool,
 
     stale_alert = _should_send_stale_alert(order)
     if stale_alert:
-        order.last_alerted_at = utc_now_naive()
+        order.last_alerted_at = utc_now_aware()
 
     if application.applied_qty > 0:
         _append_action(

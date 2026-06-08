@@ -3,9 +3,28 @@ from sqlalchemy.orm import relationship
 from datetime import UTC, datetime
 from app.core.database import Base
 
-def utc_now_naive():
-    """SQLite 호환을 위해 UTC 기준 naive datetime을 저장합니다."""
-    return datetime.now(UTC).replace(tzinfo=None)
+from sqlalchemy import TypeDecorator
+from datetime import timezone
+
+class AwareDateTime(TypeDecorator):
+    impl = DateTime
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None:
+            if not value.tzinfo:
+                value = value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is not None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+def utc_now_aware():
+    """Timezone-aware datetime을 반환합니다."""
+    return datetime.now(UTC)
 
 class User(Base):
     __tablename__ = "users"
@@ -13,12 +32,12 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    created_at = Column(DateTime, default=utc_now_naive)
+    created_at = Column(AwareDateTime, default=utc_now_aware)
     role = Column(String, default="USER", nullable=False)
 
     # 보안 강화를 위한 로그인 잠금 및 브루트포스 방어 필드
     failed_login_attempts = Column(Integer, default=0, nullable=False)
-    locked_until = Column(DateTime, nullable=True)
+    locked_until = Column(AwareDateTime, nullable=True)
 
     # Relationships
     settings = relationship("UserSettings", back_populates="user", uselist=False, cascade="all, delete-orphan")
@@ -36,9 +55,9 @@ class RefreshToken(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     token = Column(String, unique=True, index=True, nullable=False)
-    expires_at = Column(DateTime, nullable=False)
+    expires_at = Column(AwareDateTime, nullable=False)
     is_revoked = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=utc_now_naive)
+    created_at = Column(AwareDateTime, default=utc_now_aware)
 
     # Relationships
     user = relationship("User", back_populates="refresh_tokens")
@@ -64,7 +83,7 @@ class UserSettings(Base):
 
     strategy_type = Column(String, default="regime_switching", nullable=False)
 
-    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+    updated_at = Column(AwareDateTime, default=utc_now_aware, onupdate=utc_now_aware)
 
     # Relationships
     user = relationship("User", back_populates="settings")
@@ -85,7 +104,7 @@ class BrokerCredential(Base):
     
     verification_status = Column(String, default="unverified", nullable=False)
     verified_trade_mode = Column(String, nullable=True)
-    verified_at = Column(DateTime, nullable=True)
+    verified_at = Column(AwareDateTime, nullable=True)
 
     __table_args__ = (
         UniqueConstraint('user_id', 'broker_name', name='uq_user_broker'),
@@ -109,7 +128,7 @@ class TradeLog(Base):
     signal_score = Column(Integer, nullable=True)   # ⭐ v2.0 매수 당시의 스캔 점수
     realized_pnl = Column(Float, nullable=True)     # ⭐ v2.0 Phase 22 매도 시 실현 손익 (수익금)
     return_rate = Column(Float, nullable=True)      # ⭐ v2.0 Phase 22 매도 시 수익률 (%)
-    executed_at = Column(DateTime, default=utc_now_naive)
+    executed_at = Column(AwareDateTime, default=utc_now_aware)
 
     # Relationships
     user = relationship("User", back_populates="trade_logs")
@@ -127,7 +146,7 @@ class Holding(Base):
     highest_price = Column(Float) # 구매 후 최고가 (트레일링 스탑 기준점)
     regime_mode = Column(String, nullable=True)     # ⭐ v2.0 진입 당시 장세 레짐
     buy_stage = Column(Integer, default=1)          # ⭐ v2.0 후지모토 시게루식 피라미딩 단계 (1, 2, 3단계)
-    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+    updated_at = Column(AwareDateTime, default=utc_now_aware, onupdate=utc_now_aware)
 
     # Relationships
     user = relationship("User", back_populates="holdings")
@@ -167,13 +186,13 @@ class BrokerOrder(Base):
     retry_count = Column(Integer, nullable=False, default=0)
     resume_after_resolution = Column(Boolean, nullable=False, default=False)
     last_error = Column(Text, nullable=True)
-    submitted_at = Column(DateTime, nullable=False, default=utc_now_naive)
-    submission_started_at = Column(DateTime, nullable=True)
-    response_received_at = Column(DateTime, nullable=True)
-    last_discovery_at = Column(DateTime, nullable=True)
-    last_checked_at = Column(DateTime, nullable=True)
-    last_alerted_at = Column(DateTime, nullable=True)
-    resolved_at = Column(DateTime, nullable=True)
+    submitted_at = Column(AwareDateTime, nullable=False, default=utc_now_aware)
+    submission_started_at = Column(AwareDateTime, nullable=True)
+    response_received_at = Column(AwareDateTime, nullable=True)
+    last_discovery_at = Column(AwareDateTime, nullable=True)
+    last_checked_at = Column(AwareDateTime, nullable=True)
+    last_alerted_at = Column(AwareDateTime, nullable=True)
+    resolved_at = Column(AwareDateTime, nullable=True)
 
     user = relationship("User", back_populates="broker_orders")
 
@@ -190,7 +209,7 @@ class ActionLog(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     level = Column(String, default="INFO") # INFO, WARN, ERROR, SIGNAL
     message = Column(String)
-    created_at = Column(DateTime, default=utc_now_naive)
+    created_at = Column(AwareDateTime, default=utc_now_aware)
 
     # Relationships
     user = relationship("User", back_populates="action_logs")
@@ -202,7 +221,7 @@ class WatchList(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     ticker = Column(String, index=True)
     ticker_name = Column(String, nullable=True)
-    added_at = Column(DateTime, default=utc_now_naive)
+    added_at = Column(AwareDateTime, default=utc_now_aware)
 
     # Relationships
     user = relationship("User", back_populates="watch_lists")
@@ -258,7 +277,7 @@ class MarketOverviewSnapshot(Base):
         default="failed",
         comment="USD/KRW 데이터 동기화 상태: fresh, stale, failed, skipped",
     )
-    created_at = Column(DateTime, default=utc_now_naive, index=True, comment="스냅샷 생성 시각")
+    created_at = Column(AwareDateTime, default=utc_now_aware, index=True, comment="스냅샷 생성 시각")
 
 class SwingPredictionSnapshot(Base):
     """스윙 예측 후보를 사용자 관심종목 조합별로 보존하는 스냅샷"""
@@ -290,4 +309,4 @@ class SwingPredictionSnapshot(Base):
         default="fresh",
         comment="스윙 예측 동기화 상태: fresh, stale, refreshing, failed, empty",
     )
-    created_at = Column(DateTime, default=utc_now_naive, index=True, comment="스냅샷 생성 시각")
+    created_at = Column(AwareDateTime, default=utc_now_aware, index=True, comment="스냅샷 생성 시각")

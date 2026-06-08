@@ -8,7 +8,7 @@ from app.bot.order_reconciler import disable_auto_resume_for_user, has_unresolve
 from app.core.credentials import CredentialCryptoError, decrypt_credential, encrypt_credential
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, get_current_admin_user
-from app.core.models import ActionLog, User, UserSettings, BrokerCredential, utc_now_naive
+from app.core.models import ActionLog, User, UserSettings, BrokerCredential, utc_now_aware
 
 router = APIRouter()
 
@@ -287,7 +287,7 @@ def save_credential(
 
     cred.verification_status = "verified"
     cred.verified_trade_mode = trade_mode
-    cred.verified_at = utc_now_naive()
+    cred.verified_at = utc_now_aware()
 
     # Automatically set as default provider if it's the first one
     if not db_settings.broker_provider:
@@ -337,7 +337,7 @@ def verify_current_credential(
     if success:
         cred.verification_status = "verified"
         cred.verified_trade_mode = trade_mode
-        cred.verified_at = utc_now_naive()
+        cred.verified_at = utc_now_aware()
     else:
         cred.verification_status = "failed"
         cred.verified_trade_mode = trade_mode

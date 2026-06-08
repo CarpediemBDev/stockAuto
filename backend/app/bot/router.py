@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.bot.order_reconciler import disable_auto_resume_for_user, has_unresolved_orders
 from app.core.database import get_db
-from app.core.models import User, UserSettings, utc_now_naive
+from app.core.models import User, UserSettings, utc_now_aware
 from app.core.dependencies import get_current_user
 
 router = APIRouter()
@@ -39,7 +39,7 @@ def toggle_real_enabled(
         db.add(settings)
     else:
         settings.is_real_enabled = not settings.is_real_enabled
-        settings.updated_at = utc_now_naive()
+        settings.updated_at = utc_now_aware()
     db.commit()
     return {"message": "Real trading enabled toggled", "is_real_enabled": settings.is_real_enabled}
 
@@ -59,7 +59,7 @@ def start_bot(
         db.add(settings)
     else:
         settings.is_running = True
-        settings.updated_at = utc_now_naive()
+        settings.updated_at = utc_now_aware()
     db.commit()
     return {"message": "Bot started", "is_running": True}
 
@@ -75,6 +75,6 @@ def stop_bot(
         db.add(settings)
     else:
         settings.is_running = False
-        settings.updated_at = utc_now_naive()
+        settings.updated_at = utc_now_aware()
     db.commit()
     return {"message": "Bot stopped", "is_running": False}

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from app.core.database import get_db
-from app.core.models import User, UserSettings, RefreshToken, utc_now_naive
+from app.core.models import User, UserSettings, RefreshToken, utc_now_aware
 from app.core.config import settings
 from app.core.logging import logger
 from app.core.security import (
@@ -94,7 +94,7 @@ def signup(payload: UserAuthSchema, response: Response, db: Session = Depends(ge
         db_rt = RefreshToken(
             user_id=new_user.id,
             token=refresh_token,
-            expires_at=utc_now_naive() + timedelta(days=14)
+            expires_at=utc_now_aware() + timedelta(days=14)
         )
         db.add(db_rt)
         
@@ -135,7 +135,7 @@ def login(payload: UserAuthSchema, response: Response, db: Session = Depends(get
 
     # 잠금 상태 체크 (유저가 존재할 때만 실행)
     if user and user.locked_until:
-        if user.locked_until > utc_now_naive():
+        if user.locked_until > utc_now_aware():
             logger.warning(f"[Security] Blocked login attempt on locked account: {payload.username}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -151,7 +151,7 @@ def login(payload: UserAuthSchema, response: Response, db: Session = Depends(get
         if user:
             user.failed_login_attempts += 1
             if user.failed_login_attempts >= 5:
-                user.locked_until = utc_now_naive() + timedelta(minutes=15)
+                user.locked_until = utc_now_aware() + timedelta(minutes=15)
                 logger.error(f"[Security] Account {user.username} locked due to 5 consecutive failures.")
             db.commit()
             logger.warning(f"[Auth] Failed login attempt for user: {payload.username} (Failed attempts: {user.failed_login_attempts})")
@@ -176,7 +176,7 @@ def login(payload: UserAuthSchema, response: Response, db: Session = Depends(get
     db_rt = RefreshToken(
         user_id=user.id,
         token=refresh_token,
-        expires_at=utc_now_naive() + timedelta(days=14)
+        expires_at=utc_now_aware() + timedelta(days=14)
     )
     db.add(db_rt)
     db.commit()
@@ -203,7 +203,7 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
 
     # DB 토큰 검증
     db_token = db.query(RefreshToken).filter(RefreshToken.token == token).first()
-    if not db_token or db_token.is_revoked or db_token.expires_at < utc_now_naive():
+    if not db_token or db_token.is_revoked or db_token.expires_at < utc_now_aware():
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
     if str(db_token.user_id) != token_user_id:
         raise HTTPException(status_code=401, detail="Refresh token subject mismatch")
