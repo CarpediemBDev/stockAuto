@@ -15,8 +15,8 @@ class LocalSimulatedBroker(BaseBroker):
     buy_order / sell_order는 yfinance 실시간 시세를 기반으로
     DB에 가상 체결 기록을 생성합니다.
     """
-    def __init__(self, db_settings=None):
-        super().__init__(db_settings)
+    def __init__(self, db_settings=None, db_credential=None):
+        super().__init__(db_settings, db_credential)
         self.user_id = db_settings.user_id if db_settings else None
 
     def get_account_balance(self, exchange_rate: float | None = None) -> dict:

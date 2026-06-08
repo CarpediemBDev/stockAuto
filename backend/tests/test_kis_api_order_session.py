@@ -19,10 +19,11 @@ def make_kis_client(trade_mode: str = "MOCK") -> KISClient:
         SimpleNamespace(
             user_id=1,
             trade_mode=trade_mode,
-            kis_app_key="valid-app-key",
-            kis_app_secret="valid-secret",
-            kis_account_no="87654321-01",
-        )
+            app_key="valid-app-key",
+            app_secret="valid-secret",
+            account_no="87654321-01",
+        ),
+        trade_mode=trade_mode
     )
 
 

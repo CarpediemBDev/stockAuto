@@ -10,11 +10,12 @@ from app.scanner.data_provider import fetch_bulk_ohlcv_sync, fetch_ticker_fast_i
 _exchange_cache: dict[str, str] = {}
 
 class KISClient:
-    def __init__(self, db_settings):
-        trade_mode = (db_settings.trade_mode or "SIMULATED").upper() if db_settings else "SIMULATED"
+    def __init__(self, db_credential=None, trade_mode: str = "SIMULATED"):
+        trade_mode = (trade_mode or "SIMULATED").upper()
+        self.trade_mode = trade_mode
+        self.is_real = trade_mode == "REAL"
 
-        # KIS API Key 유효성 검사 - db_settings가 없거나 가상 모드이면 즉각 연동 거부
-        if not db_settings or trade_mode == "SIMULATED":
+        if not db_credential or trade_mode == "SIMULATED":
             from app.core.exceptions import StockAutoException
             raise StockAutoException(
                 code="INVALID_KIS_CREDENTIALS",
@@ -22,14 +23,11 @@ class KISClient:
                 status_code=400
             )
 
-        self.user_id = db_settings.user_id
-        self.app_key = decrypt_credential(db_settings.kis_app_key)
-        self.app_secret = decrypt_credential(db_settings.kis_app_secret)
-        self.account_no = decrypt_credential(db_settings.kis_account_no)
-        self.trade_mode = trade_mode
-        self.is_real = trade_mode == "REAL"
+        self.user_id = db_credential.user_id
+        self.app_key = decrypt_credential(db_credential.app_key)
+        self.app_secret = decrypt_credential(db_credential.app_secret)
+        self.account_no = decrypt_credential(db_credential.account_no)
 
-        # KIS API Key 유효성 검사 - MOCK/REAL 가동 시 키가 없거나 플레이스홀더면 즉각 경고 에러 발생
         placeholder_keys = {
             "YOUR_APP_KEY_HERE", "your_virtual_app_key_here",
             "your_real_app_key_here", "your_app_key_here",

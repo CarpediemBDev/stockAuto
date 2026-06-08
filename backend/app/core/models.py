@@ -53,12 +53,6 @@ class UserSettings(Base):
     # 트레이딩 모드 및 설정
     trade_mode = Column(String, default="SIMULATED") # SIMULATED, MOCK, REAL
     broker_provider = Column(String, default="KIS")
-    kis_app_key = Column(String, nullable=True)
-    kis_app_secret = Column(String, nullable=True)
-    kis_account_no = Column(String, nullable=True)
-    kis_verification_status = Column(String, default="unverified", nullable=False)
-    kis_verified_trade_mode = Column(String, nullable=True)
-    kis_verified_at = Column(DateTime, nullable=True)
 
     # 텔레그램 설정
     telegram_chat_id = Column(String, nullable=True)
@@ -74,6 +68,31 @@ class UserSettings(Base):
 
     # Relationships
     user = relationship("User", back_populates="settings")
+    credentials = relationship("BrokerCredential", back_populates="user_settings", cascade="all, delete-orphan")
+
+
+class BrokerCredential(Base):
+    """증권사별 API 인증 정보를 담는 1:N 테이블"""
+    __tablename__ = "broker_credentials"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("user_settings.user_id", ondelete="CASCADE"), nullable=False)
+    broker_name = Column(String, nullable=False) # e.g., "KIS", "TOSS"
+    
+    app_key = Column(String, nullable=True)
+    app_secret = Column(String, nullable=True)
+    account_no = Column(String, nullable=True)
+    
+    verification_status = Column(String, default="unverified", nullable=False)
+    verified_trade_mode = Column(String, nullable=True)
+    verified_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'broker_name', name='uq_user_broker'),
+    )
+
+    # Relationships
+    user_settings = relationship("UserSettings", back_populates="credentials")
 
 class TradeLog(Base):
     __tablename__ = "trade_logs"

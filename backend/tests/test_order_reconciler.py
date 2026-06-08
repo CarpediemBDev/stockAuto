@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.bot.order_reconciler as reconciler
 from app.core.database import Base
-from app.core.models import BrokerOrder, Holding, TradeLog, User, UserSettings
+from app.core.models import BrokerOrder, Holding, TradeLog, User, UserSettings, BrokerCredential
 
 
 @pytest.fixture
@@ -31,6 +31,8 @@ def create_user_settings(session_factory, *, is_running=True):
     user = User(username="trader", hashed_password="hashed")
     db.add(user)
     db.flush()
+    cred = BrokerCredential(user_id=user.id, broker_name='KIS', app_key='x', app_secret='x', account_no='x', verification_status='verified', verified_trade_mode='MOCK')
+    db.add(cred)
     db_settings = UserSettings(
         user_id=user.id,
         trade_mode="MOCK",

@@ -15,9 +15,9 @@ class KISBroker(BaseBroker):
     FILL_POLL_MAX_RETRIES = 5
     FILL_POLL_INTERVAL_SEC = 2.0
 
-    def __init__(self, db_settings=None):
-        super().__init__(db_settings)
-        self.client = KISClient(db_settings)
+    def __init__(self, db_settings=None, db_credential=None):
+        super().__init__(db_settings, db_credential)
+        self.client = KISClient(db_credential, db_settings.trade_mode if db_settings else "SIMULATED")
 
     def _confirm_fill(self, order_no: str, submitted_qty: int, submitted_price: float) -> dict:
         """

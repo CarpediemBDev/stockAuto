@@ -22,30 +22,35 @@ import api from "@/lib/api";
 type SubTab = "environment" | "telegram" | "danger";
 type TradeMode = "SIMULATED" | "MOCK" | "REAL";
 
+interface CredentialMeta {
+  broker_name: string;
+  has_credentials: boolean;
+  account_no_masked: string | null;
+  verification_status: string;
+  verified_trade_mode: string | null;
+  verified_at: string | null;
+  credential_error: string | null;
+}
+
 interface UserSettings {
   trade_mode: TradeMode;
   broker_provider: string;
   telegram_chat_id: string;
   telegram_enabled: boolean;
   global_bot_username?: string;
-  has_kis_credentials: boolean;
-  kis_account_no_masked?: string | null;
-  kis_verification_status?: string;
-  kis_verified_trade_mode?: string | null;
-  kis_verified_at?: string | null;
-  kis_credential_error?: string | null;
+  credentials: CredentialMeta[];
 }
 
-interface KisCredentialForm {
-  kis_app_key: string;
-  kis_app_secret: string;
-  kis_account_no: string;
+interface CredentialForm {
+  app_key: string;
+  app_secret: string;
+  account_no: string;
 }
 
-const EMPTY_KIS_FORM: KisCredentialForm = {
-  kis_app_key: "",
-  kis_app_secret: "",
-  kis_account_no: "",
+const EMPTY_FORM: CredentialForm = {
+  app_key: "",
+  app_secret: "",
+  account_no: "",
 };
 
 const DEFAULT_SETTINGS: UserSettings = {
@@ -54,12 +59,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   telegram_chat_id: "",
   telegram_enabled: false,
   global_bot_username: "",
-  has_kis_credentials: false,
-  kis_account_no_masked: null,
-  kis_verification_status: "unverified",
-  kis_verified_trade_mode: null,
-  kis_verified_at: null,
-  kis_credential_error: null,
+  credentials: [],
 };
 
 function normalizeTradeMode(value: unknown): TradeMode {
@@ -73,7 +73,17 @@ export default function PersonalSettingsPage() {
   const router = useRouter();
   const { isAuthenticated, isInitialized, username: storedUsername } = useAuthStore();
   const [dbSettings, setDbSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
-  const [kisForm, setKisForm] = useState<KisCredentialForm>(EMPTY_KIS_FORM);
+  
+  // Per-broker form state
+  const [forms, setForms] = useState<Record<string, CredentialForm>>({
+    KIS: { ...EMPTY_FORM },
+    TOSS: { ...EMPTY_FORM }
+  });
+  const [localVerified, setLocalVerified] = useState<Record<string, boolean>>({
+    KIS: false,
+    TOSS: false
+  });
+
   const [username, setUsername] = useState<string>("");
   const [subTab, setSubTab] = useState<SubTab>("environment");
   const [isLoading, setIsLoading] = useState(true);
@@ -85,7 +95,6 @@ export default function PersonalSettingsPage() {
   const [showLiquidateModal, setShowLiquidateModal] = useState(false);
   const [isDangerActionLoading, setIsDangerActionLoading] = useState(false);
   const [isPersonalReportSending, setIsPersonalReportSending] = useState(false);
-  const [isKisVerified, setIsKisVerified] = useState(false);
 
   useEffect(() => {
     if (isInitialized) {
@@ -107,14 +116,10 @@ export default function PersonalSettingsPage() {
       telegram_chat_id: data.telegram_chat_id || "",
       telegram_enabled: Boolean(data.telegram_enabled),
       global_bot_username: data.global_bot_username || "stockauto_official_bot",
-      has_kis_credentials: Boolean(data.has_kis_credentials),
-      kis_account_no_masked: data.kis_account_no_masked || null,
-      kis_verification_status: data.kis_verification_status || "unverified",
-      kis_verified_trade_mode: data.kis_verified_trade_mode || null,
-      kis_verified_at: data.kis_verified_at || null,
-      kis_credential_error: data.kis_credential_error || null,
+      credentials: data.credentials || [],
     });
-    setKisForm(EMPTY_KIS_FORM);
+    setForms({ KIS: { ...EMPTY_FORM }, TOSS: { ...EMPTY_FORM } });
+    setLocalVerified({ KIS: false, TOSS: false });
   }, []);
 
   const fetchSettings = useCallback(async () => {
@@ -135,69 +140,76 @@ export default function PersonalSettingsPage() {
     fetchSettings();
   }, [isAuthenticated, fetchSettings]);
 
-  const isKisMode = dbSettings.trade_mode === "MOCK" || dbSettings.trade_mode === "REAL";
-  const isVerifiedForSelectedMode = useMemo(
-    () =>
-      dbSettings.has_kis_credentials &&
-      dbSettings.kis_verification_status === "verified" &&
-      dbSettings.kis_verified_trade_mode === dbSettings.trade_mode,
-    [
-      dbSettings.has_kis_credentials,
-      dbSettings.kis_verification_status,
-      dbSettings.kis_verified_trade_mode,
-      dbSettings.trade_mode,
-    ]
-  );
+  const activeBroker = dbSettings.broker_provider || "KIS";
+  const activeCred = useMemo(() => {
+    return dbSettings.credentials.find((c) => c.broker_name === activeBroker);
+  }, [dbSettings.credentials, activeBroker]);
+
+  const isTradeModeRealMock = dbSettings.trade_mode === "MOCK" || dbSettings.trade_mode === "REAL";
+  const isVerifiedForSelectedMode = useMemo(() => {
+    if (!activeCred) return false;
+    return (
+      activeCred.has_credentials &&
+      activeCred.verification_status === "verified" &&
+      activeCred.verified_trade_mode === dbSettings.trade_mode
+    );
+  }, [activeCred, dbSettings.trade_mode]);
 
   const credentialStatusLabel = useMemo(() => {
-    if (dbSettings.kis_verification_status === "crypto_error") return "복호화 오류";
+    if (!activeCred) return "미저장";
+    if (activeCred.verification_status === "crypto_error") return "복호화 오류";
     if (isVerifiedForSelectedMode) return "검증 완료";
-    if (dbSettings.has_kis_credentials) return "재검증 필요";
+    if (activeCred.has_credentials) return "재검증 필요";
     return "미저장";
-  }, [dbSettings.has_kis_credentials, dbSettings.kis_verification_status, isVerifiedForSelectedMode]);
+  }, [activeCred, isVerifiedForSelectedMode]);
 
-  const handleVerifyKis = async () => {
-    if (!isKisMode) {
-      toast.info("SIMULATED 모드는 KIS 인증정보가 필요하지 않습니다.");
+  const handleVerifyCredential = async (provider: string) => {
+    if (!isTradeModeRealMock) {
+      toast.info(`SIMULATED 모드는 ${provider} 인증정보가 필요하지 않습니다.`);
       return;
     }
 
-    if (!kisForm.kis_app_key.trim() || !kisForm.kis_app_secret.trim() || !kisForm.kis_account_no.trim()) {
+    const form = forms[provider];
+    if (!form.app_key.trim() || !form.app_secret.trim() || !form.account_no.trim()) {
       toast.error("APP KEY, APP SECRET, ACCOUNT NO를 모두 입력하세요.");
       return;
     }
 
     setIsCredentialSaving(true);
     try {
-      const res = await api.post("/admin/verify-kis", {
+      const res = await api.post("/admin/credentials/verify-and-save", {
         trade_mode: dbSettings.trade_mode,
-        ...kisForm,
+        broker_name: provider,
+        app_key: form.app_key,
+        app_secret: form.app_secret,
+        account_no: form.account_no,
       });
       if (res.data?.success) {
-        setIsKisVerified(true);
-        toast.success("검증 성공! 오른쪽의 '설정 저장' 버튼을 눌러 적용해주세요.");
+        setLocalVerified(prev => ({ ...prev, [provider]: true }));
+        applySettings(res.data.settings);
+        toast.success(`${provider} 검증 및 저장이 완료되었습니다.`);
       } else {
-        toast.error(res.data?.message || "KIS 인증정보 검증에 실패했습니다.");
+        toast.error(res.data?.message || `${provider} 인증정보 검증에 실패했습니다.`);
       }
     } catch (err) {
-      toast.error((err as Error).message || "KIS 인증정보 검증에 실패했습니다.");
+      toast.error((err as Error).message || `${provider} 인증정보 검증에 실패했습니다.`);
     } finally {
       setIsCredentialSaving(false);
     }
   };
 
-  const handleDeleteKisCredentials = async () => {
+  const handleDeleteCredentials = async (provider: string) => {
     setIsCredentialDeleting(true);
     try {
-      const res = await api.delete("/admin/kis-credentials");
+      const res = await api.delete(`/admin/credentials/${provider}`);
       if (res.data?.settings) {
         applySettings(res.data.settings);
       } else {
         await fetchSettings();
       }
-      toast.success("KIS 인증정보가 삭제되었습니다.");
+      toast.success(`${provider} 인증정보가 삭제되었습니다.`);
     } catch (err) {
-      toast.error((err as Error).message || "KIS 인증정보 삭제에 실패했습니다.");
+      toast.error((err as Error).message || `${provider} 인증정보 삭제에 실패했습니다.`);
     } finally {
       setIsCredentialDeleting(false);
     }
@@ -209,15 +221,9 @@ export default function PersonalSettingsPage() {
       return;
     }
 
-    const hasNewKisInput = Boolean(kisForm.kis_app_key.trim() || kisForm.kis_app_secret.trim() || kisForm.kis_account_no.trim());
-
-    if (isKisMode) {
-      if (hasNewKisInput && !isKisVerified) {
-         toast.error("새로 입력된 KIS 키가 있습니다. 좌측의 'KIS 검증' 버튼을 먼저 눌러주세요.");
-         return;
-      }
-      if (!hasNewKisInput && !isVerifiedForSelectedMode) {
-         toast.error(`${dbSettings.trade_mode} 모드를 저장하려면 KIS 인증정보를 입력 후 검증해주세요.`);
+    if (isTradeModeRealMock) {
+      if (!isVerifiedForSelectedMode) {
+         toast.error(`${dbSettings.trade_mode} 모드를 저장하려면 선택한 증권사(${activeBroker})의 인증정보를 입력 후 검증해주세요.`);
          return;
       }
     }
@@ -226,18 +232,12 @@ export default function PersonalSettingsPage() {
     setIsSaving(true);
 
     try {
-      const payload: Record<string, unknown> = {
+      const payload = {
         trade_mode: dbSettings.trade_mode,
         broker_provider: dbSettings.broker_provider,
         telegram_chat_id: dbSettings.telegram_chat_id,
         telegram_enabled: dbSettings.telegram_enabled,
       };
-      
-      if (hasNewKisInput) {
-        payload.kis_app_key = kisForm.kis_app_key.trim();
-        payload.kis_app_secret = kisForm.kis_app_secret.trim();
-        payload.kis_account_no = kisForm.kis_account_no.trim();
-      }
 
       const res = await api.post("/admin/", payload);
       applySettings(res.data);
@@ -307,7 +307,7 @@ export default function PersonalSettingsPage() {
       label: "MOCK",
       color: "text-amber-400 border-amber-500 bg-amber-500/5",
       icon: Server,
-      body: "KIS 모의투자 서버 연동 모드",
+      body: "모의투자 연동 모드 (KIS 전용)",
     },
     {
       id: "REAL",
@@ -325,6 +325,8 @@ export default function PersonalSettingsPage() {
       </div>
     );
   }
+
+  const activeForm = forms[activeBroker] || EMPTY_FORM;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white font-sans">
@@ -406,30 +408,40 @@ export default function PersonalSettingsPage() {
                     <div className="p-4 rounded-lg border border-blue-500/20 bg-blue-500/5 flex items-center gap-3">
                       <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0" />
                       <p className="text-[11px] text-zinc-400 leading-relaxed">
-                        SIMULATED 모드에서는 KIS 인증정보를 사용하지 않습니다.
+                        SIMULATED 모드에서는 증권사 인증정보를 사용하지 않습니다.
                       </p>
                     </div>
                   ) : (
                     <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-300">
                       <div>
                         <label className="block text-xs font-semibold text-zinc-400 mb-1.5">Provider</label>
-                        <select
-                          value={dbSettings.broker_provider}
-                          onChange={(e) => setDbSettings((prev) => ({ ...prev, broker_provider: e.target.value }))}
-                          className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none text-xs transition-all"
-                        >
-                          <option value="KIS">Korea Investment & Securities (KIS)</option>
-                          <option value="TOSS" disabled>
-                            Toss Securities (Coming Soon)
-                          </option>
-                        </select>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setDbSettings(prev => ({ ...prev, broker_provider: "KIS" }))}
+                            className={`flex-1 py-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                              dbSettings.broker_provider === "KIS" ? "border-amber-500 bg-amber-500/10 text-amber-400" : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-800"
+                            }`}
+                          >
+                            한국투자증권 (KIS)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDbSettings(prev => ({ ...prev, broker_provider: "TOSS" }))}
+                            className={`flex-1 py-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                              dbSettings.broker_provider === "TOSS" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-800"
+                            }`}
+                          >
+                            토스증권 (TOSS)
+                          </button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                         <div className="rounded-lg border border-zinc-900 bg-zinc-900/20 p-3">
                           <p className="text-[10px] text-zinc-500 mb-1">저장 상태</p>
                           <p className="text-xs font-bold text-zinc-200">
-                            {dbSettings.has_kis_credentials ? "저장됨" : "없음"}
+                            {activeCred?.has_credentials ? "저장됨" : "없음"}
                           </p>
                         </div>
                         <div className="rounded-lg border border-zinc-900 bg-zinc-900/20 p-3">
@@ -440,19 +452,19 @@ export default function PersonalSettingsPage() {
                         </div>
                         <div className="rounded-lg border border-zinc-900 bg-zinc-900/20 p-3">
                           <p className="text-[10px] text-zinc-500 mb-1">검증 모드</p>
-                          <p className="text-xs font-bold text-zinc-200">{dbSettings.kis_verified_trade_mode || "-"}</p>
+                          <p className="text-xs font-bold text-zinc-200">{activeCred?.verified_trade_mode || "-"}</p>
                         </div>
                         <div className="rounded-lg border border-zinc-900 bg-zinc-900/20 p-3">
                           <p className="text-[10px] text-zinc-500 mb-1">계좌</p>
                           <p className="text-xs font-bold text-zinc-200 font-mono">
-                            {dbSettings.kis_account_no_masked || "-"}
+                            {activeCred?.account_no_masked || "-"}
                           </p>
                         </div>
                       </div>
 
-                      {dbSettings.kis_credential_error && (
+                      {activeCred?.credential_error && (
                         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
-                          {dbSettings.kis_credential_error}
+                          {activeCred.credential_error}
                         </div>
                       )}
 
@@ -460,18 +472,21 @@ export default function PersonalSettingsPage() {
                         <div className="flex flex-col gap-1 border-b border-zinc-800/50 pb-3">
                           <h3 className="text-xs font-extrabold text-zinc-200 flex items-center gap-2">
                             <Key className="w-4 h-4 text-emerald-400" />
-                            KIS 인증키 전용 관리
+                            {activeBroker} 인증키 전용 관리
                           </h3>
-                          <p className="text-[10px] text-zinc-500">인증키는 KIS 서버를 통해 실시간 검증을 거친 후 암호화되어 분리 저장됩니다.</p>
+                          <p className="text-[10px] text-zinc-500">인증키는 서버를 통해 실시간 검증을 거친 후 암호화되어 분리 저장됩니다.</p>
                         </div>
                         <div className="grid grid-cols-1 gap-3">
                         <div>
                           <label className="block text-xs font-semibold text-zinc-400 mb-1.5">APP KEY</label>
                           <input
                             type="text"
-                            value={kisForm.kis_app_key}
-                            onChange={(e) => { setKisForm((prev) => ({ ...prev, kis_app_key: e.target.value })); setIsKisVerified(false); }}
-                            placeholder={dbSettings.has_kis_credentials ? "•••••••••••••••• (새로 입력 시 덮어쓰기)" : "Enter APP KEY"}
+                            value={activeForm.app_key}
+                            onChange={(e) => { 
+                              setForms((prev) => ({ ...prev, [activeBroker]: { ...prev[activeBroker], app_key: e.target.value } })); 
+                              setLocalVerified((prev) => ({ ...prev, [activeBroker]: false })); 
+                            }}
+                            placeholder={activeCred?.has_credentials ? "•••••••••••••••• (새로 입력 시 덮어쓰기)" : "Enter APP KEY"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="off"
                           />
@@ -481,9 +496,12 @@ export default function PersonalSettingsPage() {
                           <label className="block text-xs font-semibold text-zinc-400 mb-1.5">APP SECRET</label>
                           <input
                             type="password"
-                            value={kisForm.kis_app_secret}
-                            onChange={(e) => { setKisForm((prev) => ({ ...prev, kis_app_secret: e.target.value })); setIsKisVerified(false); }}
-                            placeholder={dbSettings.has_kis_credentials ? "•••••••••••••••• (새로 입력 시 덮어쓰기)" : "Enter APP SECRET"}
+                            value={activeForm.app_secret}
+                            onChange={(e) => { 
+                              setForms((prev) => ({ ...prev, [activeBroker]: { ...prev[activeBroker], app_secret: e.target.value } })); 
+                              setLocalVerified((prev) => ({ ...prev, [activeBroker]: false })); 
+                            }}
+                            placeholder={activeCred?.has_credentials ? "•••••••••••••••• (새로 입력 시 덮어쓰기)" : "Enter APP SECRET"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="new-password"
                           />
@@ -493,9 +511,12 @@ export default function PersonalSettingsPage() {
                           <label className="block text-xs font-semibold text-zinc-400 mb-1.5">ACCOUNT NO</label>
                           <input
                             type="text"
-                            value={kisForm.kis_account_no}
-                            onChange={(e) => { setKisForm((prev) => ({ ...prev, kis_account_no: e.target.value })); setIsKisVerified(false); }}
-                            placeholder={dbSettings.has_kis_credentials ? `${dbSettings.kis_account_no_masked || "••••••••"} (새로 입력 시 덮어쓰기)` : "12345678-01"}
+                            value={activeForm.account_no}
+                            onChange={(e) => { 
+                              setForms((prev) => ({ ...prev, [activeBroker]: { ...prev[activeBroker], account_no: e.target.value } })); 
+                              setLocalVerified((prev) => ({ ...prev, [activeBroker]: false })); 
+                            }}
+                            placeholder={activeCred?.has_credentials ? `${activeCred.account_no_masked || "••••••••"} (새로 입력 시 덮어쓰기)` : "Enter Account No"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="off"
                           />
@@ -503,10 +524,10 @@ export default function PersonalSettingsPage() {
                       </div>
 
                       <div className="flex flex-col sm:flex-row gap-2 justify-end">
-                        {dbSettings.has_kis_credentials && (
+                        {activeCred?.has_credentials && (
                           <button
                             type="button"
-                            onClick={handleDeleteKisCredentials}
+                            onClick={() => handleDeleteCredentials(activeBroker)}
                             disabled={isCredentialDeleting || isCredentialSaving}
                             className="border border-red-500/40 text-red-300 hover:bg-red-500/10 disabled:opacity-50 px-4 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
                           >
@@ -518,33 +539,32 @@ export default function PersonalSettingsPage() {
                             인증정보 삭제
                           </button>
                         )}
-
+                        <button
+                          onClick={() => handleVerifyCredential(activeBroker)}
+                          disabled={isCredentialSaving || isSaving}
+                          className={`px-4 py-2.5 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer shadow-md ${
+                            localVerified[activeBroker] 
+                              ? "bg-zinc-800 text-emerald-400 border border-emerald-500/30" 
+                              : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30 disabled:opacity-50"
+                          }`}
+                        >
+                          {isCredentialSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+                          {localVerified[activeBroker] ? "검증 완료됨" : `${activeBroker} 검증 및 저장`}
+                        </button>
                       </div>
                       </div>
                     </div>
                   )}
                 </div>
 
-                <div className="flex justify-between items-center pt-6 border-t border-zinc-900">
-                  <button
-                    onClick={handleVerifyKis}
-                    disabled={isCredentialSaving || isSaving || dbSettings.trade_mode === "SIMULATED"}
-                    className={`px-5 py-2.5 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center gap-2 cursor-pointer shadow-md ${
-                      isKisVerified 
-                        ? "bg-zinc-800 text-emerald-400 border border-emerald-500/30" 
-                        : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30 disabled:opacity-50"
-                    }`}
-                  >
-                    {isCredentialSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
-                    {isKisVerified ? "검증 완료됨" : "KIS 검증"}
-                  </button>
+                <div className="flex justify-end items-center pt-6 border-t border-zinc-900">
                   <button
                     onClick={() => handleSave(false)}
                     disabled={isSaving}
                     className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center gap-2 cursor-pointer shadow-md shadow-blue-900/30"
                   >
                     {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                    설정 저장
+                    전체 설정 저장
                   </button>
                 </div>
               </div>
@@ -795,10 +815,12 @@ export default function PersonalSettingsPage() {
             >
               <div className="flex flex-col items-center text-center gap-4">
                 <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center">
-                  <Trash2 className="w-7 h-7 text-red-500" />
+                  <Ban className="w-7 h-7 text-red-500" />
                 </div>
-                <h3 className="text-lg font-extrabold text-white">보유 주식 전량 청산</h3>
-                <p className="text-xs text-red-300 font-semibold leading-relaxed">시장가 기준으로 즉시 청산합니다.</p>
+                <h3 className="text-lg font-extrabold text-white">전량 시장가 청산</h3>
+                <p className="text-xs text-red-300 font-semibold leading-relaxed">
+                  현재 보유 중인 모든 종목을 시장가로 즉시 매도합니다. 계속하시겠습니까?
+                </p>
                 <div className="flex gap-3 w-full pt-2">
                   <button
                     onClick={() => setShowLiquidateModal(false)}
@@ -816,7 +838,7 @@ export default function PersonalSettingsPage() {
                     ) : (
                       <Trash2 className="w-3.5 h-3.5" />
                     )}
-                    청산 실행
+                    청산 진행
                   </button>
                 </div>
               </div>

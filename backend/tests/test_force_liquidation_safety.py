@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 import app.bot.scheduler as scheduler
 import app.trades.router_account as account_router
 from app.core.database import Base
-from app.core.models import BrokerOrder, Holding, User, UserSettings
+from app.core.models import BrokerOrder, Holding, User, UserSettings, BrokerCredential
 
 
 def test_kis_force_liquidation_keeps_holdings_and_bot_paused_when_ack_is_unknown(
@@ -25,6 +25,8 @@ def test_kis_force_liquidation_keeps_holdings_and_bot_paused_when_ack_is_unknown
     user = User(username="liquidator", hashed_password="hashed")
     db.add(user)
     db.flush()
+    cred = BrokerCredential(user_id=user.id, broker_name='KIS', app_key='x', app_secret='x', account_no='x', verification_status='verified', verified_trade_mode='REAL')
+    db.add(cred)
     db.add(UserSettings(
         user_id=user.id,
         trade_mode="MOCK",

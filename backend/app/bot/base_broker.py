@@ -15,8 +15,9 @@ class BaseBroker(ABC):
       팩토리(broker_factory.py)에서 broker_class(db_settings)로 통일 호출됩니다.
     """
 
-    def __init__(self, db_settings=None):
+    def __init__(self, db_settings=None, db_credential=None):
         self.db_settings = db_settings
+        self.db_credential = db_credential
 
     @abstractmethod
     def get_account_balance(self, exchange_rate: float | None = None) -> dict:

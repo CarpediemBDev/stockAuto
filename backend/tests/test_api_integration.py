@@ -15,7 +15,7 @@ import app.watchlist.router as watchlist_router_module
 from app.auth.router import router as auth_router
 from app.core.database import Base, get_db
 from app.core.exceptions import StockAutoException, stock_auto_exception_handler
-from app.core.models import User, UserSettings, WatchList
+from app.core.models import User, UserSettings, WatchList, BrokerCredential
 from app.watchlist.router import router as watchlist_router
 
 
@@ -70,7 +70,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
     config = make_alembic_config(db_url)
 
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "f2a3b4c5d6e7"
+    assert script.get_current_head() == "7f1c4286ef02"
 
     command.upgrade(config, "head")
 
@@ -88,6 +88,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             "swing_prediction_snapshots",
             "refresh_tokens",
             "broker_orders",
+            "broker_credentials",
             "alembic_version",
         }
 
@@ -115,11 +116,16 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             "submission_started_at",
             "response_received_at",
         } <= broker_order_columns
+        
+        broker_credential_columns = {column["name"] for column in inspector.get_columns("broker_credentials")}
         assert {
-            "kis_verification_status",
-            "kis_verified_trade_mode",
-            "kis_verified_at",
-        } <= user_settings_columns
+            "user_id",
+            "broker_name",
+            "verification_status",
+            "verified_trade_mode",
+            "verified_at",
+        } <= broker_credential_columns
+
         assert {"realized_pnl", "return_rate"} <= trade_log_columns
         assert {
             "market_condition",

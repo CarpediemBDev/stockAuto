@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 import app.bot.order_discovery as discovery
 from app.bot.order_reconciler import begin_order_submission, create_order_intent
 from app.core.database import Base
-from app.core.models import BrokerOrder, Holding, User, UserSettings, utc_now_naive
+from app.core.models import BrokerOrder, Holding, User, UserSettings, BrokerCredential, utc_now_naive
 
 
 ET = ZoneInfo("America/New_York")
@@ -41,6 +41,8 @@ def create_settings(session_factory):
     user = User(username="discovery-user", hashed_password="hashed")
     db.add(user)
     db.flush()
+    cred = BrokerCredential(user_id=user.id, broker_name='KIS', app_key='x', app_secret='x', account_no='x', verification_status='verified', verified_trade_mode='REAL')
+    db.add(cred)
     settings = UserSettings(
         user_id=user.id,
         trade_mode="MOCK",
