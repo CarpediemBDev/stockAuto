@@ -312,7 +312,7 @@ export function OverseasScanner({
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/30">
-              {results.filter((r) => !r.source || r.source.includes("MARKET")).map((item, idx) => {
+              {results.filter((r) => !r.source || r.source.length === 0 || r.source.some((s) => s !== "WATCHLIST")).map((item, idx) => {
                 const signal = SIGNAL_CONFIG[item.signal_type] || SIGNAL_CONFIG.NEUTRAL;
                 const SignalIcon = signal.icon;
                 const isInWatchlist = watchlistTickers.includes(item.ticker);
