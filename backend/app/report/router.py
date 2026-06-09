@@ -98,9 +98,13 @@ def trigger_global_report(current_user: User = Depends(get_current_admin_user)):
     관리자가 대시보드 화면에서 원할 때 수동으로 전체 사용자에게 텔레그램 일일 리포트를 강제 기동합니다.
     """
     from app.core.telegram import send_daily_report_to_all_users_sync
+    
     try:
-        send_daily_report_to_all_users_sync()
-        return success_response(message="전체 사용자의 텔레그램 리포트 발송 요청이 정상적으로 처리되었습니다.")
+        result = send_daily_report_to_all_users_sync()
+        total = result.get("total_enabled_users", 0)
+        sent = result.get("sent_count", 0)
+        
+        return success_response(message=f"텔레그램 알림 활성 사용자 총 {total}명 중 {sent}명에게 리포트 발송이 완료되었습니다.")
     except Exception as e:
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"수동 전체 리포트 발송 중 장애 발생: {str(e)}")

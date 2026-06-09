@@ -25,8 +25,8 @@ export function SystemHealth() {
   const handleTriggerManualReport = async () => {
     try {
       setIsReportSending(true);
-      await reportAPI.triggerManualReport();
-      toast.success("관리자 본인의 텔레그램 일일 결산 리포트 발송에 성공했습니다.");
+      const res = await reportAPI.triggerManualReport();
+      toast.success(res.serverMessage || "관리자 본인의 텔레그램 일일 결산 리포트 발송에 성공했습니다.");
     } catch (error) {
       const msg = reportHandledError("Failed to trigger manual report", error);
       toast.error(`리포트 발송 실패: ${msg}`);
@@ -38,8 +38,8 @@ export function SystemHealth() {
   const handleTriggerGlobalReport = async () => {
     try {
       setIsGlobalReportSending(true);
-      await reportAPI.triggerGlobalReport();
-      toast.success("전체 사용자의 텔레그램 일일 결산 리포트 발송에 성공했습니다.");
+      const res = await reportAPI.triggerGlobalReport();
+      toast.success(res.serverMessage || "전체 사용자의 텔레그램 리포트 발송이 완료되었습니다.");
     } catch (error) {
       const msg = reportHandledError("Failed to trigger global report", error);
       toast.error(`전체 리포트 발송 실패: ${msg}`);

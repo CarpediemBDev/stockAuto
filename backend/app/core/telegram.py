@@ -327,7 +327,7 @@ def _process_command(user_id: int, text: str):
     finally:
         db.close()
 
-def send_daily_report_to_all_users_sync():
+def send_daily_report_to_all_users_sync() -> dict:
     """
     장 마감 후 모든 활성 사용자에게 당일 매매 성적을 텔레그램으로 발송합니다.
     """
@@ -335,11 +335,15 @@ def send_daily_report_to_all_users_sync():
     from app.core.models import TradeLog
 
     db = SessionLocal()
+    sent_count = 0
+    total_enabled_users = 0
     try:
         # 최근 24시간 거래 내역
         cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=24)
 
         users = db.query(UserSettings).filter(UserSettings.telegram_enabled == True).all()
+        total_enabled_users = len(users)
+        
         for u in users:
             sells = db.query(TradeLog).filter(
                 TradeLog.user_id == u.user_id,
@@ -369,8 +373,12 @@ def send_daily_report_to_all_users_sync():
             )
 
             send_message_sync(u.user_id, msg)
+            sent_count += 1
+            
+        return {"total_enabled_users": total_enabled_users, "sent_count": sent_count}
     except Exception as e:
         logger.exception("[TelegramBot] Error sending daily report")
+        return {"total_enabled_users": 0, "sent_count": 0, "error": str(e)}
     finally:
         db.close()
 

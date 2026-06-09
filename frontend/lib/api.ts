@@ -1,6 +1,12 @@
 import axios, { AxiosRequestConfig, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../store/authStore';
 
+declare module 'axios' {
+  export interface AxiosResponse {
+    serverMessage?: string;
+  }
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000/api/v1';
 
 const api = axios.create({
@@ -55,7 +61,10 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => {
     if (response.data && response.data.code === 'SUCCESS') {
-      return { ...response, data: response.data.data };
+      const serverMessage = response.data.message;
+      response.data = response.data.data;
+      response.serverMessage = serverMessage;
+      return response;
     }
     return response;
   },
