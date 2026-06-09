@@ -74,16 +74,22 @@ def get_report_stats(current_user: User = Depends(get_current_user), db: Session
     })
 
 @router.post("/trigger-manual-report")
-def trigger_manual_report(current_user: User = Depends(get_current_admin_user)):
+def trigger_manual_report(current_user: User = Depends(get_current_admin_user), db: Session = Depends(get_db)):
     """
     관리자가 대시보드 화면에서 원할 때 수동으로 관리자 본인의 텔레그램 일일 리포트를 강제 기동합니다. (테스트 목적 격리)
     """
+    from fastapi import HTTPException
+    from app.core.models import UserSettings
+    
+    u_settings = db.query(UserSettings).filter(UserSettings.user_id == current_user.id).first()
+    if not u_settings or not u_settings.telegram_enabled or not u_settings.telegram_chat_id:
+        raise HTTPException(status_code=400, detail="텔레그램 연동이 되어있지 않거나 알림이 비활성화 상태입니다. 먼저 개인 설정에서 연동을 완료해주세요.")
+
     from app.core.telegram import send_daily_report_to_user_sync
     try:
         send_daily_report_to_user_sync(current_user.id)
         return success_response(message="관리자 본인 계정의 텔레그램 리포트 발송 요청이 정상적으로 처리되었습니다.")
     except Exception as e:
-        from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"수동 결산 리포트 테스트 발송 중 장애 발생: {str(e)}")
 
 @router.post("/trigger-global-report")
@@ -100,14 +106,20 @@ def trigger_global_report(current_user: User = Depends(get_current_admin_user)):
         raise HTTPException(status_code=500, detail=f"수동 전체 리포트 발송 중 장애 발생: {str(e)}")
 
 @router.post("/trigger-personal-report")
-def trigger_personal_report(current_user: User = Depends(get_current_user)):
+def trigger_personal_report(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     사용자가 개인 투자 설정 화면에서 원할 때 수동으로 본인의 텔레그램 일일 리포트를 강제 기동합니다.
     """
+    from fastapi import HTTPException
+    from app.core.models import UserSettings
+    
+    u_settings = db.query(UserSettings).filter(UserSettings.user_id == current_user.id).first()
+    if not u_settings or not u_settings.telegram_enabled or not u_settings.telegram_chat_id:
+        raise HTTPException(status_code=400, detail="텔레그램 연동이 되어있지 않거나 알림이 비활성화 상태입니다. 먼저 텔레그램 연동을 완료해주세요.")
+
     from app.core.telegram import send_daily_report_to_user_sync
     try:
         send_daily_report_to_user_sync(current_user.id)
         return success_response(message="본인 성적표 텔레그램 리포트 발송 요청이 처리되었습니다.")
     except Exception as e:
-        from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"수동 결산 개인 리포트 발송 중 장애 발생: {str(e)}")
