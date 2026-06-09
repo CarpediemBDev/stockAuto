@@ -177,8 +177,8 @@ def make_user_settings():
         is_running=True,
         trade_mode="SIMULATED",
         strategy_type="regime_switching",
-        is_real_enabled=False,
     )
+
 
 
 def make_signal(price=100.0):
@@ -202,7 +202,6 @@ def install_flow_fakes(monkeypatch, fake_db, fake_broker, strategy, realtime_pri
 
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: fake_db)
     monkeypatch.setattr(scheduler, "get_broker_client", lambda settings: fake_broker)
-    monkeypatch.setattr(scheduler, "is_real_order_locked", lambda settings: False)
     monkeypatch.setattr(strategy_module, "MultiStrategyManager", lambda strategy_type="regime_switching": FakeStrategyManager(strategy))
     monkeypatch.setattr(scheduler, "safe_broker_call", fake_safe_broker_call)
     monkeypatch.setattr(scheduler, "get_realtime_price", fake_get_realtime_price)

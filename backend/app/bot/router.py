@@ -21,27 +21,12 @@ def get_bot_status(
 
     return {
         "is_running": settings.is_running,
-        "is_real_enabled": settings.is_real_enabled,
         "updated_at": settings.updated_at,
         "trade_mode": settings.trade_mode,
         "is_real": settings.trade_mode == "REAL",
         "has_unresolved_orders": has_unresolved_orders(db, current_user.id),
     }
 
-@router.post("/toggle-real")
-def toggle_real_enabled(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    settings = current_user.settings
-    if not settings:
-        settings = UserSettings(user_id=current_user.id, is_real_enabled=True)
-        db.add(settings)
-    else:
-        settings.is_real_enabled = not settings.is_real_enabled
-        settings.updated_at = utc_now_aware()
-    db.commit()
-    return {"message": "Real trading enabled toggled", "is_real_enabled": settings.is_real_enabled}
 
 @router.post("/start")
 def start_bot(

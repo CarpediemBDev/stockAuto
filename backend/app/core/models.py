@@ -79,9 +79,9 @@ class UserSettings(Base):
 
     # 봇 기동 제어 스위치
     is_running = Column(Boolean, default=False)
-    is_real_enabled = Column(Boolean, default=False)
 
     strategy_type = Column(String, default="regime_switching", nullable=False)
+
 
     updated_at = Column(AwareDateTime, default=utc_now_aware, onupdate=utc_now_aware)
 

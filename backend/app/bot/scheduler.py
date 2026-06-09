@@ -1,5 +1,5 @@
 from apscheduler.schedulers.background import BackgroundScheduler
-from app.bot.broker_factory import get_broker_client, is_real_order_locked
+from app.bot.broker_factory import get_broker_client
 from app.core.database import SessionLocal
 from app.core.models import TradeLog, Holding, ActionLog, UserSettings
 from datetime import datetime, timezone, timedelta
@@ -208,7 +208,6 @@ class TradingFlowContext:
     exchange_rate: float
     holdings: list
     broker: object
-    real_order_locked: bool
     ms_manager: object
     first_slot_key: str
     signal_map: dict
@@ -252,14 +251,6 @@ def prepare_trading_flow_context(
     log_action(db, user_id, f"Scan Cycle Started (Mode: {db_settings.trade_mode} | Market Regime: {sentiment})")
 
     broker = get_broker_client(db_settings)
-    real_order_locked = is_real_order_locked(db_settings)
-    if real_order_locked:
-        log_action(
-            db,
-            user_id,
-            "[REAL SAFETY LOCK] REAL mode is selected, but the live trading safety switch is OFF. Broker queries are allowed; buy/sell orders are blocked.",
-            "WARNING"
-        )
 
     from app.bot.multi_strategy_manager import MultiStrategyManager
     strategy_type = getattr(db_settings, "strategy_type", "regime_switching")
@@ -275,7 +266,6 @@ def prepare_trading_flow_context(
         exchange_rate=exchange_rate,
         holdings=holdings,
         broker=broker,
-        real_order_locked=real_order_locked,
         ms_manager=ms_manager,
         first_slot_key=first_slot_key,
         signal_map=signal_map,
@@ -396,7 +386,6 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
     holdings = ctx.holdings
     ms_manager = ctx.ms_manager
     broker = ctx.broker
-    real_order_locked = ctx.real_order_locked
     sentiment = ctx.sentiment
     exchange_rate = ctx.exchange_rate
 
@@ -466,10 +455,6 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
 
             if sell_reason:
                 log_action(db, user_id, f"[{strategy_instance.name}] EXIT SIGNAL: {h.ticker} ({clean_ticker}) | Reason: {sell_reason}", "SIGNAL")
-
-                if real_order_locked:
-                    log_action(db, user_id, f"[REAL SAFETY LOCK] SELL BLOCKED for {clean_ticker}. Turn on the live trading safety switch before sending REAL orders.", "ERROR")
-                    continue
 
                 is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
                 order_intent = None
@@ -899,10 +884,6 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                     reason_desc=reason_desc, current_price=current_price, proposed_value_usd=proposed_value_usd,
                     slot_cash_usd=slot_cash_usd,
                 )
-                continue
-
-            if ctx.real_order_locked:
-                log_action(db, user_id, f"[REAL SAFETY LOCK] BUY BLOCKED for {clean_ticker}. Turn on the live trading safety switch before sending REAL orders.", "ERROR")
                 continue
 
             is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}

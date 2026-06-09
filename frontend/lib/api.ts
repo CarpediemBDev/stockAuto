@@ -140,7 +140,6 @@ export const botAPI = {
   getStatus: (config?: AxiosRequestConfig) => api.get('/bot/status', config),
   start: () => api.post('/bot/start'),
   stop: () => api.post('/bot/stop'),
-  toggleReal: () => api.post('/bot/toggle-real'),
 };
 
 export const tradeAPI = {

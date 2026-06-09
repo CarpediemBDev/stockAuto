@@ -250,12 +250,10 @@ def _resume_user_if_safe(db, order: BrokerOrder, db_settings: UserSettings) -> b
     db.flush()
     if has_unresolved_orders(db, order.user_id):
         return False
-    current_mode = (db_settings.trade_mode or "SIMULATED").upper()
-    if current_mode == "REAL" and not bool(db_settings.is_real_enabled):
-        return False
     db_settings.is_running = True
     order.resume_after_resolution = False
     return True
+
 
 
 def create_order_intent(

@@ -33,7 +33,6 @@ erDiagram
         string telegram_chat_id
         boolean telegram_enabled
         boolean is_running
-        boolean is_real_enabled
         datetime updated_at
     }
 
@@ -110,7 +109,6 @@ erDiagram
 * `telegram_chat_id` (VARCHAR, Nullable): 텔레그램 CHAT ID
 * `telegram_enabled` (BOOLEAN, Default: False): 텔레그램 알림 활성화 여부
 * `is_running` (BOOLEAN, Default: False): 백그라운드 봇 스케줄러 가동 여부
-* `is_real_enabled` (BOOLEAN, Default: False): 실전 매매 최종 잠금해제 스위치 (실거래 주문 승인)
 * `updated_at` (DATETIME): 마지막 갱신 시간
 
 ### ③ `trade_logs` (매매 체결 기록)

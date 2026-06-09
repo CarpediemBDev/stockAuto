@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.scanner.data_provider import fetch_ohlcv
 
 from app.core.database import get_db
-from app.bot.broker_factory import get_broker_client, is_real_order_locked
+from app.bot.broker_factory import get_broker_client
 from app.bot.order_reconciler import (
     begin_order_submission,
     create_order_intent,
@@ -153,11 +153,7 @@ async def force_liquidate(
             detail="미해결 증권사 주문이 있어 전량 청산을 시작할 수 없습니다.",
         )
 
-    if is_real_order_locked(current_user.settings):
-        raise HTTPException(
-            status_code=400,
-            detail="REAL 모드에서는 실전투자 안전 스위치를 켠 뒤에만 전량 청산 주문을 전송할 수 있습니다."
-        )
+
 
     broker = get_broker_client(current_user.settings)
     liquidated_tickers = []

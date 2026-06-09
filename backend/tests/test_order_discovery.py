@@ -47,7 +47,6 @@ def create_settings(session_factory):
         user_id=user.id,
         trade_mode="MOCK",
         is_running=True,
-        is_real_enabled=False,
     )
     db.add(settings)
     db.commit()

@@ -109,7 +109,6 @@ def _settings_response(db_settings: UserSettings) -> dict:
         "telegram_chat_id": getattr(db_settings, "telegram_chat_id", None) if db_settings else None,
         "telegram_enabled": bool(getattr(db_settings, "telegram_enabled", False)) if db_settings else False,
         "is_running": bool(getattr(db_settings, "is_running", False)) if db_settings else False,
-        "is_real_enabled": bool(getattr(db_settings, "is_real_enabled", False)) if db_settings else False,
         "global_bot_username": os.getenv("TELEGRAM_BOT_USERNAME", "stockauto_official_bot"),
         "credentials": [_credential_meta(c) for c in credentials],
     }
@@ -385,6 +384,29 @@ def list_users(
     result = []
     for user in users:
         settings = user.settings
+        
+        profit_rate = 0.0
+        if settings:
+            try:
+                is_simulated = settings.trade_mode == "SIMULATED"
+                has_verified_cred = False
+                
+                if not is_simulated and settings.broker_provider:
+                    for cred in settings.credentials:
+                        if cred.broker_name == settings.broker_provider and cred.verification_status == "verified":
+                            has_verified_cred = True
+                            break
+                
+                if is_simulated or has_verified_cred:
+                    from app.bot.broker_factory import get_broker_client
+                    broker = get_broker_client(settings)
+                    balance = broker.get_account_balance()
+                    profit_rate = balance.get("profit_rate", 0.0)
+            except Exception as e:
+                # API 호출 에러 발생 시 안전하게 0.0%로 폴백하여 어드민 대시보드 마비 차단
+                print(f"[Admin User List] Failed to fetch balance for user {user.username}: {e}")
+                profit_rate = 0.0
+
         result.append(
             {
                 "id": user.id,
@@ -396,12 +418,13 @@ def list_users(
                 "telegram_enabled": settings.telegram_enabled if settings else False,
                 "telegram_chat_id": settings.telegram_chat_id if settings else None,
                 "is_running": settings.is_running if settings else False,
-                "is_real_enabled": settings.is_real_enabled if settings else False,
+                "profit_rate": profit_rate,
                 "strategy_type": settings.strategy_type if settings else "regime_switching",
                 "credentials": [_credential_meta(c) for c in settings.credentials] if settings else [],
             }
         )
     return result
+
 
 @router.post("/users/{user_id}/toggle-bot")
 def toggle_user_bot(

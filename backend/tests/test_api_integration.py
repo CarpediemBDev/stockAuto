@@ -70,7 +70,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
     config = make_alembic_config(db_url)
 
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "5b86ba90d475"
+    assert script.get_current_head() == "93ff846b6e0a"
 
     command.upgrade(config, "head")
 

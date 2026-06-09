@@ -84,9 +84,9 @@ def make_settings(**overrides):
         "telegram_chat_id": None,
         "telegram_enabled": False,
         "is_running": False,
-        "is_real_enabled": False,
         "credentials": []
     }
+
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
 

@@ -21,7 +21,6 @@ export function NavBar() {
   const pathname = usePathname();
   const router = useRouter();
   const [tradeMode, setTradeMode] = useState("VIRTUAL");
-  const [isRealEnabled, setIsRealEnabled] = useState(false);
   const [isBotRunning, setIsBotRunning] = useState(false);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -38,7 +37,6 @@ export function NavBar() {
     try {
       const res = await botAPI.getStatus();
       setTradeMode(res.data.trade_mode);
-      setIsRealEnabled(res.data.is_real_enabled);
       setIsBotRunning(res.data.is_running);
     } catch {
       // Silently fail in navbar background fetches
@@ -108,13 +106,13 @@ export function NavBar() {
             {!isAuthPage && username && (
               <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider transition-colors duration-500 select-none ${
                 tradeMode === 'REAL'
-                  ? (isRealEnabled ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-red-900/40 text-red-300 border border-red-700/50')
+                  ? (isBotRunning ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-red-900/40 text-red-300 border border-red-700/50')
                   : tradeMode === 'MOCK'
                   ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                   : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
               }`}>
                 {tradeMode === 'REAL'
-                  ? (isRealEnabled ? '🔥 PREMIUM / LIVE' : '🔒 PREMIUM / REAL (LOCKED)')
+                  ? (isBotRunning ? '🔥 PREMIUM / LIVE' : '🔒 PREMIUM / REAL (STOPPED)')
                   : tradeMode === 'MOCK'
                   ? '⚡ PRO / MOCK'
                   : '📝 FREE / SIMULATED'}

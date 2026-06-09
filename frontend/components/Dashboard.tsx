@@ -13,7 +13,7 @@ import { reportHandledError } from "@/lib/utils";
 import { toast } from "sonner";
 
 export function Dashboard() {
-  const [isRealEnabled, setIsRealEnabled] = useState(false);
+  const [isBotRunning, setIsBotRunning] = useState(false);
   const [isReal, setIsReal] = useState(false);
   const [logs, setLogs] = useState<TradeLog[]>([]);
   const [isChartOpen, setIsChartOpen] = useState(false);
@@ -22,9 +22,8 @@ export function Dashboard() {
   const fetchStatus = useCallback(async (signal?: AbortSignal) => {
     try {
       const res = await botAPI.getStatus({ signal });
-      setIsRealEnabled(res.data.is_real_enabled);
+      setIsBotRunning(res.data.is_running);
       setIsReal(res.data.is_real);
-
     } catch (error) {
       if (isCancel(error)) return;
       const msg = reportHandledError("Failed to fetch bot status", error);
@@ -49,44 +48,11 @@ export function Dashboard() {
 
   usePolling(fetchData, 5000);
 
-  const handleToggleReal = async () => {
-    try {
-      await botAPI.toggleReal();
-      fetchStatus();
-      toast.info("실전 투자 스위치가 변경되었습니다.");
-    } catch (error) {
-      const msg = reportHandledError("Failed to toggle real switch", error);
-      toast.error(`스위치 조작 실패: ${msg}`);
-    }
-  };
-
   const [displayCurrency, setDisplayCurrency] = useState<"KRW" | "USD">("KRW");
 
   return (
-    <div className={`min-h-screen transition-colors duration-700 ${isReal && isRealEnabled ? 'bg-red-950/20' : 'bg-black'}`}>
+    <div className={`min-h-screen transition-colors duration-700 ${isReal && isBotRunning ? 'bg-red-950/20' : 'bg-black'}`}>
       <div className="max-w-[1600px] mx-auto p-6 pt-6">
-        {/* 실전 모드(REAL)일 때만 상단 비상 안전 스위치 바를 슬림하게 노출하여 세로 공간 극대화 */}
-        {isReal && (
-          <div className="mb-6 flex justify-end items-center border-b border-zinc-900 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 bg-zinc-900/50 p-2 rounded-lg border border-zinc-800 backdrop-blur-sm">
-                <span className="text-[11px] text-zinc-400 font-semibold">실전투자 안전 스위치</span>
-                <button 
-                  onClick={handleToggleReal}
-                  className={`w-10 h-5 rounded-full p-0.5 transition-colors duration-300 ${isRealEnabled ? 'bg-red-600' : 'bg-zinc-700'}`}
-                >
-                  <div className={`w-4 h-4 bg-white rounded-full transition-transform duration-300 ${isRealEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
-                </button>
-              </div>
-              {isRealEnabled && (
-                <span className="text-[10px] text-red-500 font-extrabold animate-pulse">
-                  ⚠️ WARNING: LIVE TRADING ACTIVE
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
         <LiveTradeTicker latestLog={logs[0]} onClick={() => setIsLogsModalOpen(true)} />
 
         <div className="flex justify-between items-center mb-6">

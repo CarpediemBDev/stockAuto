@@ -125,7 +125,6 @@ def seed_competitive_users():
                     strategy_type=comp["strategy"],
                     trade_mode="SIMULATED",
                     is_running=False,
-                    is_real_enabled=False
                 )
                 db.add(new_settings)
                 db.commit()
@@ -139,7 +138,6 @@ def seed_competitive_users():
                         strategy_type=comp["strategy"],
                         trade_mode="SIMULATED",
                         is_running=False,
-                        is_real_enabled=False
                     )
                     db.add(settings)
                     db.commit()

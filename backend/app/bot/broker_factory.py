@@ -43,12 +43,3 @@ def get_broker_client(db_settings=None) -> BaseBroker:
     broker_class = provider_map.get(mode, LocalSimulatedBroker)
     return broker_class(db_settings, db_credential=cred)
 
-def is_real_order_locked(db_settings=None) -> bool:
-    """
-    REAL 모드에서도 사용자가 별도 안전 스위치를 켜기 전까지는 실제 주문 전송을 차단합니다.
-    계좌 조회는 허용하되 buy/sell 주문 직전에 이 값을 확인합니다.
-    """
-    if not db_settings:
-        return False
-    mode = (db_settings.trade_mode or "SIMULATED").upper()
-    return mode == "REAL" and not bool(db_settings.is_real_enabled)

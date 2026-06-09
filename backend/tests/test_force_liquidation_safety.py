@@ -31,8 +31,8 @@ def test_kis_force_liquidation_keeps_holdings_and_bot_paused_when_ack_is_unknown
         user_id=user.id,
         trade_mode="MOCK",
         is_running=True,
-        is_real_enabled=False,
     ))
+
     db.add(Holding(
         user_id=user.id,
         ticker="slot_AAPL",

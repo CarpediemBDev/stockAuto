@@ -27,7 +27,7 @@ interface ManagedUser {
   telegram_enabled: boolean;
   telegram_chat_id: string | null;
   is_running: boolean;
-  is_real_enabled: boolean;
+  profit_rate: number;
   strategy_type: string;
   credentials: BrokerCredentialMeta[];
 }
@@ -135,6 +135,7 @@ export function UserManagement() {
                   <th className="px-6 py-3.5">투자 모드</th>
                   <th className="px-6 py-3.5">텔레그램</th>
                   <th className="px-6 py-3.5">봇 상태</th>
+                  <th className="px-6 py-3.5">수익률</th>
                   <th className="px-6 py-3.5 text-right">관리</th>
                 </tr>
               </thead>
@@ -170,6 +171,18 @@ export function UserManagement() {
                           {user.is_running ? 'RUNNING' : 'STOPPED'}
                         </span>
                       </div>
+                    </td>
+                    <td className="px-6 py-4 font-mono">
+                      {user.profit_rate !== undefined ? (
+                        <span className={`text-xs font-bold ${
+                          user.profit_rate > 0 ? 'text-emerald-400' :
+                          user.profit_rate < 0 ? 'text-blue-400' : 'text-zinc-500'
+                        }`}>
+                          {user.profit_rate > 0 ? `+${user.profit_rate.toFixed(2)}%` : `${user.profit_rate.toFixed(2)}%`}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-600 text-xs">-</span>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-right space-x-2">
                       <button 
@@ -297,13 +310,19 @@ export function UserManagement() {
                         {selectedUser.trade_mode}
                       </span>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-zinc-500 text-xs font-semibold">실전투자 허용 여부</span>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        selectedUser.is_real_enabled ? 'bg-red-500/15 text-red-400 border border-red-500/30' : 'bg-zinc-800 text-zinc-500'
-                      }`}>
-                        {selectedUser.is_real_enabled ? 'ENABLED' : 'DISABLED'}
-                      </span>
+                    <div className="flex justify-between items-center font-sans">
+                      <span className="text-zinc-500 text-xs font-semibold">실시간 봇 수익률</span>
+                      {selectedUser.profit_rate !== undefined ? (
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono border ${
+                          selectedUser.profit_rate > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                          selectedUser.profit_rate < 0 ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                          'bg-zinc-800 text-zinc-500 border-zinc-700/50'
+                        }`}>
+                          {selectedUser.profit_rate > 0 ? `+${selectedUser.profit_rate.toFixed(2)}%` : `${selectedUser.profit_rate.toFixed(2)}%`}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-500 text-xs font-semibold">-</span>
+                      )}
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-zinc-500 text-xs font-semibold">구동 알고리즘 전략</span>
