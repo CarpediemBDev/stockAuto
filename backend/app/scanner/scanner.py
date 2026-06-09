@@ -36,6 +36,9 @@ from app.scanner.news_analyzer import analyze_news_sentiment
 # 지수 비교용 (Relative Strength)
 MARKET_INDEX = "QQQ" 
 
+# 최소 거래대금 기준 (한국 돈 1억 원)
+MIN_KRW_VOLUME = 100_000_000.0
+
 # 💡 Sentiment 캐시 (5분 TTL - API 호출 최소화 & 로그 과다 출력 방지)
 _sentiment_cache = {"value": None, "timestamp": 0}
 SENTIMENT_TTL = 300  # 5분 (API 호출 빈도 대폭 감소)
@@ -134,9 +137,9 @@ async def scan_market_expert() -> list:
     df_qqq = await fetch_index_data(MARKET_INDEX)
     qqq_perf = (df_qqq['Close'].iloc[-1] / df_qqq['Close'].iloc[0] - 1) if not df_qqq.empty else 0
     
-    # 1.5. 최소 거래대금 기준 설정 (한국 돈 1억 원 기준 환산)
+    # 1.5. 최소 거래대금 기준 설정 (설정된 한국 돈 기준 환산)
     from app.bot.fx_cache import FXRateCache
-    min_dollar_volume = 100000000.0 / FXRateCache.get_rate()
+    min_dollar_volume = MIN_KRW_VOLUME / FXRateCache.get_rate()
     
     logger.info(f"[Stage 1] Scanning {len(tickers)} tickers with 15m data (Min Vol: ${min_dollar_volume:,.2f})...")
     
