@@ -257,15 +257,5 @@ class MultiStrategyManager:
         # 가중치 내림차순 정렬
         candidates.sort(key=lambda x: x[1], reverse=True)
         focused = {t for t, _ in candidates[:10]}
-        
-        # 선별된 종목이 5개 미만인 경우 최정예 포트폴리오 11개 종목에서 부족분만큼 순차 보완하여 유동성/거래 기회 보장
-        if len(focused) < 5:
-            additional_needed = 5 - len(focused)
-            for t in self.TARGET_TICKERS:
-                if t not in focused:
-                     focused.add(t)
-                     additional_needed -= 1
-                     if additional_needed <= 0:
-                         break
                          
         return focused

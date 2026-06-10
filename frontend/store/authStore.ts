@@ -5,7 +5,7 @@ interface AuthState {
   username: string | null;
   isAuthenticated: boolean;
   isInitialized: boolean;
-  setAuth: (token: string, username: string) => void;
+  setAuth: (token: string, username: string, refreshToken?: string) => void;
   clearAuth: () => void;
   setInitialized: (val: boolean) => void;
 }
@@ -15,16 +15,26 @@ export const useAuthStore = create<AuthState>((set) => ({
   username: null,
   isAuthenticated: false,
   isInitialized: false,
-  setAuth: (token, username) => set({
-    accessToken: token,
-    username: username,
-    isAuthenticated: true,
-  }),
-  clearAuth: () => set({
-    accessToken: null,
-    username: null,
-    isAuthenticated: false,
-  }),
+  setAuth: (token, username, refreshToken) => {
+    if (typeof window !== 'undefined' && refreshToken) {
+      localStorage.setItem('refresh_token', refreshToken);
+    }
+    set({
+      accessToken: token,
+      username: username,
+      isAuthenticated: true,
+    });
+  },
+  clearAuth: () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('refresh_token');
+    }
+    set({
+      accessToken: null,
+      username: null,
+      isAuthenticated: false,
+    });
+  },
   setInitialized: (val) => set({
     isInitialized: val,
   }),

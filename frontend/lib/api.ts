@@ -7,7 +7,7 @@ declare module 'axios' {
   }
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:8000/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -103,13 +103,21 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
+        const localRefreshToken = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
+        if (!localRefreshToken) {
+          throw new Error("Refresh token missing in localStorage");
+        }
+
         // 인터셉터를 타지 않는 axios 인스턴스로 refresh 호출 (무한루프 방지)
-        const refreshResponse = await axios.post(`${API_BASE}/auth/refresh`, {}, { withCredentials: true });
+        const refreshResponse = await axios.post(`${API_BASE}/auth/refresh`, {
+          refresh_token: localRefreshToken
+        });
         const newToken = refreshResponse.data.data ? refreshResponse.data.data.access_token : refreshResponse.data.access_token;
         const newUsername = refreshResponse.data.data ? refreshResponse.data.data.username : refreshResponse.data.username;
+        const newRefreshToken = refreshResponse.data.data ? refreshResponse.data.data.refresh_token : refreshResponse.data.refresh_token;
 
         // Zustand 업데이트
-        useAuthStore.getState().setAuth(newToken, newUsername);
+        useAuthStore.getState().setAuth(newToken, newUsername, newRefreshToken || localRefreshToken);
 
         processQueue(null, newToken);
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
@@ -140,8 +148,14 @@ api.interceptors.response.use(
 export const authAPI = {
   signup: (username: string, password: string) => api.post('/auth/signup', { username, password }),
   login: (username: string, password: string) => api.post('/auth/login', { username, password }),
-  refresh: () => api.post('/auth/refresh'),
-  logout: () => api.post('/auth/logout'),
+  refresh: () => {
+    const localRefreshToken = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
+    return api.post('/auth/refresh', { refresh_token: localRefreshToken });
+  },
+  logout: () => {
+    const localRefreshToken = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
+    return api.post('/auth/logout', { refresh_token: localRefreshToken });
+  },
   getMe: (config?: AxiosRequestConfig) => api.get('/auth/me', config),
 };
 

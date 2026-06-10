@@ -363,7 +363,8 @@ async def calculate_slot_allocations(ctx: TradingFlowContext) -> dict:
 
 async def build_target_signals(ctx: TradingFlowContext) -> list | None:
     target_signals = []
-    for ticker in ctx.ms_manager.TARGET_TICKERS:
+    focused_tickers = ctx.ms_manager.get_focused_tickers(ctx.all_signals)
+    for ticker in focused_tickers:
         sig = ctx.signal_map.get(ticker)
         if sig:
             target_signals.append(sig)

@@ -13,6 +13,7 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
         code: "SUCCESS",
         data: {
           access_token: "fake_magic_token",
+          refresh_token: "fake_magic_refresh_token",
           token_type: "bearer",
           username: "MagicUser",
         },
@@ -21,16 +22,7 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
   });
 
   // 1-2. 전체 페이지 이동 후 HttpOnly refresh 기반 세션 복구
-  let refreshAttempts = 0;
   await page.route("**/api/v1/auth/refresh", async (route) => {
-    refreshAttempts += 1;
-    if (refreshAttempts === 1) {
-      await route.fulfill({
-        status: 401,
-        json: { detail: "No refresh session yet" },
-      });
-      return;
-    }
     await route.fulfill({
       status: 200,
       json: {

@@ -94,7 +94,7 @@ async def get_balance(
                 "regime_switching": {"cash": int(balance.get("cash_balance", 10000000.0) * 0.5), "stock_value": 0, "name": "마스터 레짐스위칭 V2", "weight": 0.5},
                 "episodic_pivot": {"cash": int(balance.get("cash_balance", 10000000.0) * 0.5), "stock_value": 0, "name": "에피소딕 피벗 (Episodic Pivot)", "weight": 0.5}
             }
-        balance["focused_radar_tickers"] = ["AKAN", "WNW", "ASTC", "SDA", "HUBC"]
+        balance["focused_radar_tickers"] = []
 
     return success_response(data=balance)
 

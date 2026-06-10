@@ -144,7 +144,6 @@ class FakeStrategy:
 
 class FakeStrategyManager:
     SLOTS = {"slot": {"prefix": "slot_"}}
-    TARGET_TICKERS = ["AAPL"]
 
     def __init__(self, strategy):
         self.strategies = {"slot": strategy}

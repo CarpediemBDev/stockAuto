@@ -50,8 +50,9 @@ export default function SignupPage() {
       const res = await authAPI.signup(username, password);
       const newToken = res.data.access_token;
       const newUsername = res.data.username;
+      const newRefreshToken = res.data.refresh_token;
 
-      setAuth(newToken, newUsername);
+      setAuth(newToken, newUsername, newRefreshToken);
       toast.success("회원가입이 완료되었으며, 성공적으로 로그인되었습니다!");
       router.push("/");
     } catch (err: unknown) {
