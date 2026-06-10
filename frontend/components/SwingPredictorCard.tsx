@@ -87,7 +87,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
 
   if (loading) {
     return (
-      <div className="bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-6">
+      <div className="bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-2xl p-6 shadow-xl space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-zinc-900 rounded-2xl animate-pulse"></div>
@@ -99,7 +99,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
           <div className="w-24 h-7 bg-zinc-900 rounded-lg animate-pulse"></div>
         </div>
         {/* 2-Tab Selector inside Scanner Container */}
-        <div className="flex border-b border-zinc-850 bg-zinc-950 px-2 pt-1 gap-6 mb-6">
+        <div className="flex border-b border-zinc-800/80 bg-zinc-900/20 px-2 pt-1 gap-6 mb-6">
           <button
             onClick={() => setActiveTab?.("15m")}
             className={cn(
@@ -135,7 +135,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
   }
 
   return (
-    <div className="bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl">
+    <div className="bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-2xl p-6 shadow-xl">
       {/* 프리미엄 헤더 */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 pb-4 border-b border-zinc-900 gap-4">
         <div className="flex items-center space-x-3">
@@ -154,11 +154,17 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
         </div>
         <div className="flex items-center gap-2 self-end md:self-auto">
           <span className="text-[10px] bg-zinc-900 text-zinc-400 border border-zinc-800 font-mono px-3 py-1 rounded-full flex items-center gap-1.5 select-none">
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
+            <span className={cn(
+              "w-1.5 h-1.5 rounded-full animate-pulse",
+              syncStatus === "fresh" ? "bg-emerald-500" :
+              syncStatus === "stale" ? "bg-amber-500" :
+              syncStatus === "failed" ? "bg-rose-500" :
+              "bg-indigo-500"
+            )}></span>
             {syncStatus.toUpperCase()} SWING SIGNALS
           </span>
           {updatedAt && (
-            <span className="text-[10px] text-zinc-600 font-mono flex items-center gap-1.5">
+            <span className="text-[10px] text-zinc-400 font-mono flex items-center gap-1.5">
               <span className="bg-zinc-800/80 text-zinc-400 px-1.5 py-0.5 rounded font-black tracking-widest">{selectedTimezone.abbr}</span>
               {new Date(updatedAt).toLocaleTimeString('ko-KR', {
                 timeZone: selectedTimezone.timeZone,
@@ -178,7 +184,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
       </div>
 
       {/* 2-Tab Selector inside Scanner Container */}
-      <div className="flex border-b border-zinc-850 bg-zinc-950 px-2 pt-1 gap-6 mb-6">
+      <div className="flex border-b border-zinc-800/80 bg-zinc-900/20 px-2 pt-1 gap-6 mb-6">
         <button
           onClick={() => setActiveTab?.("15m")}
           className={cn(

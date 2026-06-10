@@ -330,7 +330,13 @@ async def scan_market_expert() -> list:
                 news_list = news_map.get(ticker, [])
                 is_fundamental_healthy = fundamental_map.get(ticker, True)
                 
-                if not is_fundamental_healthy:
+                # 💡 [필터 우회] 사용자가 관심종목(WATCHLIST)으로 등록했거나, 봇의 11대 타겟 종목(TARGET_TICKERS)인 경우
+                # 적자 기업이더라도 매매가 가능하도록 재무 필터링(퇴출)을 적용하지 않고 통과시킵니다.
+                from app.bot.multi_strategy_manager import MultiStrategyManager
+                is_target_ticker = ticker in MultiStrategyManager.TARGET_TICKERS
+                is_watchlist = "WATCHLIST" in cand.get("source", [])
+                
+                if not is_fundamental_healthy and not is_watchlist and not is_target_ticker:
                     logger.info(f"[Scanner Filter] {ticker} discarded - Negative earnings (not healthy).")
                     continue
                 

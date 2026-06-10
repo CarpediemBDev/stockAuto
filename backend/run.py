@@ -90,6 +90,7 @@ def main():
         host=host,
         port=port,
         reload=reload_enabled,
+        reload_excludes=["*.db", "*.db-journal", "*.sqlite3", "venv/*", "__pycache__/*", "logs/*", "*.log", "backend/logs/*", "**/logs/*", "**/*.log"],
         workers=workers_count,
         env_file=f".env.{profile}" # Uvicorn 레벨에서 단일 환경파일만 강제 주입
     )

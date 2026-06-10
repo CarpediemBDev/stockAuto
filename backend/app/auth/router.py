@@ -49,6 +49,13 @@ class TokenResponseSchema(BaseModel):
     access_token: str
     token_type: str = "bearer"
     username: str
+    refresh_token: Optional[str] = None
+
+class RefreshRequestSchema(BaseModel):
+    refresh_token: str
+
+class LogoutRequestSchema(BaseModel):
+    refresh_token: Optional[str] = None
 
 class UserProfileSchema(BaseModel):
     id: int
@@ -110,13 +117,14 @@ def signup(payload: UserAuthSchema, response: Response, db: Session = Depends(ge
             detail="회원가입 처리 중 내부 오류가 발생했습니다."
         )
 
-    # HttpOnly 쿠키에 Refresh Token 설정
+    # HttpOnly 쿠키에 Refresh Token 설정 (쿠키 호환성 유지)
     _set_refresh_cookie(response, refresh_token)
 
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "username": new_user.username
+        "username": new_user.username,
+        "refresh_token": refresh_token
     }
 
 @router.post("/login", response_model=TokenResponseSchema)
@@ -187,15 +195,26 @@ def login(payload: UserAuthSchema, response: Response, db: Session = Depends(get
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "username": user.username
+        "username": user.username,
+        "refresh_token": refresh_token
     }
 
 @router.post("/refresh", response_model=TokenResponseSchema)
-def refresh_token(request: Request, response: Response, db: Session = Depends(get_db)):
+def refresh_token(
+    payload: Optional[RefreshRequestSchema] = None,
+    request: Request = None,
+    response: Response = None,
+    db: Session = Depends(get_db)
+):
     """
-    HttpOnly 쿠키의 Refresh Token을 사용해 새 Access Token을 발급합니다.
+    JSON 바디 또는 HttpOnly 쿠키의 Refresh Token을 사용해 새 Access Token을 발급합니다.
     """
-    token = request.cookies.get("refresh_token")
+    token = None
+    if payload:
+        token = payload.refresh_token
+    if not token and request:
+        token = request.cookies.get("refresh_token")
+
     if not token:
         raise HTTPException(status_code=401, detail="Refresh token missing")
     token_user_id = decode_refresh_token(token)
@@ -218,22 +237,34 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "username": user.username
+        "username": user.username,
+        "refresh_token": token
     }
 
 @router.post("/logout")
-def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+def logout(
+    payload: Optional[LogoutRequestSchema] = None,
+    request: Request = None,
+    response: Response = None,
+    db: Session = Depends(get_db)
+):
     """
     로그아웃 (Refresh Token 파기 및 쿠키 삭제)
     """
-    token = request.cookies.get("refresh_token")
+    token = None
+    if payload:
+        token = payload.refresh_token
+    if not token and request:
+        token = request.cookies.get("refresh_token")
+
     if token:
         db_token = db.query(RefreshToken).filter(RefreshToken.token == token).first()
         if db_token:
             db_token.is_revoked = True
             db.commit()
 
-    _delete_refresh_cookie(response)
+    if response:
+        _delete_refresh_cookie(response)
     return {"success": True, "message": "Successfully logged out"}
 
 @router.post("/change-password")
