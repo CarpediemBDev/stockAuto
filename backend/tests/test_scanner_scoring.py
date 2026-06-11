@@ -1,3 +1,4 @@
+import pytest
 import pandas as pd
 
 import app.scanner.scanner as scanner_module
@@ -18,6 +19,7 @@ def make_ohlcv(index, close_values, volume_values):
     )
 
 
+@pytest.mark.asyncio
 async def test_scan_market_expert_maps_realtime_strategy_fields(monkeypatch):
     yesterday = pd.date_range("2026-06-01 09:30", periods=20, freq="15min")
     today = pd.date_range("2026-06-02 09:30", periods=10, freq="15min")
