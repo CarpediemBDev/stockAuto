@@ -60,7 +60,8 @@ def create_submitting_buy(db, settings):
         settings,
         side="BUY",
         ticker="AAPL",
-        prefixed_ticker="slot_AAPL",
+        prefixed_ticker="AAPL",
+        strategy_type="episodic_pivot",
         ticker_name="Apple",
         requested_qty=3,
         submitted_price=200.0,
@@ -122,6 +123,8 @@ def test_submitting_intent_is_recovered_without_resubmitting_order(
     assert recovered.broker_order_no == "KIS-RECOVERED-1"
     assert recovered.status == "FILLED"
     assert recovered.applied_filled_qty == 3
+    assert holding.ticker == "AAPL"
+    assert holding.strategy_type == "episodic_pivot"
     assert holding.quantity == 3
     assert holding.avg_price == 199.5
     assert recovered_settings.is_running is True
@@ -179,7 +182,8 @@ def test_stale_intent_created_before_submission_is_aborted(session_factory, monk
         settings,
         side="BUY",
         ticker="MSFT",
-        prefixed_ticker="slot_MSFT",
+        prefixed_ticker="MSFT",
+        strategy_type="regime_switching",
         ticker_name="Microsoft",
         requested_qty=1,
         submitted_price=400.0,

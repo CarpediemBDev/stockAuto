@@ -13,7 +13,7 @@ from app.core.logging import logger
 
 # 가상 DB 보유 레코드 모사 클래스
 class MockHolding:
-    def __init__(self, ticker, ticker_name, avg_price, quantity, highest_price, regime_mode, buy_stage):
+    def __init__(self, ticker, ticker_name, avg_price, quantity, highest_price, regime_mode, buy_stage, strategy_type):
         self.ticker = ticker
         self.ticker_name = ticker_name
         self.avg_price = avg_price
@@ -21,6 +21,7 @@ class MockHolding:
         self.highest_price = highest_price
         self.regime_mode = regime_mode
         self.buy_stage = buy_stage
+        self.strategy_type = strategy_type
         self.current_price = avg_price
 
 def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
@@ -57,7 +58,7 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
         # 2. 실시간 평가자산 산출
         stock_value = 0.0
         for h in holdings:
-            clean_ticker = h.ticker.split('_')[-1]
+            clean_ticker = h.ticker
             if clean_ticker in current_prices:
                 h.current_price = current_prices[clean_ticker]
             stock_value += h.quantity * h.current_price
@@ -73,17 +74,12 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
         # 3. 실시간 격리 지갑 자산 분배
         slot_stock_values = {slot_key: 0.0 for slot_key in slots_cfg}
         for h in holdings:
-            ticker = h.ticker
             qty = h.quantity
             price = h.current_price
             
-            parsed_slot = None
-            for slot_key, cfg in slots_cfg.items():
-                if ticker.startswith(cfg["prefix"]):
-                    parsed_slot = slot_key
-                    break
-            if parsed_slot:
-                slot_stock_values[parsed_slot] += qty * price
+            slot_key = h.strategy_type
+            if slot_key in slot_stock_values:
+                slot_stock_values[slot_key] += qty * price
             else:
                 if "regime_switching" in slot_stock_values:
                     slot_stock_values["regime_switching"] += qty * price
@@ -123,14 +119,12 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
         # ------------------ (Part A) 보유 종목 실시간 감시 및 매도 주문 ------------------
         holdings_to_check = list(holdings)
         for h in holdings_to_check:
-            parsed = None
-            for slot_key, cfg in slots_cfg.items():
-                if h.ticker.startswith(cfg["prefix"]):
-                    parsed = (slot_key, h.ticker[len(cfg["prefix"]):])
-                    break
-            if not parsed:
+            slot_key = h.strategy_type
+            clean_ticker = h.ticker
+            
+            if slot_key not in strategies:
                 continue
-            slot_key, clean_ticker = parsed
+                
             strategy_instance = strategies[slot_key]
             
             if clean_ticker not in current_prices:
@@ -164,12 +158,13 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
                 is_breached = True
                 breach_reason = f"동적 트레일링 스탑 이탈 (-{trailing_stop_pct:.2f}% 돌파 | 수익률: {profit_rate:.2f}%)"
             
+            cooldown_key = (h.ticker, h.strategy_type)
             if is_breached:
-                breach_counts[h.ticker] = breach_counts.get(h.ticker, 0) + 1
-                if breach_counts[h.ticker] >= 2:
+                breach_counts[cooldown_key] = breach_counts.get(cooldown_key, 0) + 1
+                if breach_counts[cooldown_key] >= 2:
                     sell_reason = breach_reason + " [2회 연속 이탈 확정]"
             else:
-                breach_counts.pop(h.ticker, None)
+                breach_counts.pop(cooldown_key, None)
                 
             if not sell_reason and profit_rate >= strategy_instance.min_smart_exit_profit and is_smart_exit:
                 sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
@@ -201,12 +196,13 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
                     "quantity": sell_qty,
                     "realized_pnl": realized_pnl,
                     "return_rate": calc_return_rate,
-                    "reason": sell_reason
+                    "reason": sell_reason,
+                    "strategy_type": h.strategy_type
                 })
                 
-                sell_cooldowns[h.ticker] = t
+                sell_cooldowns[cooldown_key] = t
                 holdings.remove(h)
-                breach_counts.pop(h.ticker, None)
+                breach_counts.pop(cooldown_key, None)
 
         # ------------------ (Part B) 슬롯별 신규 매수 기회 검사 및 분할 매수 ------------------
         # Focusing 필터 적용 (RVOL >= 2.0 대량 수급 매집봉 5~10개 압축 선별)
@@ -240,10 +236,9 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
             strategy_instance = strategies[slot_key]
             slot_cash_usd = slot_info["cash_balance"]
             slot_total_asset_usd = slot_info["total_asset"]
-            slot_prefix = slot_info["prefix"]
             
             # 슬롯별 최대 3종목 가드
-            slot_holdings_count = sum(1 for x in holdings if x.ticker.startswith(slot_prefix))
+            slot_holdings_count = sum(1 for x in holdings if x.strategy_type == slot_key)
             if slot_holdings_count >= 3:
                 continue
                 
@@ -260,8 +255,7 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
                 score = strategy_instance.calculate_score(row, sentiment, is_entry=True)
                 
                 if score >= cutoff_score:
-                    prefixed_ticker = f"{slot_prefix}{clean_ticker.upper()}"
-                    existing_holding = next((x for x in holdings if x.ticker == prefixed_ticker), None)
+                    existing_holding = next((x for x in holdings if x.ticker == clean_ticker and x.strategy_type == slot_key), None)
                     
                     proposed_alloc_factor = 1.0
                     next_stage = 3
@@ -298,7 +292,8 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
                             next_stage = 3
 
                     # Whipsaw 방지 쿨다운 검사
-                    last_sell = sell_cooldowns.get(prefixed_ticker)
+                    cooldown_key = (clean_ticker, slot_key)
+                    last_sell = sell_cooldowns.get(cooldown_key)
                     if last_sell:
                         cooldown_hours = 2.0
                         time_diff = (pd.to_datetime(t) - pd.to_datetime(last_sell)).total_seconds() / 3600.0
@@ -351,25 +346,27 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
                             existing_holding.highest_price = max(existing_holding.highest_price, current_price)
                         else:
                             holdings.append(MockHolding(
-                                ticker=prefixed_ticker,
+                                ticker=clean_ticker,
                                 ticker_name=clean_ticker,
                                 avg_price=current_price,
                                 quantity=final_qty,
                                 highest_price=current_price,
                                 regime_mode=sentiment,
-                                buy_stage=next_stage
+                                buy_stage=next_stage,
+                                strategy_type=slot_key
                             ))
                             
                         # BUY 로그 기록
                         trade_logs.append({
                             "timestamp": t.strftime('%Y-%m-%d %H:%M:%S') if hasattr(t, 'strftime') else str(t),
-                            "ticker": prefixed_ticker,
+                            "ticker": clean_ticker,
                             "trade_type": "BUY",
                             "price": current_price,
                             "quantity": final_qty,
                             "realized_pnl": 0.0,
                             "return_rate": 0.0,
-                            "reason": f"Stage {next_stage} Entry/Add"
+                            "reason": f"Stage {next_stage} Entry/Add",
+                            "strategy_type": slot_key
                         })
 
     # 시뮬레이션 통계 지표 연산
@@ -397,7 +394,7 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
         t_type = log["trade_type"]
         pnl = log["realized_pnl"]
         
-        clean_t = ticker.split('_')[-1]
+        clean_t = ticker
         
         if clean_t not in stats:
             stats[clean_t] = {"buys": 0, "sells": 0, "pnl": 0.0}
@@ -424,14 +421,31 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
         "equity_curve": chart_equity,
         **calculate_performance_metrics(equity_curve, initial_value=initial_cash),
     }
-
-async def run_dynamic_tournament(start_date: str, end_date: str) -> List[Dict[str, Any]]:
+ 
+async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: List[str] = None, db = None) -> List[Dict[str, Any]]:
     """과거 지정된 특정 기간(start_date ~ end_date) 동안 5대 전략 토너먼트 배틀을 실행하고 그 통계와 자산 곡선을 캐시/반환합니다."""
     
+    # 💡 [요구사항 반영] tickers_list가 없고 db 세션이 주어졌다면,
+    # 과거 '매수/매도 이력(TradeLog)', '현재 보유종목(Holding)', '관심종목(WatchList)'의 합집합을 구해 중복제거한 종목들로 백테스트를 동적 가동합니다.
+    if not tickers_list and db:
+        try:
+            from app.core.models import WatchList, Holding, TradeLog
+            watch_tickers = [w.ticker for w in db.query(WatchList.ticker).all() if w.ticker]
+            holding_tickers = [h.ticker for h in db.query(Holding.ticker).all() if h.ticker]
+            trade_tickers = [t.ticker for t in db.query(TradeLog.ticker).all() if t.ticker]
+            
+            raw_tickers = set(watch_tickers + holding_tickers + trade_tickers)
+            clean_tickers = {t.strip().upper() for t in raw_tickers if t}
+            tickers_list = list(clean_tickers)
+            logger.info(f"[Backtest Tournament] Dynamically extracted {len(tickers_list)} tickers from Watchlist, Holdings, and TradeLogs: {tickers_list}")
+        except Exception as e:
+            logger.error(f"[Backtest Tournament] Failed to extract tickers dynamically: {e}", exc_info=True)
+
     # 디스크 캐시 체크
+    tickers_key = "_".join(sorted(tickers_list)) if tickers_list else "default"
     cache_dir = r"C:\Users\Im\.gemini\antigravity\brain\3a7f1012-f111-46d8-8da9-7971ca6063b4\scratch\backtest_cache"
     os.makedirs(cache_dir, exist_ok=True)
-    cache_path = os.path.join(cache_dir, f"tournament_v2_{start_date}_{end_date}.json")
+    cache_path = os.path.join(cache_dir, f"tournament_v2_{start_date}_{end_date}_{tickers_key}.json")
     
     if os.path.exists(cache_path):
         try:
@@ -440,7 +454,11 @@ async def run_dynamic_tournament(start_date: str, end_date: str) -> List[Dict[st
         except Exception as e:
             logger.warning(f"Cache loading failed, falling back to live calc: {e}")
             
-    tickers_list = ["AKAN", "WNW", "ASTC", "SDA", "HUBC", "MNTS", "ITP", "SES", "AEHL", "ODYS", "PRFX"]
+    if not tickers_list:
+        from app.scanner.discovery import get_seed_tickers
+        tickers_list, _ = await get_seed_tickers()
+        if not tickers_list:
+            tickers_list = ["NVDA", "AAPL", "MSFT", "TSLA", "AMD"]
     interval = "1h"
     cash = 10000.0
 

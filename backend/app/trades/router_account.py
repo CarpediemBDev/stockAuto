@@ -177,7 +177,7 @@ async def force_liquidate(
 
     try:
         for h in holdings:
-            clean_ticker = h.ticker.rsplit("_", 1)[-1]
+            clean_ticker = h.ticker
 
             # 실시간 청산 가격 조회 (데이터 프로바이더 연동으로 결합도 해제)
             try:

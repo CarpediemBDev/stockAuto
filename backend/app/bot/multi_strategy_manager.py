@@ -24,8 +24,7 @@ class MultiStrategyManager:
         }
     }
     
-    # 🎯 타겟팅할 11대 최정예 급등주/변동성 포트폴리오 (낚시용 종목 포함 완벽 방어 검증용)
-    TARGET_TICKERS = {"AKAN", "WNW", "ASTC", "SDA", "HUBC", "MNTS", "ITP", "SES", "AEHL", "ODYS", "PRFX"}
+
 
     def _get_prefix_for_strategy(self, strategy_type: str) -> str:
         prefix_map = {
@@ -133,37 +132,12 @@ class MultiStrategyManager:
         }
         logger.info(f"[MultiStrategyManager] Segmented {len(self.SLOTS)}-Slot Modular Core Engine initialized successfully for strategy_type: {strategy_type}")
 
-    def get_slot_by_holding_ticker(self, holding_ticker: str) -> tuple[str, str] | None:
-        """
-        보유 종목의 접두사(Prefix)를 분석하여 해당하는 슬롯 키와 순수 티커를 반환합니다.
-        예: 'ASQS_ASTC' -> ('asqs', 'ASTC')
-        접두사가 없거나 올바르지 않으면 None을 반환합니다.
-        """
-        if not holding_ticker:
-            return None
-            
-        for slot_key, cfg in self.SLOTS.items():
-            prefix = cfg["prefix"]
-            if holding_ticker.startswith(prefix):
-                clean_ticker = holding_ticker[len(prefix):]
-                return slot_key, clean_ticker
-        return None
-
-    def get_prefix_for_slot(self, slot_key: str) -> str:
-        """슬롯 키에 해당하는 접두사를 반환합니다."""
-        return self.SLOTS.get(slot_key, {}).get("prefix", "")
-
-    def make_prefixed_ticker(self, slot_key: str, clean_ticker: str) -> str:
-        """순수 티커와 슬롯 키를 결합하여 접두사가 붙은 티커를 생성합니다."""
-        prefix = self.get_prefix_for_slot(slot_key)
-        return f"{prefix}{clean_ticker.upper()}"
-
     def calculate_slots_allocation(self, total_asset_usd: float, cash_balance_usd: float, holdings: list, sentiment: str = "BULLISH", session: str = "REGULAR_MARKET") -> dict:
         """
         각 슬롯별로 현재의 주식 평가액과 격리된 예수금을 수학적 보존 법칙 하에 정밀 계산합니다.
         
         - total_asset_usd: 계좌의 총 자산 가치 (현금 + 주식 평가금)
-         - cash_balance_usd: 계좌의 총 실제 가용 현금(예수금)
+        - cash_balance_usd: 계좌의 총 실제 가용 현금(예수금)
         - holdings: 데이터베이스의 Holdings 레코드 리스트
         - sentiment: 현재 시장 레짐 (BULLISH, BEARISH, NEUTRAL)
         - session: 현재 시장 세션 (PRE_MARKET, REGULAR_MARKET, AFTER_HOURS, CLOSED)
@@ -172,18 +146,15 @@ class MultiStrategyManager:
         slot_stock_values = {slot_key: 0.0 for slot_key in self.SLOTS}
         
         for h in holdings:
-            ticker = h.ticker
             qty = h.quantity
             # 현재 평가가치는 highest_price 또는 avg_price로 우선 활용하고, 스케너 루프에서 보정 가능
             price = getattr(h, 'current_price', None) or h.highest_price or h.avg_price
             
-            parsed = self.get_slot_by_holding_ticker(ticker)
-            if parsed:
-                slot_key, _ = parsed
-                if slot_key in slot_stock_values:
-                    slot_stock_values[slot_key] += qty * price
+            slot_key = h.strategy_type
+            if slot_key in slot_stock_values:
+                slot_stock_values[slot_key] += qty * price
             else:
-                # 레거시 일반 종목의 경우 기본적으로 첫번째 슬롯에 가산
+                # 매핑되지 않는 경우 기본적으로 첫번째 슬롯에 가산
                 first_slot_key = list(self.SLOTS.keys())[0]
                 if first_slot_key in slot_stock_values:
                     slot_stock_values[first_slot_key] += qty * price

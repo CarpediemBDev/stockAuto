@@ -15,7 +15,8 @@ import app.watchlist.router as watchlist_router_module
 from app.auth.router import router as auth_router
 from app.core.database import Base, get_db
 from app.core.exceptions import StockAutoException, stock_auto_exception_handler
-from app.core.models import User, UserSettings, WatchList, BrokerCredential
+from app.core.models import User, UserSettings, WatchList, BrokerCredential, RefreshToken
+from app.core.security import hash_refresh_token
 from app.watchlist.router import router as watchlist_router
 
 
@@ -70,7 +71,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
     config = make_alembic_config(db_url)
 
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "93ff846b6e0a"
+    assert script.get_current_head() == "cc508504ea6c"
 
     command.upgrade(config, "head")
 
@@ -101,6 +102,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
         swing_prediction_columns = {column["name"] for column in inspector.get_columns("swing_prediction_snapshots")}
         assert "strategy_type" in user_settings_columns
         assert "role" in user_columns
+        assert "token_version" in user_columns
         assert {"failed_login_attempts", "locked_until"} <= user_columns
         assert {"user_id", "token", "expires_at", "is_revoked"} <= refresh_token_columns
         assert {
@@ -184,10 +186,12 @@ def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, int
     with TestClient(integration_app) as client:
         signup_response = client.post(
             "/api/v1/auth/signup",
-            json={"username": "tester", "password": "pass1234"},
+            json={"username": "tester", "password": "pass12345678"},
         )
         assert signup_response.status_code == 201
         assert signup_response.cookies.get("refresh_token")
+        assert "refresh_token" not in signup_response.json()
+        assert signup_response.json()["role"] == "USER"
         token = signup_response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
 
@@ -196,6 +200,7 @@ def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, int
         assert me_response.json() == {
             "id": 1,
             "username": "tester",
+            "role": "USER",
             "trade_mode": "SIMULATED",
             "broker_provider": None,
             "telegram_enabled": False,
@@ -225,6 +230,7 @@ def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, int
         refresh_response = client.post("/api/v1/auth/refresh")
         assert refresh_response.status_code == 200
         assert refresh_response.json()["username"] == "tester"
+        assert "refresh_token" not in refresh_response.json()
 
         refresh_token = signup_response.cookies.get("refresh_token")
         refresh_as_access = client.get(
@@ -240,6 +246,85 @@ def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, int
         assert db.query(WatchList).count() == 1
     finally:
         db.close()
+
+
+def test_refresh_cookie_rotation_hash_storage_and_origin_guard(integration_app, test_session_factory):
+    with TestClient(integration_app) as client:
+        signup_response = client.post(
+            "/api/v1/auth/signup",
+            json={"username": "rotation_tester", "password": "strongpassword123"},
+        )
+        assert signup_response.status_code == 201
+        original_token = signup_response.cookies.get("refresh_token")
+        assert original_token
+
+        db = test_session_factory()
+        try:
+            stored_token = db.query(RefreshToken).filter(
+                RefreshToken.user_id == 1,
+                RefreshToken.is_revoked.is_(False),
+            ).one()
+            assert stored_token.token == hash_refresh_token(original_token)
+            assert stored_token.token != original_token
+        finally:
+            db.close()
+
+        rejected_origin = client.post(
+            "/api/v1/auth/refresh",
+            headers={"Origin": "https://attacker.example"},
+        )
+        assert rejected_origin.status_code == 403
+
+        refresh_response = client.post("/api/v1/auth/refresh")
+        assert refresh_response.status_code == 200
+        rotated_token = refresh_response.cookies.get("refresh_token")
+        assert rotated_token
+        assert rotated_token != original_token
+
+    with TestClient(integration_app) as replay_client:
+        replay_client.cookies.set(
+            "refresh_token",
+            original_token,
+            path="/api/v1/auth",
+        )
+        replay_response = replay_client.post("/api/v1/auth/refresh")
+        assert replay_response.status_code == 401
+
+
+def test_change_password_revokes_refresh_and_access_tokens(integration_app):
+    with TestClient(integration_app) as client:
+        signup_response = client.post(
+            "/api/v1/auth/signup",
+            json={"username": "password_tester", "password": "initialpassword123"},
+        )
+        assert signup_response.status_code == 201
+        access_token = signup_response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        change_response = client.post(
+            "/api/v1/auth/change-password",
+            json={
+                "old_password": "initialpassword123",
+                "new_password": "replacementpassword123",
+            },
+            headers=headers,
+        )
+        assert change_response.status_code == 200
+
+        old_access_response = client.get("/api/v1/auth/me", headers=headers)
+        assert old_access_response.status_code == 401
+
+        old_refresh_response = client.post("/api/v1/auth/refresh")
+        assert old_refresh_response.status_code == 401
+
+
+def test_signup_rejects_short_password(integration_app):
+    with TestClient(integration_app) as client:
+        response = client.post(
+            "/api/v1/auth/signup",
+            json={"username": "short_password", "password": "abcd"},
+        )
+        assert response.status_code == 422
 
 
 def test_brute_force_defense_and_lockout_reset(integration_app, test_session_factory):

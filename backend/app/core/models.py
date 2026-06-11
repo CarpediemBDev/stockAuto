@@ -34,6 +34,7 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     created_at = Column(AwareDateTime, default=utc_now_aware)
     role = Column(String, default="USER", nullable=False)
+    token_version = Column(Integer, default=0, nullable=False)
 
     # 보안 강화를 위한 로그인 잠금 및 브루트포스 방어 필드
     failed_login_attempts = Column(Integer, default=0, nullable=False)
@@ -82,7 +83,6 @@ class UserSettings(Base):
 
     strategy_type = Column(String, default="regime_switching", nullable=False)
 
-
     updated_at = Column(AwareDateTime, default=utc_now_aware, onupdate=utc_now_aware)
 
     # Relationships
@@ -128,6 +128,7 @@ class TradeLog(Base):
     signal_score = Column(Integer, nullable=True)   # ⭐ v2.0 매수 당시의 스캔 점수
     realized_pnl = Column(Float, nullable=True)     # ⭐ v2.0 Phase 22 매도 시 실현 손익 (수익금)
     return_rate = Column(Float, nullable=True)      # ⭐ v2.0 Phase 22 매도 시 수익률 (%)
+    strategy_type = Column(String, default="regime_switching", nullable=False)
     executed_at = Column(AwareDateTime, default=utc_now_aware)
 
     # Relationships
@@ -146,13 +147,14 @@ class Holding(Base):
     highest_price = Column(Float) # 구매 후 최고가 (트레일링 스탑 기준점)
     regime_mode = Column(String, nullable=True)     # ⭐ v2.0 진입 당시 장세 레짐
     buy_stage = Column(Integer, default=1)          # ⭐ v2.0 후지모토 시게루식 피라미딩 단계 (1, 2, 3단계)
+    strategy_type = Column(String, default="regime_switching", nullable=False)
     updated_at = Column(AwareDateTime, default=utc_now_aware, onupdate=utc_now_aware)
 
     # Relationships
     user = relationship("User", back_populates="holdings")
 
-    # 동일 사용자가 동일 티커를 이중으로 보유하는 것을 물리적으로 차단
-    __table_args__ = (UniqueConstraint('user_id', 'ticker', name='_user_ticker_uc'),)
+    # 동일 사용자가 동일 전략 하에서 동일 티커를 이중으로 보유하는 것을 물리적으로 차단
+    __table_args__ = (UniqueConstraint('user_id', 'ticker', 'strategy_type', name='_user_ticker_strategy_uc'),)
 
 class BrokerOrder(Base):
     """증권사 주문의 누적 체결 상태와 DB 반영 수량을 보존하는 영구 원장."""
@@ -167,6 +169,7 @@ class BrokerOrder(Base):
     side = Column(String, nullable=False)
     ticker = Column(String, nullable=False)
     prefixed_ticker = Column(String, nullable=False)
+    strategy_type = Column(String, default="regime_switching", nullable=False)
     ticker_name = Column(String, nullable=True)
     exchange_code = Column(String, nullable=True)
     order_division = Column(String, nullable=True)

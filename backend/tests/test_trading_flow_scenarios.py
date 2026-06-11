@@ -143,7 +143,7 @@ class FakeStrategy:
 
 
 class FakeStrategyManager:
-    SLOTS = {"slot": {"prefix": "slot_"}}
+    SLOTS = {"slot": {"prefix": "slot_", "weight": 1.0, "name": "FakeStrategy", "strategy_key": "regime_switching"}}
 
     def __init__(self, strategy):
         self.strategies = {"slot": strategy}
@@ -160,15 +160,6 @@ class FakeStrategyManager:
             }
         }
 
-    def make_prefixed_ticker(self, slot_key, ticker):
-        return f"{slot_key}_{ticker}"
-
-    def get_slot_by_holding_ticker(self, ticker):
-        if "_" not in ticker:
-            return None
-        slot_key, clean_ticker = ticker.split("_", 1)
-        return slot_key, clean_ticker
-
 
 def make_user_settings():
     return SimpleNamespace(
@@ -177,7 +168,6 @@ def make_user_settings():
         trade_mode="SIMULATED",
         strategy_type="regime_switching",
     )
-
 
 
 def make_signal(price=100.0):
@@ -234,12 +224,13 @@ async def test_run_user_trading_flow_records_successful_new_buy(monkeypatch):
     assert len(fake_db.holdings) == 1
 
     holding = fake_db.holdings[0]
-    assert holding.ticker == "slot_AAPL"
+    assert holding.ticker == "AAPL"
+    assert holding.strategy_type == "slot"
     assert holding.ticker_name == "Apple"
     assert holding.avg_price == 100.0
     assert holding.quantity == 10
     assert holding.buy_stage == 3
-    assert any("SUCCESS: slot_AAPL purchased" in message for _level, message in logs)
+    assert any("SUCCESS: AAPL (slot) purchased" in message for _level, message in logs)
     assert any("BUY-1" in message for _user_id, message in messages)
 
 
@@ -268,7 +259,7 @@ async def test_run_user_trading_flow_skips_holding_write_when_buy_fails(monkeypa
     assert fake_db.holdings == []
     assert not any(isinstance(item, Holding) for item in fake_db.added)
     assert messages == []
-    assert any(level == "ERROR" and "BUY FAILED: slot_AAPL | broker rejected" in message for level, message in logs)
+    assert any(level == "ERROR" and "BUY FAILED: AAPL (slot) | broker rejected" in message for level, message in logs)
 
 
 @pytest.mark.asyncio
@@ -345,7 +336,8 @@ async def test_run_user_trading_flow_records_successful_sell(monkeypatch):
     signal = make_signal()
     holding = Holding(
         user_id=1,
-        ticker="slot_AAPL",
+        ticker="AAPL",
+        strategy_type="slot",
         ticker_name="Apple",
         avg_price=120.0,
         quantity=3,
@@ -371,7 +363,7 @@ async def test_run_user_trading_flow_records_successful_sell(monkeypatch):
         FakeStrategy(entry_score=0),
     )
 
-    scheduler.BREACH_COUNT_CACHE[(1, "slot_AAPL")] = 1
+    scheduler.BREACH_COUNT_CACHE[(1, "AAPL", "slot")] = 1
     try:
         await scheduler.run_user_trading_flow(
             user_id=1,
@@ -382,7 +374,7 @@ async def test_run_user_trading_flow_records_successful_sell(monkeypatch):
             session="REGULAR_MARKET",
         )
     finally:
-        scheduler.BREACH_COUNT_CACHE.pop((1, "slot_AAPL"), None)
+        scheduler.BREACH_COUNT_CACHE.pop((1, "AAPL", "slot"), None)
 
     assert fake_broker.sell_calls == [("AAPL", 3, 100.0)]
     assert fake_broker.buy_calls == []
@@ -391,13 +383,14 @@ async def test_run_user_trading_flow_records_successful_sell(monkeypatch):
     assert len(fake_db.trade_logs) == 1
 
     trade_log = fake_db.trade_logs[0]
-    assert trade_log.ticker == "slot_AAPL"
+    assert trade_log.ticker == "AAPL"
+    assert trade_log.strategy_type == "slot"
     assert trade_log.trade_type == "SELL"
     assert trade_log.price == 100.0
     assert trade_log.quantity == 3
     assert trade_log.order_no == "SELL-1"
     assert trade_log.realized_pnl < 0
-    assert any("SUCCESS: slot_AAPL sold" in message for _level, message in logs)
+    assert any("SUCCESS: AAPL (slot) sold" in message for _level, message in logs)
     assert any("SELL-1" in message for _user_id, message in messages)
 
 
@@ -407,7 +400,8 @@ async def test_run_user_trading_flow_stops_bot_without_deleting_unconfirmed_sell
     user_settings = make_user_settings()
     holding = Holding(
         user_id=1,
-        ticker="slot_AAPL",
+        ticker="AAPL",
+        strategy_type="slot",
         ticker_name="Apple",
         avg_price=120.0,
         quantity=5,
@@ -443,7 +437,7 @@ async def test_run_user_trading_flow_stops_bot_without_deleting_unconfirmed_sell
         FakeStrategy(entry_score=0),
     )
 
-    scheduler.BREACH_COUNT_CACHE[(1, "slot_AAPL")] = 1
+    scheduler.BREACH_COUNT_CACHE[(1, "AAPL", "slot")] = 1
     try:
         await scheduler.run_user_trading_flow(
             user_id=1,
@@ -454,7 +448,7 @@ async def test_run_user_trading_flow_stops_bot_without_deleting_unconfirmed_sell
             session="REGULAR_MARKET",
         )
     finally:
-        scheduler.BREACH_COUNT_CACHE.pop((1, "slot_AAPL"), None)
+        scheduler.BREACH_COUNT_CACHE.pop((1, "AAPL", "slot"), None)
 
     assert fake_db.holdings == [holding]
     assert fake_db.deleted == []
@@ -469,7 +463,8 @@ async def test_run_user_trading_flow_keeps_remaining_quantity_after_partial_sell
     user_settings = make_user_settings()
     holding = Holding(
         user_id=1,
-        ticker="slot_AAPL",
+        ticker="AAPL",
+        strategy_type="slot",
         ticker_name="Apple",
         avg_price=120.0,
         quantity=5,
@@ -505,7 +500,7 @@ async def test_run_user_trading_flow_keeps_remaining_quantity_after_partial_sell
         FakeStrategy(entry_score=0),
     )
 
-    scheduler.BREACH_COUNT_CACHE[(1, "slot_AAPL")] = 1
+    scheduler.BREACH_COUNT_CACHE[(1, "AAPL", "slot")] = 1
     try:
         await scheduler.run_user_trading_flow(
             user_id=1,
@@ -516,7 +511,7 @@ async def test_run_user_trading_flow_keeps_remaining_quantity_after_partial_sell
             session="REGULAR_MARKET",
         )
     finally:
-        scheduler.BREACH_COUNT_CACHE.pop((1, "slot_AAPL"), None)
+        scheduler.BREACH_COUNT_CACHE.pop((1, "AAPL", "slot"), None)
 
     assert holding.quantity == 3
     assert fake_db.deleted == []

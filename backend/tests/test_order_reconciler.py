@@ -54,7 +54,8 @@ def test_partial_buy_is_applied_idempotently_and_resumes_after_final_fill(
         db_settings,
         side="BUY",
         ticker="AAPL",
-        prefixed_ticker="slot_AAPL",
+        prefixed_ticker="AAPL",
+        strategy_type="episodic_pivot",
         ticker_name="Apple",
         requested_qty=5,
         submitted_price=100.0,
@@ -74,6 +75,8 @@ def test_partial_buy_is_applied_idempotently_and_resumes_after_final_fill(
     assert application.is_unresolved is True
     assert db_settings.is_running is False
     holding = db.query(Holding).filter(Holding.user_id == db_settings.user_id).one()
+    assert holding.ticker == "AAPL"
+    assert holding.strategy_type == "episodic_pivot"
     assert holding.quantity == 2
     assert holding.avg_price == 100.0
 
@@ -108,6 +111,8 @@ def test_partial_buy_is_applied_idempotently_and_resumes_after_final_fill(
     final_settings = check_db.query(UserSettings).one()
     assert final_order.status == "FILLED"
     assert final_order.applied_filled_qty == 5
+    assert final_holding.ticker == "AAPL"
+    assert final_holding.strategy_type == "episodic_pivot"
     assert final_holding.quantity == 5
     assert final_holding.avg_price == pytest.approx(100.6)
     assert final_settings.is_running is True
@@ -122,7 +127,8 @@ def test_partial_sell_uses_only_fill_delta_and_manual_stop_disables_auto_resume(
     db, db_settings = create_user_settings(session_factory)
     db.add(Holding(
         user_id=db_settings.user_id,
-        ticker="slot_AAPL",
+        ticker="AAPL",
+        strategy_type="episodic_pivot",
         ticker_name="Apple",
         avg_price=100.0,
         quantity=10,
@@ -137,7 +143,8 @@ def test_partial_sell_uses_only_fill_delta_and_manual_stop_disables_auto_resume(
         db_settings,
         side="SELL",
         ticker="AAPL",
-        prefixed_ticker="slot_AAPL",
+        prefixed_ticker="AAPL",
+        strategy_type="episodic_pivot",
         ticker_name="Apple",
         requested_qty=10,
         submitted_price=110.0,
@@ -155,6 +162,9 @@ def test_partial_sell_uses_only_fill_delta_and_manual_stop_disables_auto_resume(
     assert application.applied_qty == 4
     assert application.remaining_qty == 6
     assert db.query(TradeLog).count() == 1
+    trade_log = db.query(TradeLog).one()
+    assert trade_log.ticker == "AAPL"
+    assert trade_log.strategy_type == "episodic_pivot"
 
     order = db.query(BrokerOrder).one()
     transient_error = reconciler.apply_broker_report(
@@ -203,7 +213,8 @@ def test_unresolved_order_guard_detects_pending_order(session_factory):
         db_settings,
         side="BUY",
         ticker="MSFT",
-        prefixed_ticker="slot_MSFT",
+        prefixed_ticker="MSFT",
+        strategy_type="regime_switching",
         ticker_name="Microsoft",
         requested_qty=1,
         submitted_price=400.0,

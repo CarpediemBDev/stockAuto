@@ -77,10 +77,13 @@ def _mark_integrity_error(order: BrokerOrder, message: str) -> FillApplication:
     return FillApplication(order=order, error=message)
 
 
+
+
 def _apply_buy_delta(db, order: BrokerOrder, delta: int, filled_price: float) -> tuple[bool, int]:
     holding = db.query(Holding).filter(
         Holding.user_id == order.user_id,
-        Holding.ticker == order.prefixed_ticker,
+        Holding.ticker == order.ticker,
+        Holding.strategy_type == order.strategy_type,
     ).first()
     if holding:
         old_qty = holding.quantity
@@ -96,7 +99,8 @@ def _apply_buy_delta(db, order: BrokerOrder, delta: int, filled_price: float) ->
 
     db.add(Holding(
         user_id=order.user_id,
-        ticker=order.prefixed_ticker,
+        ticker=order.ticker,
+        strategy_type=order.strategy_type,
         ticker_name=order.ticker_name,
         avg_price=filled_price,
         quantity=delta,
@@ -110,14 +114,15 @@ def _apply_buy_delta(db, order: BrokerOrder, delta: int, filled_price: float) ->
 def _apply_sell_delta(db, order: BrokerOrder, delta: int, filled_price: float) -> tuple[int, float, float]:
     holding = db.query(Holding).filter(
         Holding.user_id == order.user_id,
-        Holding.ticker == order.prefixed_ticker,
+        Holding.ticker == order.ticker,
+        Holding.strategy_type == order.strategy_type,
     ).first()
     if not holding:
-        raise ValueError(f"Holding {order.prefixed_ticker} does not exist for sell reconciliation.")
+        raise ValueError(f"Holding {order.ticker} ({order.strategy_type}) does not exist for sell reconciliation.")
     if delta > holding.quantity:
         raise ValueError(
             f"Sell fill delta {delta} exceeds DB holding quantity {holding.quantity} "
-            f"for {order.prefixed_ticker}."
+            f"for {order.ticker} ({order.strategy_type})."
         )
 
     buy_gross = holding.avg_price * delta
@@ -130,7 +135,8 @@ def _apply_sell_delta(db, order: BrokerOrder, delta: int, filled_price: float) -
 
     db.add(TradeLog(
         user_id=order.user_id,
-        ticker=order.prefixed_ticker,
+        ticker=order.ticker,
+        strategy_type=order.strategy_type,
         ticker_name=order.ticker_name or holding.ticker_name,
         trade_type="SELL",
         price=filled_price,
@@ -263,6 +269,7 @@ def create_order_intent(
     side: str,
     ticker: str,
     prefixed_ticker: str,
+    strategy_type: str = "regime_switching",
     ticker_name: str | None,
     requested_qty: int,
     submitted_price: float,
@@ -284,6 +291,7 @@ def create_order_intent(
         side=side.upper(),
         ticker=ticker,
         prefixed_ticker=prefixed_ticker,
+        strategy_type=strategy_type,
         ticker_name=ticker_name,
         exchange_code=exchange_code,
         order_division=order_division,
@@ -364,6 +372,7 @@ def record_submitted_order(
     side: str,
     ticker: str,
     prefixed_ticker: str,
+    strategy_type: str = "regime_switching",
     ticker_name: str | None,
     requested_qty: int,
     submitted_price: float,
@@ -392,6 +401,7 @@ def record_submitted_order(
             side=side.upper(),
             ticker=ticker,
             prefixed_ticker=prefixed_ticker,
+            strategy_type=strategy_type,
             ticker_name=ticker_name,
             source="LEGACY_POST_SUBMIT",
             status="SUBMITTED",

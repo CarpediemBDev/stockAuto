@@ -478,7 +478,9 @@ def get_system_logs(
 async def get_backtest_tournament_results(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    tickers: Optional[str] = None,
     current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
 ):
     if not start_date or not end_date:
         import json
@@ -497,7 +499,8 @@ async def get_backtest_tournament_results(
 
     try:
         from app.admin.backtest_runner import run_dynamic_tournament
-        return await run_dynamic_tournament(start_date, end_date)
+        parsed_tickers = [t.strip().upper() for t in tickers.split(",")] if tickers else None
+        return await run_dynamic_tournament(start_date, end_date, tickers_list=parsed_tickers, db=db)
     except Exception as exc:
         raise HTTPException(
             status_code=500,

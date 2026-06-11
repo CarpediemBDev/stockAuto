@@ -273,19 +273,14 @@ def prepare_trading_flow_context(
     )
 
 
-def migrate_legacy_holdings(ctx: TradingFlowContext) -> None:
-    for h in ctx.holdings:
-        if not ctx.ms_manager.get_slot_by_holding_ticker(h.ticker):
-            legacy_ticker = h.ticker
-            h.ticker = ctx.ms_manager.make_prefixed_ticker(ctx.first_slot_key, legacy_ticker)
-            ctx.db.commit()
-            log_action(ctx.db, ctx.user_id, f"[Migration Guard] Legacy holding migrated: {legacy_ticker} -> {h.ticker}", "INFO")
-
-
 async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
     try:
         real_holdings = await safe_broker_call(ctx.broker.get_holdings, exchange_rate=ctx.exchange_rate)
-        db_holdings_map = {db_h.ticker: db_h for db_h in ctx.holdings}
+        # 티커별 DB 보유 레코드 리스트 그룹화
+        db_holdings_by_ticker = {}
+        for db_h in ctx.holdings:
+            db_holdings_by_ticker.setdefault(db_h.ticker, []).append(db_h)
+
         real_ticker_set = set()
 
         for rh in real_holdings:
@@ -298,37 +293,48 @@ async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
                 continue
 
             real_ticker_set.add(r_ticker)
-            found_in_db = False
 
-            for slot_key, _cfg in ctx.ms_manager.SLOTS.items():
-                prefixed = ctx.ms_manager.make_prefixed_ticker(slot_key, r_ticker)
-                if prefixed in db_holdings_map:
-                    found_in_db = True
-                    db_h = db_holdings_map[prefixed]
-                    if db_h.quantity != r_qty:
-                        log_action(ctx.db, ctx.user_id, f"[Sync Guard] Quantity discrepancy fixed for {prefixed}: {db_h.quantity} -> {r_qty}", "WARNING")
-                        db_h.quantity = r_qty
-                        ctx.db.commit()
-                    break
+            # 해당 티커의 DB 보유 리스트 및 총 수량 계산
+            db_hs = db_holdings_by_ticker.get(r_ticker, [])
+            db_total_qty = sum(h.quantity for h in db_hs)
 
-            if not found_in_db:
-                last_buy = ctx.db.query(TradeLog).filter(
-                    TradeLog.user_id == ctx.user_id,
-                    TradeLog.ticker.like(f"%_{r_ticker}"),
-                    TradeLog.trade_type == "BUY"
-                ).order_by(TradeLog.executed_at.desc()).first()
+            if db_total_qty == r_qty:
+                # 수량이 완전히 일치하면 동기화할 필요가 없음
+                continue
 
-                target_prefixed_ticker = last_buy.ticker if last_buy else ctx.ms_manager.make_prefixed_ticker(ctx.first_slot_key, r_ticker)
+            if db_total_qty > 0:
+                # 수량 불일치 발생 시, 첫 번째 전략의 수량을 차이만큼 가감하여 보정
+                diff = r_qty - db_total_qty
+                target_db_h = db_hs[0]
+                old_qty = target_db_h.quantity
+                target_db_h.quantity += diff
+                ctx.db.commit()
                 log_action(
                     ctx.db,
                     ctx.user_id,
-                    f"[Self-Healing] Phantom holding detected in account: {r_ticker} (Qty: {r_qty}). Restoring DB record as {target_prefixed_ticker}!",
+                    f"[Sync Guard] Quantity discrepancy fixed for {r_ticker} ({target_db_h.strategy_type}): {old_qty} -> {target_db_h.quantity} (Total: {r_qty})",
+                    "WARNING"
+                )
+            else:
+                # DB에 아예 보유 정보가 없는 경우 (Phantom holding) -> 신규 복구
+                last_buy = ctx.db.query(TradeLog).filter(
+                    TradeLog.user_id == ctx.user_id,
+                    TradeLog.ticker == r_ticker,
+                    TradeLog.trade_type == "BUY"
+                ).order_by(TradeLog.executed_at.desc()).first()
+
+                target_strategy = last_buy.strategy_type if last_buy else ctx.first_slot_key
+                log_action(
+                    ctx.db,
+                    ctx.user_id,
+                    f"[Self-Healing] Phantom holding detected in account: {r_ticker} (Qty: {r_qty}). Restoring DB record under strategy {target_strategy}!",
                     "ERROR"
                 )
 
                 ctx.db.add(Holding(
                     user_id=ctx.user_id,
-                    ticker=target_prefixed_ticker,
+                    ticker=r_ticker,
+                    strategy_type=target_strategy,
                     ticker_name=r_name,
                     avg_price=r_price,
                     quantity=r_qty,
@@ -339,13 +345,10 @@ async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
                 ctx.db.commit()
 
         for db_h in ctx.holdings:
-            parsed = ctx.ms_manager.get_slot_by_holding_ticker(db_h.ticker)
-            if parsed:
-                _, clean_t = parsed
-                if clean_t not in real_ticker_set:
-                    log_action(ctx.db, ctx.user_id, f"[Self-Healing] DB Holding {db_h.ticker} does not exist in actual broker account. Sweeping legacy DB record.", "ERROR")
-                    ctx.db.delete(db_h)
-                    ctx.db.commit()
+            if db_h.ticker not in real_ticker_set:
+                log_action(ctx.db, ctx.user_id, f"[Self-Healing] DB Holding {db_h.ticker} ({db_h.strategy_type}) does not exist in actual broker account. Sweeping legacy DB record.", "ERROR")
+                ctx.db.delete(db_h)
+                ctx.db.commit()
 
         ctx.holdings = ctx.db.query(Holding).filter(Holding.user_id == ctx.user_id).all()
     except Exception as sync_err:
@@ -395,10 +398,10 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
     # ------------------ (Part A) 매도 조건 판별 및 인텐트 생성 (순차) ------------------
     for h in holdings:
         try:
-            parsed = ms_manager.get_slot_by_holding_ticker(h.ticker)
-            if not parsed:
+            slot_key = h.strategy_type
+            clean_ticker = h.ticker
+            if slot_key not in ms_manager.strategies:
                 continue
-            slot_key, clean_ticker = parsed
             strategy_instance = ms_manager.strategies[slot_key]
 
             current_data = target_signal_map.get(clean_ticker) or ctx.signal_map.get(clean_ticker)
@@ -437,16 +440,16 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                 breach_reason = f"동적 트레일링 스탑 이탈 (최고가 ${h.highest_price:.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)"
 
             if is_breached:
-                cache_key = (user_id, h.ticker)
+                cache_key = (user_id, h.ticker, h.strategy_type)
                 BREACH_COUNT_CACHE[cache_key] = BREACH_COUNT_CACHE.get(cache_key, 0) + 1
                 count = BREACH_COUNT_CACHE[cache_key]
 
                 if count >= 2:
                     sell_reason = breach_reason + " [2회 연속 이탈 확정]"
                 else:
-                    log_action(db, user_id, f"[Noise Buffer] {h.ticker} first breach detected ({breach_reason}). Delaying sell for noise protection (Count: {count}/2).", "INFO")
+                    log_action(db, user_id, f"[Noise Buffer] {h.ticker} ({h.strategy_type}) first breach detected ({breach_reason}). Delaying sell for noise protection (Count: {count}/2).", "INFO")
             else:
-                BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
+                BREACH_COUNT_CACHE.pop((user_id, h.ticker, h.strategy_type), None)
 
             if not sell_reason and profit_rate >= strategy_instance.min_smart_exit_profit and is_smart_exit:
                 sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
@@ -455,7 +458,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                 sell_reason = f"강세 시그널 붕괴 ({current_score}점 도달)"
 
             if sell_reason:
-                log_action(db, user_id, f"[{strategy_instance.name}] EXIT SIGNAL: {h.ticker} ({clean_ticker}) | Reason: {sell_reason}", "SIGNAL")
+                log_action(db, user_id, f"[{strategy_instance.name}] EXIT SIGNAL: {h.ticker} | Reason: {sell_reason}", "SIGNAL")
 
                 is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
                 order_intent = None
@@ -463,7 +466,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     metadata = await safe_broker_call(broker.get_order_metadata, clean_ticker, ctx.session)
                     order_intent = create_order_intent(
                         db, ctx.db_settings, side="SELL", ticker=clean_ticker,
-                        prefixed_ticker=h.ticker, ticker_name=h.ticker_name,
+                        prefixed_ticker=clean_ticker, strategy_type=slot_key, ticker_name=h.ticker_name,
                         requested_qty=h.quantity, submitted_price=current_price,
                         exchange_code=metadata.get("exchange_code"), order_division=metadata.get("order_division"),
                         regime_mode=sentiment, signal_score=current_score, sell_reason=sell_reason,
@@ -563,7 +566,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             calc_return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
 
             db.add(TradeLog(
-                user_id=user_id, ticker=h.ticker, ticker_name=h.ticker_name,
+                user_id=user_id, ticker=h.ticker, strategy_type=h.strategy_type, ticker_name=h.ticker_name,
                 trade_type="SELL", price=filled_price, quantity=filled_qty,
                 order_no=res["order_no"], regime_mode=sentiment, signal_score=current_score,
                 realized_pnl=round(realized_pnl, 2), return_rate=round(calc_return_rate, 2)
@@ -574,9 +577,9 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             else:
                 h.quantity -= filled_qty
             db.commit()
-            BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
+            BREACH_COUNT_CACHE.pop((user_id, h.ticker, h.strategy_type), None)
             fill_label = "sold" if is_full_fill else f"partially sold ({filled_qty} filled, {h.quantity} remaining)"
-            log_action(db, user_id, f"SUCCESS: {h.ticker} {fill_label} via {sell_reason} | Order: {res['order_no']}", "INFO")
+            log_action(db, user_id, f"SUCCESS: {h.ticker} ({h.strategy_type}) {fill_label} via {sell_reason} | Order: {res['order_no']}", "INFO")
 
             filled_price_krw = filled_price * exchange_rate
             total_amount_usd = filled_price * filled_qty
@@ -648,11 +651,12 @@ def resolve_entry_stage(ctx: TradingFlowContext, strategy_instance, clean_ticker
     return proposed_alloc_factor, next_stage
 
 
-def has_recent_sell(db, user_id: int, prefixed_ticker: str) -> bool:
+def has_recent_sell(db, user_id: int, ticker: str, strategy_type: str) -> bool:
     cooldown_cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.REENTRY_COOLDOWN_MINUTES)
     recent_sell = db.query(TradeLog).filter(
         TradeLog.user_id == user_id,
-        TradeLog.ticker == prefixed_ticker,
+        TradeLog.ticker == ticker,
+        TradeLog.strategy_type == strategy_type,
         TradeLog.trade_type == "SELL",
         TradeLog.executed_at >= cooldown_cutoff
     ).first()
@@ -698,7 +702,7 @@ def send_entry_budget_warning(
     strategy_instance,
     clean_ticker: str,
     signal: dict,
-    prefixed_ticker: str,
+    strategy_type: str,
     reason_title: str,
     reason_desc: str,
     current_price: float,
@@ -707,7 +711,7 @@ def send_entry_budget_warning(
 ) -> None:
     log_action(ctx.db, ctx.user_id, f"[{strategy_instance.name}] SKIP PURCHASE ({reason_title}): {clean_ticker}.", "WARNING")
 
-    cache_key = (ctx.user_id, prefixed_ticker, reason_title)
+    cache_key = (ctx.user_id, clean_ticker, strategy_type, reason_title)
     now = time.time()
     last_sent = WARNING_COOLDOWN_CACHE.get(cache_key, 0.0)
 
@@ -731,7 +735,8 @@ def record_successful_buy(
     ctx: TradingFlowContext,
     strategy_instance,
     existing_holding,
-    prefixed_ticker: str,
+    ticker: str,
+    strategy_type: str,
     signal: dict,
     filled_price: float,
     filled_qty: int,
@@ -749,12 +754,13 @@ def record_successful_buy(
         existing_holding.buy_stage = next_stage
         existing_holding.highest_price = max(existing_holding.highest_price, filled_price)
         ctx.db.commit()
-        log_action(ctx.db, ctx.user_id, f"SUCCESS: {prefixed_ticker} Pyramiding Stage {next_stage} Add-on. New Avg: ${new_avg:.2f}", "INFO")
+        log_action(ctx.db, ctx.user_id, f"SUCCESS: {ticker} ({strategy_type}) Pyramiding Stage {next_stage} Add-on. New Avg: ${new_avg:.2f}", "INFO")
         return False
 
     ctx.db.add(Holding(
         user_id=ctx.user_id,
-        ticker=prefixed_ticker,
+        ticker=ticker,
+        strategy_type=strategy_type,
         ticker_name=signal['name'],
         avg_price=filled_price,
         quantity=filled_qty,
@@ -763,7 +769,7 @@ def record_successful_buy(
         buy_stage=next_stage
     ))
     ctx.db.commit()
-    log_action(ctx.db, ctx.user_id, f"SUCCESS: {prefixed_ticker} purchased ({filled_qty} shares)", "INFO")
+    log_action(ctx.db, ctx.user_id, f"SUCCESS: {ticker} ({strategy_type}) purchased ({filled_qty} shares)", "INFO")
     return True
 
 
@@ -817,10 +823,9 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
         strategy_instance = ms_manager.strategies[slot_key]
         slot_cash_usd = slot_info["cash_balance"]
         slot_total_asset_usd = slot_info["total_asset"]
-        slot_prefix = slot_info["prefix"]
         slot_holdings_count = db.query(Holding).filter(
             Holding.user_id == user_id,
-            Holding.ticker.like(f"{slot_prefix}%")
+            Holding.strategy_type == slot_key
         ).count()
         cutoff_score = strategy_instance.get_cutoff_score(ctx.sentiment)
 
@@ -836,10 +841,10 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
             if slot_holdings_count >= 3:
                 continue
 
-            prefixed_ticker = ms_manager.make_prefixed_ticker(slot_key, clean_ticker)
             existing_holding = db.query(Holding).filter(
                 Holding.user_id == user_id,
-                Holding.ticker == prefixed_ticker
+                Holding.ticker == clean_ticker,
+                Holding.strategy_type == slot_key
             ).first()
 
             entry_stage = resolve_entry_stage(ctx, strategy_instance, clean_ticker, signal, existing_holding)
@@ -847,7 +852,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 continue
             proposed_alloc_factor, next_stage = entry_stage
 
-            if has_recent_sell(db, user_id, prefixed_ticker):
+            if has_recent_sell(db, user_id, clean_ticker, slot_key):
                 continue
 
             realtime_price = await get_realtime_price(clean_ticker)
@@ -881,7 +886,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 reason_desc = "Slot cash is not enough for this order." if not is_budget_exceeded else "One share costs more than the slot allocation allows."
                 send_entry_budget_warning(
                     ctx=ctx, strategy_instance=strategy_instance, clean_ticker=clean_ticker,
-                    signal=signal, prefixed_ticker=prefixed_ticker, reason_title=reason_title,
+                    signal=signal, strategy_type=slot_key, reason_title=reason_title,
                     reason_desc=reason_desc, current_price=current_price, proposed_value_usd=proposed_value_usd,
                     slot_cash_usd=slot_cash_usd,
                 )
@@ -893,7 +898,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 metadata = await safe_broker_call(ctx.broker.get_order_metadata, clean_ticker, ctx.session)
                 order_intent = create_order_intent(
                     db, ctx.db_settings, side="BUY", ticker=clean_ticker,
-                    prefixed_ticker=prefixed_ticker, ticker_name=signal["name"],
+                    prefixed_ticker=clean_ticker, strategy_type=slot_key, ticker_name=signal["name"],
                     requested_qty=final_qty, submitted_price=current_price,
                     exchange_code=metadata.get("exchange_code"), order_division=metadata.get("order_division"),
                     buy_stage=next_stage, regime_mode=ctx.sentiment, signal_score=score,
@@ -901,8 +906,8 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 begin_order_submission(db, order_intent, ctx.db_settings)
 
             buy_tasks_args.append((
-                clean_ticker, prefixed_ticker, strategy_instance, signal, score, next_stage,
-                current_price, final_qty, existing_holding, order_intent
+                clean_ticker, strategy_instance, signal, score, next_stage,
+                current_price, final_qty, existing_holding, order_intent, slot_key
             ))
             slot_cash_usd -= (current_price * final_qty) * (1 + settings.KIS_FEE_RATE)
             if not existing_holding:
@@ -912,7 +917,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
         return True
 
     # ------------------ (Part B) 브로커 비동기 병렬 주문 및 체결 처리 ------------------
-    async def _execute_single_buy(clean_ticker, prefixed_ticker, strategy_instance, signal, score, next_stage, current_price, final_qty, existing_holding, order_intent):
+    async def _execute_single_buy(clean_ticker, strategy_instance, signal, score, next_stage, current_price, final_qty, existing_holding, order_intent, slot_key):
         try:
             is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
             if is_kis_order:
@@ -942,7 +947,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
             if application.applied_qty > 0:
                 filled_price = application.filled_price
                 filled_qty = application.applied_qty
-                log_action(db, user_id, f"SUCCESS: {prefixed_ticker} broker fill applied ({filled_qty} shares)", "INFO")
+                log_action(db, user_id, f"SUCCESS: {clean_ticker} ({slot_key}) broker fill applied ({filled_qty} shares)", "INFO")
                 send_successful_buy_message(
                     ctx=ctx, strategy_instance=strategy_instance, clean_ticker=clean_ticker,
                     signal=signal, filled_price=filled_price, filled_qty=filled_qty,
@@ -952,7 +957,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 halt_trading_for_order_review(ctx, "BUY", clean_ticker, res)
                 return False
             if application.applied_qty == 0 and not res.get("success"):
-                log_action(db, user_id, f"BUY FAILED: {prefixed_ticker} | {res['message']}", "ERROR")
+                log_action(db, user_id, f"BUY FAILED: {clean_ticker} ({slot_key}) | {res['message']}", "ERROR")
             return True
 
         requires_review = bool(res.get("order_submitted")) and not bool(res.get("fill_confirmed"))
@@ -961,7 +966,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
             return False
 
         if not res["success"]:
-            log_action(db, user_id, f"BUY FAILED: {prefixed_ticker} | {res['message']}", "ERROR")
+            log_action(db, user_id, f"BUY FAILED: {clean_ticker} ({slot_key}) | {res['message']}", "ERROR")
             return True
 
         filled_price = res["filled_price"]
@@ -969,7 +974,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
 
         record_successful_buy(
             ctx=ctx, strategy_instance=strategy_instance, existing_holding=existing_holding,
-            prefixed_ticker=prefixed_ticker, signal=signal, filled_price=filled_price,
+            ticker=clean_ticker, strategy_type=slot_key, signal=signal, filled_price=filled_price,
             filled_qty=filled_qty, next_stage=next_stage,
         )
 
@@ -1005,7 +1010,6 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         if not ctx:
             return
 
-        migrate_legacy_holdings(ctx)
         await sync_broker_holdings(ctx)
         slot_allocations = await calculate_slot_allocations(ctx)
         target_signals = await build_target_signals(ctx)

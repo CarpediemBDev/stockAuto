@@ -50,11 +50,11 @@ class LocalSimulatedBroker(BaseBroker):
         total_eval_krw = 0.0
 
         if holdings:
-            tickers = [h.ticker.split('_')[-1] for h in holdings]
+            tickers = [h.ticker for h in holdings]
             try:
                 data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
                 for h in holdings:
-                    clean_t = h.ticker.split('_')[-1]
+                    clean_t = h.ticker
                     current_price = h.avg_price  # 기본 폴백값
                     try:
                         if len(tickers) == 1:
@@ -117,12 +117,12 @@ class LocalSimulatedBroker(BaseBroker):
         if exchange_rate is None:
             exchange_rate = FXRateCache.get_rate()
 
-        tickers = [h.ticker.split('_')[-1] for h in holdings]
+        tickers = [h.ticker for h in holdings]
         try:
             data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
             result = []
             for h in holdings:
-                clean_t = h.ticker.split('_')[-1]
+                clean_t = h.ticker
                 current_price = h.avg_price  # 기본 폴백값
                 try:
                     if len(tickers) == 1:
