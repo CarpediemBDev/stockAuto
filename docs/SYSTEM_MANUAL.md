@@ -725,10 +725,13 @@ npm run local
 1.  **백엔드 서비스 배포**:
     *   Google Cloud Run에서 `backend/Dockerfile`을 소스로 지정하여 서비스를 생성합니다.
     *   완료 시 생성되는 백엔드 HTTPS 주소(`https://stockauto-be-xxxx-a.run.app`)를 획득합니다.
-    *   환경변수 `ALLOWED_ORIGINS`에 프론트엔드가 구동될 Vercel 혹은 Cloud Run URL을 등록하여 CORS를 개방합니다.
+    *   환경변수 `ALLOWED_ORIGINS`에 프론트엔드의 정확한 Origin을 등록합니다. 여러 주소는 쉼표로 구분하며 와일드카드는 사용하지 않습니다.
+    *   동일 출처 프록시 사용 시 Refresh Cookie는 `REFRESH_COOKIE_SAMESITE=lax`, `REFRESH_COOKIE_SECURE=true`를 유지합니다.
 2.  **프론트엔드 서비스 배포**:
     *   Google Cloud Run에서 `frontend/Dockerfile`을 소스로 지정하여 서비스를 생성합니다.
-    *   빌드 인수(Build Arguments) 또는 환경변수에 `NEXT_PUBLIC_API_BASE` 이름으로 백엔드 주소(`https://stockauto-be-xxxx-a.run.app/api/v1`)를 주입하여 컴파일합니다.
+    *   브라우저가 백엔드를 직접 cross-site 호출하지 않도록 `NEXT_PUBLIC_API_BASE=/api/v1`을 사용합니다.
+    *   서버 측 Next.js rewrite 대상은 `BACKEND_API_ORIGIN=https://stockauto-be-xxxx-a.run.app`으로 주입합니다.
+    *   이 구조에서는 `/api/v1/*` 요청과 HttpOnly Refresh Cookie가 프론트엔드와 동일한 Origin에서 처리되어 서드파티 쿠키 차단 영향을 받지 않습니다.
 
 #### C. 데이터베이스 영속성 (SQLite) 및 프로덕션 아키텍처 권장사항
 Google Cloud Run은 **무상태(Stateless)** 서버리스 환경이므로 컨테이너 인스턴스 재생성 시 내부 로컬 파일(`/app/stockauto.db`)이 초기화됩니다. 데이터 보존을 위해 아래 두 방식 중 하나를 설정하는 것을 강력히 권장합니다.

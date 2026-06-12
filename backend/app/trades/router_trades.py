@@ -6,7 +6,7 @@ from app.core.dependencies import get_current_user
 
 router = APIRouter()
 
-@router.get("/")
+@router.get("")
 def get_trade_logs(
     skip: int = 0,
     limit: int = 100,

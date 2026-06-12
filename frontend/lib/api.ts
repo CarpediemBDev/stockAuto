@@ -7,7 +7,7 @@ declare module 'axios' {
   }
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || '/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -30,7 +30,14 @@ interface ApiErrorPayload {
   detail?: string;
 }
 
+export interface AuthSession {
+  accessToken: string;
+  username: string;
+  role: string;
+}
+
 let failedQueue: PendingRequest[] = [];
+let refreshSessionPromise: Promise<AuthSession> | null = null;
 
 const processQueue = (error: unknown, token: string | null = null) => {
   failedQueue.forEach(prom => {
@@ -41,6 +48,39 @@ const processQueue = (error: unknown, token: string | null = null) => {
     }
   });
   failedQueue = [];
+};
+
+const parseAuthSession = (payload: {
+  data?: {
+    access_token?: string;
+    username?: string;
+    role?: string;
+  };
+  access_token?: string;
+  username?: string;
+  role?: string;
+}): AuthSession => {
+  const data = payload.data ?? payload;
+  if (!data.access_token || !data.username || !data.role) {
+    throw new Error("인증 갱신 응답 형식이 올바르지 않습니다.");
+  }
+  return {
+    accessToken: data.access_token,
+    username: data.username,
+    role: data.role,
+  };
+};
+
+export const refreshAuthSession = (): Promise<AuthSession> => {
+  if (!refreshSessionPromise) {
+    refreshSessionPromise = axios
+      .post(`${API_BASE}/auth/refresh`, undefined, { withCredentials: true })
+      .then((response) => parseAuthSession(response.data))
+      .finally(() => {
+        refreshSessionPromise = null;
+      });
+  }
+  return refreshSessionPromise;
 };
 
 // Request Interceptor: Zustand 메모리에서 토큰 주입
@@ -103,24 +143,17 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const localRefreshToken = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
-        if (!localRefreshToken) {
-          throw new Error("Refresh token missing in localStorage");
-        }
-
-        // 인터셉터를 타지 않는 axios 인스턴스로 refresh 호출 (무한루프 방지)
-        const refreshResponse = await axios.post(`${API_BASE}/auth/refresh`, {
-          refresh_token: localRefreshToken
-        });
-        const newToken = refreshResponse.data.data ? refreshResponse.data.data.access_token : refreshResponse.data.access_token;
-        const newUsername = refreshResponse.data.data ? refreshResponse.data.data.username : refreshResponse.data.username;
-        const newRefreshToken = refreshResponse.data.data ? refreshResponse.data.data.refresh_token : refreshResponse.data.refresh_token;
+        const session = await refreshAuthSession();
 
         // Zustand 업데이트
-        useAuthStore.getState().setAuth(newToken, newUsername, newRefreshToken || localRefreshToken);
+        useAuthStore.getState().setAuth(
+          session.accessToken,
+          session.username,
+          session.role,
+        );
 
-        processQueue(null, newToken);
-        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        processQueue(null, session.accessToken);
+        originalRequest.headers.Authorization = `Bearer ${session.accessToken}`;
         return api(originalRequest);
       } catch (refreshError: unknown) {
         processQueue(refreshError, null);
@@ -148,14 +181,12 @@ api.interceptors.response.use(
 export const authAPI = {
   signup: (username: string, password: string) => api.post('/auth/signup', { username, password }),
   login: (username: string, password: string) => api.post('/auth/login', { username, password }),
-  refresh: () => {
-    const localRefreshToken = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
-    return api.post('/auth/refresh', { refresh_token: localRefreshToken });
-  },
-  logout: () => {
-    const localRefreshToken = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
-    return api.post('/auth/logout', { refresh_token: localRefreshToken });
-  },
+  refresh: refreshAuthSession,
+  logout: () => api.post('/auth/logout'),
+  changePassword: (oldPassword: string, newPassword: string) => api.post(
+    '/auth/change-password',
+    { old_password: oldPassword, new_password: newPassword },
+  ),
   getMe: (config?: AxiosRequestConfig) => api.get('/auth/me', config),
 };
 
@@ -166,7 +197,7 @@ export const botAPI = {
 };
 
 export const tradeAPI = {
-  getLogs: (config?: AxiosRequestConfig) => api.get('/trades/', config),
+  getLogs: (config?: AxiosRequestConfig) => api.get('/trades', config),
   getActions: (config?: AxiosRequestConfig) => api.get('/trades/actions', config),
 };
 
@@ -187,14 +218,14 @@ export const marketAPI = {
 };
 
 export const watchlistAPI = {
-  getAll: (config?: AxiosRequestConfig) => api.get('/watchlist/', config),
-  add: (ticker: string, name: string) => api.post('/watchlist/', { ticker, ticker_name: name }),
+  getAll: (config?: AxiosRequestConfig) => api.get('/watchlist', config),
+  add: (ticker: string, name: string) => api.post('/watchlist', { ticker, ticker_name: name }),
   delete: (id: number) => api.delete(`/watchlist/${id}`),
 };
 
 export const translationAPI = {
-  getAll: (config?: AxiosRequestConfig) => api.get('/translations/', config),
-  save: (ticker: string, nameKo: string) => api.post('/translations/', { ticker, name_ko: nameKo }),
+  getAll: (config?: AxiosRequestConfig) => api.get('/translations', config),
+  save: (ticker: string, nameKo: string) => api.post('/translations', { ticker, name_ko: nameKo }),
   update: (id: number, nameKo: string) => api.put(`/translations/${id}`, { name_ko: nameKo }),
   delete: (id: number) => api.delete(`/translations/${id}`),
 };

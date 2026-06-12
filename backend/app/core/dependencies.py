@@ -3,7 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import User
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token_claims
 
 security_scheme = HTTPBearer()
 
@@ -15,7 +15,8 @@ def get_current_user(
     HTTP Bearer JWT 토큰 검증 및 현재 요청 중인 사용자 객체 추출 의존성 주입 함수.
     """
     token = credentials.credentials
-    user_id_str = decode_access_token(token)
+    claims = decode_access_token_claims(token)
+    user_id_str = claims.get("sub") if claims else None
 
     if not user_id_str:
         raise HTTPException(
@@ -38,6 +39,14 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="사용자를 찾을 수 없습니다.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token_version = claims.get("ver", 0)
+    if not isinstance(token_version, int) or token_version != user.token_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="폐기된 로그인 세션입니다.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 

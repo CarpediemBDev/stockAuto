@@ -17,7 +17,7 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
-import api from "@/lib/api";
+import api, { authAPI } from "@/lib/api";
 
 type SubTab = "environment" | "telegram" | "danger";
 type TradeMode = "SIMULATED" | "MOCK" | "REAL";
@@ -71,7 +71,7 @@ function normalizeTradeMode(value: unknown): TradeMode {
 
 export default function PersonalSettingsPage() {
   const router = useRouter();
-  const { isAuthenticated, isInitialized, username: storedUsername } = useAuthStore();
+  const { clearAuth, isAuthenticated, isInitialized, username: storedUsername } = useAuthStore();
   const [dbSettings, setDbSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   
   // Per-broker form state
@@ -95,6 +95,10 @@ export default function PersonalSettingsPage() {
   const [showLiquidateModal, setShowLiquidateModal] = useState(false);
   const [isDangerActionLoading, setIsDangerActionLoading] = useState(false);
   const [isPersonalReportSending, setIsPersonalReportSending] = useState(false);
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [isPasswordChanging, setIsPasswordChanging] = useState(false);
 
   useEffect(() => {
     if (isInitialized) {
@@ -285,6 +289,33 @@ export default function PersonalSettingsPage() {
       toast.error((err as Error).message || "리포트 발송 중 오류가 발생했습니다.");
     } finally {
       setIsPersonalReportSending(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!oldPassword || !newPassword || !confirmNewPassword) {
+      toast.error("비밀번호 입력란을 모두 채워주세요.");
+      return;
+    }
+    if (newPassword.length < 12) {
+      toast.error("새 비밀번호는 최소 12글자 이상이어야 합니다.");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error("새 비밀번호 확인이 일치하지 않습니다.");
+      return;
+    }
+
+    setIsPasswordChanging(true);
+    try {
+      await authAPI.changePassword(oldPassword, newPassword);
+      clearAuth();
+      toast.success("비밀번호가 변경되었습니다. 다시 로그인해주세요.");
+      router.replace("/login");
+    } catch (err) {
+      toast.error((err as Error).message || "비밀번호 변경에 실패했습니다.");
+    } finally {
+      setIsPasswordChanging(false);
     }
   };
 
@@ -675,6 +706,52 @@ export default function PersonalSettingsPage() {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2 p-4 bg-zinc-900/20 rounded-lg border border-zinc-900">
+                    <div>
+                      <h3 className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
+                        <Key className="w-3.5 h-3.5 text-zinc-400" />
+                        로그인 비밀번호 변경
+                      </h3>
+                      <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">
+                        변경 즉시 모든 기기의 Access Token과 Refresh Token이 폐기됩니다.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                      <input
+                        type="password"
+                        value={oldPassword}
+                        onChange={(event) => setOldPassword(event.target.value)}
+                        placeholder="현재 비밀번호"
+                        autoComplete="current-password"
+                        className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white text-xs outline-none focus:border-red-500"
+                      />
+                      <input
+                        type="password"
+                        value={newPassword}
+                        onChange={(event) => setNewPassword(event.target.value)}
+                        placeholder="새 비밀번호 (12글자 이상)"
+                        autoComplete="new-password"
+                        className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white text-xs outline-none focus:border-red-500"
+                      />
+                      <input
+                        type="password"
+                        value={confirmNewPassword}
+                        onChange={(event) => setConfirmNewPassword(event.target.value)}
+                        placeholder="새 비밀번호 확인"
+                        autoComplete="new-password"
+                        className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white text-xs outline-none focus:border-red-500"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleChangePassword}
+                      disabled={isPasswordChanging}
+                      className="mt-3 w-full py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50 text-red-400 border border-red-500/30 text-xs font-bold transition-all active:scale-[0.99]"
+                    >
+                      {isPasswordChanging ? "변경 중..." : "비밀번호 변경 및 전체 세션 로그아웃"}
+                    </button>
+                  </div>
+
                   <div className="p-4 bg-zinc-900/20 rounded-lg border border-zinc-900 flex flex-col justify-between">
                     <div>
                       <h3 className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">

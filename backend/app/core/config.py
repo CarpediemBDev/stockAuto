@@ -22,6 +22,24 @@ else:
 
 # 유효한 트레이딩 모드 목록
 VALID_TRADE_MODES = ("SIMULATED", "MOCK", "REAL")
+DEFAULT_ALLOWED_ORIGINS = (
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_allowed_origins() -> list[str]:
+    configured = os.getenv("ALLOWED_ORIGINS", "")
+    origins = [*DEFAULT_ALLOWED_ORIGINS]
+    origins.extend(origin.strip() for origin in configured.split(",") if origin.strip())
+    return list(dict.fromkeys(origins))
 
 class Settings:
     """
@@ -62,6 +80,20 @@ class Settings:
 
         # Gemini API Key for AI Sentiment (Phase 21)
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+        cookie_samesite = os.getenv("REFRESH_COOKIE_SAMESITE", "lax").strip().lower()
+        if cookie_samesite not in {"lax", "strict", "none"}:
+            raise RuntimeError("REFRESH_COOKIE_SAMESITE must be one of: lax, strict, none")
+
+        self.REFRESH_COOKIE_SAMESITE = cookie_samesite
+        self.REFRESH_COOKIE_SECURE = _env_bool(
+            "REFRESH_COOKIE_SECURE",
+            self.IS_PROD or cookie_samesite == "none",
+        )
+        self.REFRESH_COOKIE_DOMAIN = os.getenv("REFRESH_COOKIE_DOMAIN") or None
+
+        if cookie_samesite == "none" and not self.REFRESH_COOKIE_SECURE:
+            raise RuntimeError("SameSite=None refresh cookies require REFRESH_COOKIE_SECURE=true")
 
         # 1. 초기 생성 시 무조건 안전한 SIMULATED 모드로 하드코딩 셋업
         # (이후 main.py에서 사용자가 화면(어드민)을 통해 저장한 DB 값을 읽어와 덮어씌웁니다)

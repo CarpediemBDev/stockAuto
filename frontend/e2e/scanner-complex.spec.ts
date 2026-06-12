@@ -5,17 +5,23 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
   // 프론트엔드가 백엔드를 호출할 때 실제 백엔드를 타지 않고,
   // Playwright가 가짜 데이터(Mock Data)를 즉시 던져주도록 설정합니다.
 
+  let sessionActive = false;
+
   // 1-1. 가짜 로그인 토큰 발급
   await page.route("**/api/v1/auth/login", async (route) => {
+    sessionActive = true;
     await route.fulfill({
       status: 200,
+      headers: {
+        "set-cookie": "refresh_token=scanner-session; Path=/api/v1/auth; HttpOnly; SameSite=Lax",
+      },
       json: {
         code: "SUCCESS",
         data: {
           access_token: "fake_magic_token",
-          refresh_token: "fake_magic_refresh_token",
           token_type: "bearer",
           username: "MagicUser",
+          role: "USER",
         },
       },
     });
@@ -23,16 +29,21 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
 
   // 1-2. 전체 페이지 이동 후 HttpOnly refresh 기반 세션 복구
   await page.route("**/api/v1/auth/refresh", async (route) => {
+    const hasRefreshCookie = route.request().headers()["cookie"]?.includes("scanner-session") ?? false;
+    const canRefresh = sessionActive && hasRefreshCookie;
     await route.fulfill({
-      status: 200,
-      json: {
-        code: "SUCCESS",
-        data: {
-          access_token: "fake_magic_token_refreshed",
-          token_type: "bearer",
-          username: "MagicUser",
-        },
-      },
+      status: canRefresh ? 200 : 401,
+      json: canRefresh
+        ? {
+            code: "SUCCESS",
+            data: {
+              access_token: "fake_magic_token_refreshed",
+              token_type: "bearer",
+              username: "MagicUser",
+              role: "USER",
+            },
+          }
+        : { detail: "No refresh session" },
     });
   });
 

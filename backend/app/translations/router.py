@@ -24,13 +24,13 @@ class TranslationCreate(BaseModel):
 class TranslationUpdate(BaseModel):
     name_ko: str
 
-@router.get("/")
+@router.get("")
 def get_all_translations(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """현재 DB에 저장된 모든 한글 번역 사전 목록을 조회합니다 (ID 오름차순)."""
     items = db.query(models.StockTranslation).order_by(models.StockTranslation.id.asc()).all()
     return success_response(data=items)
 
-@router.post("/")
+@router.post("")
 def create_or_update_translation(item: TranslationCreate, db: Session = Depends(get_db), current_admin: User = Depends(get_current_admin_user)):
     """번역쌍을 새로 생성하거나 덮어쓰고 실시간 캐시를 갱신합니다."""
     ticker_upper = item.ticker.upper().strip()

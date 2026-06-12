@@ -24,7 +24,7 @@ class WatchListResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-@router.get("/")
+@router.get("")
 def get_watchlist(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -32,7 +32,7 @@ def get_watchlist(
     items = db.query(models.WatchList).filter(models.WatchList.user_id == current_user.id).all()
     return success_response(data=items)
 
-@router.post("/")
+@router.post("")
 async def add_to_watchlist(
     item: WatchListCreate,
     current_user: models.User = Depends(get_current_user),

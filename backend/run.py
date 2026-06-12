@@ -1,5 +1,6 @@
 import sys
 import os
+import multiprocessing
 import uvicorn
 
 OFFICIAL_VENV_DIR = "venv"
@@ -63,6 +64,10 @@ def main():
             
     # 2. 💡 프레임워크 로드 전 OS 환경변수 최우선 주입 (스프링부트 active.profile 역할)
     os.environ["APP_ENV"] = profile
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Windows의 Uvicorn reload 자식 프로세스도 공식 backend/venv Python을 사용하도록 고정합니다.
+    multiprocessing.set_executable(sys.executable)
     
     # 3. 환경별 Uvicorn 구동 파라미터 세팅
     host = "0.0.0.0"
@@ -90,6 +95,7 @@ def main():
         host=host,
         port=port,
         reload=reload_enabled,
+        reload_dirs=[os.path.join(backend_dir, "app")] if reload_enabled else None,
         reload_excludes=["*.db", "*.db-journal", "*.sqlite3", "venv/*", "__pycache__/*", "logs/*", "*.log", "backend/logs/*", "**/logs/*", "**/*.log"],
         workers=workers_count,
         env_file=f".env.{profile}" # Uvicorn 레벨에서 단일 환경파일만 강제 주입

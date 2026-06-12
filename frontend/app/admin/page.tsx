@@ -20,8 +20,8 @@ import { BacktestTournament } from "@/components/admin/BacktestTournament";
 export default function AdminPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<string>("translation");
-  const { isAuthenticated, isInitialized, username } = useAuthStore();
-  const isAdmin = isAuthenticated && username === "admin";
+  const { isAuthenticated, isInitialized, role } = useAuthStore();
+  const isAdmin = isAuthenticated && role === "ADMIN";
 
   useEffect(() => {
     if (isInitialized) {

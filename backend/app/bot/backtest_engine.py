@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from app.scanner.data_provider import fetch_ohlcv, fetch_bulk_ohlcv
 from app.scanner.indicators import (
     calculate_ema, calculate_rsi, calculate_macd, calculate_atr, 
-    calculate_obv_divergence, calculate_rsi_bb, calculate_vwap, calculate_wick_ratio
+    calculate_obv_divergence, calculate_rsi_bb, calculate_vwap, calculate_wick_ratio,
+    calculate_double_bb_reversion_signals
 )
 from app.core.logging import logger
 from app.bot.backtest_metrics import calculate_performance_metrics
@@ -784,6 +785,9 @@ class BacktestSimulator:
                 metrics['change_pct'] = ((df['Close'] / df['Close'].shift(20) - 1) * 100).fillna(0.0)
                 metrics['trendline_support'] = metrics['EMA20']
                 metrics['is_uptrend'] = (metrics['EMA9'] > metrics['EMA20'])
+                
+                # 💡 마켓트랩 더블 볼린저 밴드 역추세 전략 신호 사전 연산
+                metrics = calculate_double_bb_reversion_signals(metrics)
                 
                 self.tickers_data[ticker] = requested_df
                 self.processed_metrics[ticker] = metrics

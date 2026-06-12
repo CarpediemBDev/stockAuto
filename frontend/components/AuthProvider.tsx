@@ -2,9 +2,7 @@
 
 import React, { useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
-import axios from 'axios';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8000/api/v1';
+import { refreshAuthSession } from '../lib/api';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { setAuth, clearAuth, setInitialized, isInitialized } = useAuthStore();
@@ -14,19 +12,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const initAuth = async () => {
       try {
-        const localRefreshToken = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
-        if (!localRefreshToken) {
-          clearAuth();
-          return;
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('refresh_token');
         }
 
-        const response = await axios.post(`${API_BASE}/auth/refresh`, {
-          refresh_token: localRefreshToken
-        });
-        const newToken = response.data.data ? response.data.data.access_token : response.data.access_token;
-        const newUsername = response.data.data ? response.data.data.username : response.data.username;
-        const newRefreshToken = response.data.data ? response.data.data.refresh_token : response.data.refresh_token;
-        setAuth(newToken, newUsername, newRefreshToken || localRefreshToken);
+        const session = await refreshAuthSession();
+        setAuth(session.accessToken, session.username, session.role);
       } catch {
         clearAuth();
       } finally {

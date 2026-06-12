@@ -25,7 +25,7 @@ export function NavBar() {
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isTimezoneMenuOpen, setIsTimezoneMenuOpen] = useState(false);
-  const { accessToken, username, clearAuth } = useAuthStore();
+  const { accessToken, username, role, clearAuth } = useAuthStore();
   const { selectedTimezone, timezoneOptions, setTimezone } = useTimezone();
 
 
@@ -280,7 +280,7 @@ export function NavBar() {
                         <div className="border-t border-zinc-800/60 my-1"></div>
 
                         {/* 어드민 패널 단축 링크 (어드민 전용) */}
-                        {username === "admin" && (
+                        {role === "ADMIN" && (
                           <Link
                             href="/admin"
                             onClick={() => setIsUserMenuOpen(false)}

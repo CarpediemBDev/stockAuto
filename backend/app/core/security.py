@@ -1,4 +1,6 @@
 import os
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Union, Any
 import jwt
@@ -34,6 +36,7 @@ if not JWT_SECRET_KEY or JWT_SECRET_KEY in INSECURE_DEFAULT_KEYS:
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30 # 단기 생존 (30분)
 REFRESH_TOKEN_EXPIRE_DAYS = 14   # 장기 생존 (14일)
+DUMMY_PASSWORD_HASH = "$2b$12$mfF4R0w0bvqw8dKQMKwpQ.NTz.KoAzLH.fGk.pR7GRHkhFOD1iavi"
 
 
 def get_password_hash(password: str) -> str:
@@ -49,7 +52,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception:
         return False
 
-def create_access_token(subject: Union[str, Any], expires_delta: timedelta = None) -> str:
+def create_access_token(
+    subject: Union[str, Any],
+    token_version: int = 0,
+    expires_delta: timedelta = None,
+) -> str:
     """Access JWT 토큰 발행"""
     if expires_delta:
         expire = datetime.now(UTC) + expires_delta
@@ -60,6 +67,7 @@ def create_access_token(subject: Union[str, Any], expires_delta: timedelta = Non
         "exp": expire,
         "sub": str(subject),
         "type": "access",
+        "ver": token_version,
     }
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
     return encoded_jwt
@@ -74,19 +82,28 @@ def create_refresh_token(subject: Union[str, Any], expires_delta: timedelta = No
     to_encode = {
         "exp": expire,
         "sub": str(subject),
-        "type": "refresh"
+        "type": "refresh",
+        "jti": secrets.token_urlsafe(24),
     }
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
     return encoded_jwt
 
 def decode_access_token(token: str) -> Union[str, None]:
     """Access JWT 토큰 해독 및 검증"""
+    claims = decode_access_token_claims(token)
+    return claims["sub"] if claims else None
+
+
+def decode_access_token_claims(token: str) -> dict[str, Any] | None:
+    """Access JWT 토큰의 사용자 식별자와 세션 버전을 검증합니다."""
     try:
         decoded_token = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
         if decoded_token.get("type") != "access":
             return None
-        return decoded_token["sub"]
-    except jwt.PyJWTError:
+        if "sub" not in decoded_token:
+            return None
+        return decoded_token
+    except (jwt.PyJWTError, KeyError):
         return None
 
 
@@ -99,3 +116,8 @@ def decode_refresh_token(token: str) -> Union[str, None]:
         return decoded_token["sub"]
     except jwt.PyJWTError:
         return None
+
+
+def hash_refresh_token(token: str) -> str:
+    """DB 유출 시 원본 Refresh Token 재사용을 막기 위한 SHA-256 지문을 반환합니다."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

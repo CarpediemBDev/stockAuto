@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Route } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/auth/refresh", async (route) => {
@@ -7,6 +7,12 @@ test.beforeEach(async ({ page }) => {
       json: { detail: "No refresh session" },
     });
   });
+});
+
+test("localhost visits remain on the localhost host", async ({ page }) => {
+  await page.goto("http://localhost:3100/login");
+
+  await expect(page).toHaveURL("http://localhost:3100/login");
 });
 
 test("anonymous root visits are redirected to the login screen", async ({ page }) => {
@@ -37,4 +43,90 @@ test("empty login submission shows client-side validation", async ({ page }) => 
   await page.getByRole("button", { name: "로그인" }).click();
 
   await expect(page.getByText("아이디와 비밀번호를 모두 입력해 주세요.")).toBeVisible();
+});
+
+test("HttpOnly refresh cookie survives different local ports and reload", async ({ page }) => {
+  await page.unroute("**/api/v1/auth/refresh");
+  let refreshSawCookie = false;
+  let refreshRequestCount = 0;
+
+  const fulfillSuccess = async (route: Route, data: unknown) => {
+    await route.fulfill({
+      status: 200,
+      json: { code: "SUCCESS", data },
+    });
+  };
+
+  await page.route("**/api/v1/bot/status", (route) =>
+    fulfillSuccess(route, { is_running: false, is_real: false }),
+  );
+  await page.route("**/api/v1/trades", (route) => fulfillSuccess(route, []));
+  await page.route("**/api/v1/account/balance", (route) =>
+    fulfillSuccess(route, {
+      total_asset: 0,
+      cash_balance: 0,
+      stock_balance: 0,
+      profit_rate: 0,
+      fx_rate: 1350,
+      focused_radar_tickers: [],
+    }),
+  );
+  await page.route("**/api/v1/account/holdings", (route) => fulfillSuccess(route, []));
+  await page.route("**/api/v1/scanner/latest", (route) => fulfillSuccess(route, []));
+  await page.route("**/api/v1/market/overview", (route) =>
+    fulfillSuccess(route, {
+      market_condition: "NEUTRAL",
+      sentiment: "NEUTRAL",
+      nasdaq: null,
+      exchange_rate: null,
+    }),
+  );
+
+  await page.route("**/api/v1/auth/login", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: {
+        "set-cookie": "refresh_token=port-safe-cookie; Path=/api/v1/auth; HttpOnly; SameSite=Lax",
+      },
+      json: {
+        access_token: "initial-access-token",
+        token_type: "bearer",
+        username: "cookie-user",
+        role: "USER",
+      },
+    });
+  });
+
+  await page.route("**/api/v1/auth/refresh", async (route) => {
+    refreshRequestCount += 1;
+    refreshSawCookie = route.request().headers()["cookie"]?.includes("port-safe-cookie") ?? false;
+    await route.fulfill({
+      status: refreshSawCookie ? 200 : 401,
+      headers: refreshSawCookie
+        ? {
+            "set-cookie": "refresh_token=rotated-port-safe-cookie; Path=/api/v1/auth; HttpOnly; SameSite=Lax",
+          }
+        : undefined,
+      json: refreshSawCookie
+        ? {
+            access_token: "refreshed-access-token",
+            token_type: "bearer",
+            username: "cookie-user",
+            role: "USER",
+          }
+        : { detail: "Refresh cookie missing" },
+    });
+  });
+
+  await page.goto("/login");
+  await page.getByPlaceholder("Username").fill("cookie-user");
+  await page.getByPlaceholder("Password").fill("long-enough-password");
+  await page.getByRole("button", { name: "로그인" }).click();
+  await expect(page).toHaveURL("/");
+
+  refreshRequestCount = 0;
+  await page.reload();
+  await expect(page).toHaveURL("/");
+  expect(refreshSawCookie).toBe(true);
+  expect(refreshRequestCount).toBe(1);
 });

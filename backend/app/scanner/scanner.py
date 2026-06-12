@@ -13,7 +13,8 @@ from app.scanner.indicators import (
     calculate_ema,
     calculate_atr,
     detect_vcp_pattern,
-    detect_cup_and_handle
+    detect_cup_and_handle,
+    calculate_double_bb_reversion_signals
 )
 from app.scanner.filters import (
     detect_obv_divergence,
@@ -124,7 +125,7 @@ def get_ticker_name(ticker: str) -> str:
     """Translator 메모리 캐시를 이용해 종목명을 초고속 번역 및 Fallback 반환합니다."""
     return Translator.translate(ticker)
 
-async def scan_market_expert() -> list:
+async def scan_market_expert(bypass_tickers: set = None) -> list:
     """
     전수 조사 기반 고수 필터 스캐너 (Stage 1 & 2) - ⭐ v2.0 레짐 스위칭 & 비동기 고성능 데이터 프로바이더 연동
     """
@@ -330,10 +331,9 @@ async def scan_market_expert() -> list:
                 news_list = news_map.get(ticker, [])
                 is_fundamental_healthy = fundamental_map.get(ticker, True)
                 
-                # 💡 [필터 우회] 사용자가 관심종목(WATCHLIST)으로 등록했거나, 봇의 11대 타겟 종목(TARGET_TICKERS)인 경우
+                # 💡 [필터 우회] 사용자가 관심종목(WATCHLIST)으로 등록했거나, 외부 주입된 우회 대상 종목(bypass_tickers)인 경우
                 # 적자 기업이더라도 매매가 가능하도록 재무 필터링(퇴출)을 적용하지 않고 통과시킵니다.
-                from app.bot.multi_strategy_manager import MultiStrategyManager
-                is_target_ticker = ticker in MultiStrategyManager.TARGET_TICKERS
+                is_target_ticker = ticker in bypass_tickers if bypass_tickers else False
                 is_watchlist = "WATCHLIST" in cand.get("source", [])
                 
                 if not is_fundamental_healthy and not is_watchlist and not is_target_ticker:
@@ -358,6 +358,11 @@ async def scan_market_expert() -> list:
                 
                 vwap = calculate_vwap(df_5m)
                 risk_level, wick_ratio = detect_fakeout_risk(df_5m)
+                
+                # 💡 마켓트랩 더블 볼린저 밴드 역추세 전략 신호 실시간 계산
+                df_bb_signals = calculate_double_bb_reversion_signals(df_5m)
+                is_double_bb_buy = float(df_bb_signals['is_double_bb_buy'].iloc[-1]) if not df_bb_signals.empty else 0.0
+                is_double_bb_sell = float(df_bb_signals['is_double_bb_sell'].iloc[-1]) if not df_bb_signals.empty else 0.0
                 
                 # ----------------- 다이내믹 세부 채점표 (score_card) 구축 -----------------
                 score_card = []
@@ -386,6 +391,8 @@ async def scan_market_expert() -> list:
                 cand['is_cup'] = is_cup
                 cand['is_orb_breakout'] = is_orb_breakout
                 cand['risk_level'] = risk_level
+                cand['is_double_bb_buy'] = is_double_bb_buy
+                cand['is_double_bb_sell'] = is_double_bb_sell
                 
                 if not df_daily.empty and len(df_daily) >= 120:
                     daily_ema120 = calculate_ema(df_daily['Close'], 120)
@@ -454,8 +461,8 @@ async def scan_market_expert() -> list:
         
     return sorted(final_results, key=lambda x: -x['signal_score'])
 
-async def scan_overseas_market() -> list:
-    return await scan_market_expert()
+async def scan_overseas_market(bypass_tickers: set = None) -> list:
+    return await scan_market_expert(bypass_tickers=bypass_tickers)
 
 async def analyze_single_ticker(ticker: str) -> dict:
     """
@@ -515,6 +522,11 @@ async def analyze_single_ticker(ticker: str) -> dict:
         vwap = calculate_vwap(df_5m)
         risk_level, wick_ratio = detect_fakeout_risk(df_5m)
 
+        # 💡 마켓트랩 더블 볼린저 밴드 역추세 전략 신호 실시간 계산
+        df_bb_signals = calculate_double_bb_reversion_signals(df_5m)
+        is_double_bb_buy = float(df_bb_signals['is_double_bb_buy'].iloc[-1]) if not df_bb_signals.empty else 0.0
+        is_double_bb_sell = float(df_bb_signals['is_double_bb_sell'].iloc[-1]) if not df_bb_signals.empty else 0.0
+
         # 💡 [전략 패턴] 전략 팩토리를 통해 실시간 전략 로드 및 채점
         from app.strategies.strategy_factory import get_strategy
         strategy_instance = get_strategy(settings.STRATEGY_TYPE)
@@ -543,7 +555,9 @@ async def analyze_single_ticker(ticker: str) -> dict:
             'is_vcp': False,
             'is_cup': False,
             'is_orb_breakout': is_orb_breakout,
-            'risk_level': risk_level
+            'risk_level': risk_level,
+            'is_double_bb_buy': is_double_bb_buy,
+            'is_double_bb_sell': is_double_bb_sell
         }
 
         if not df_daily.empty and len(df_daily) >= 120:

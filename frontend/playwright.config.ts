@@ -30,7 +30,9 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
     env: {
-      NEXT_PUBLIC_API_BASE: "http://127.0.0.1:8000/api/v1",
+      NEXT_DIST_DIR: ".next-e2e",
+      NEXT_PUBLIC_API_BASE: "/api/v1",
+      BACKEND_API_ORIGIN: "http://127.0.0.1:8000",
     },
   },
 });

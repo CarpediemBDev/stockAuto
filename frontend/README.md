@@ -14,6 +14,7 @@ npm run local
 ```
 
 브라우저에서 [http://localhost:3000](http://localhost:3000)을 열어 결과를 확인하세요.
+프론트엔드의 `/api/v1` 요청은 Next.js가 백엔드로 전달하므로 refresh 쿠키는 `localhost` 기준으로 유지됩니다.
 
 `app/page.tsx` 파일을 수정하여 대시보드 편집을 시작할 수 있습니다. 파일을 수정하면 페이지가 자동으로 업데이트됩니다.
 

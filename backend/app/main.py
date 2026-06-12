@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 from app.core.exceptions import StockAutoException, stock_auto_exception_handler
+from app.core.config import get_allowed_origins
 from app.translations.translator import Translator
 from app.bot.scheduler import start_scheduler
 from app.bot.order_discovery import discover_orphan_orders_once
@@ -79,22 +80,12 @@ async def global_exception_handler(request, exc):
         }
     )
 
-# Add allowed origins dynamically from env for cloud deployment (Vercel)
-import os
-allowed_origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-env_origins = os.getenv("ALLOWED_ORIGINS")
-if env_origins:
-    allowed_origins.extend([origin.strip() for origin in env_origins.split(",") if origin.strip()])
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Accept", "Authorization", "Content-Type"],
 )
 
 # 💡 API 라우터 바인딩

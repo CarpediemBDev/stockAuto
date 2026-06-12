@@ -73,16 +73,11 @@ const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
         </h4>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {radarTickers.length === 0 ? (
-            ["AKAN", "WNW", "ASTC", "SDA", "HUBC"].map((t) => (
-              <div 
-                key={t}
-                className="bg-slate-950/80 border border-amber-500/30 hover:border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.05)] hover:shadow-[0_0_15px_rgba(245,158,11,0.2)] rounded-xl p-3 text-center transition-all duration-300 relative overflow-hidden animate-pulse"
-              >
-                <div className="absolute top-0 right-0 w-1.5 h-1.5 bg-amber-500 rounded-full animate-ping" />
-                <span className="text-xs font-black text-slate-200 tracking-tight block">{t}</span>
-                <span className="text-[9px] text-amber-500/80 font-bold block mt-0.5">RVOL ≥ 2.0</span>
-              </div>
-            ))
+            <div className="col-span-full py-4 text-center border border-dashed border-slate-850 rounded-xl bg-slate-950/30">
+              <span className="text-xs text-slate-500 font-bold tracking-tight block animate-pulse">
+                실시간 감지된 돌파 레이더 종목이 없습니다. (RVOL ≥ 2.0 대기 중)
+              </span>
+            </div>
           ) : (
             radarTickers.map((t) => {
               const matchingSig = signals.find(s => s.ticker === t);

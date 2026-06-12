@@ -433,3 +433,122 @@ def calculate_obv_divergence(df: pd.DataFrame, window: int = 10) -> pd.Series:
             
     return pd.Series(scores, index=df.index)
 
+
+def calculate_double_bb_reversion_signals(
+    df: pd.DataFrame,
+    window: int = 20,
+    std_inner: float = 2.0,
+    std_outer: float = 3.0,
+    trigger_expiry: int = 3,
+    rsi_period: int = 14,
+    rsi_threshold: float = 30.0,
+    use_rsi_filter: bool = True
+) -> pd.DataFrame:
+    """
+    마켓트랩 볼린저 밴드 2개(2SD, 3SD) 및 RSI를 활용한 1분봉 역추세 매매 시그널 상태 기계.
+    df에 'lower_3sd', 'lower_2sd', 'upper_2sd', 'upper_3sd', 'is_double_bb_buy' 등의 컬럼을 추가한 복사본을 반환합니다.
+    """
+    if df.empty or len(df) < window:
+        # Fallback empty dataframe structure
+        res = df.copy()
+        res['lower_3sd'] = df['Close'] if not df.empty else 0.0
+        res['lower_2sd'] = df['Close'] if not df.empty else 0.0
+        res['upper_2sd'] = df['Close'] if not df.empty else 0.0
+        res['upper_3sd'] = df['Close'] if not df.empty else 0.0
+        res['is_double_bb_buy'] = 0.0
+        res['is_double_bb_sell'] = 0.0
+        return res
+
+    temp_df = df.copy()
+    if isinstance(temp_df.columns, pd.MultiIndex):
+        temp_df.columns = temp_df.columns.get_level_values(0)
+
+    close_vals = temp_df['Close'].squeeze().values
+    high_vals = temp_df['High'].squeeze().values
+    low_vals = temp_df['Low'].squeeze().values
+
+    # 볼린저 밴드 계산
+    ma = temp_df['Close'].rolling(window=window).mean()
+    std = temp_df['Close'].rolling(window=window).std()
+
+    lower_2sd = ma - std * std_inner
+    upper_2sd = ma + std * std_inner
+    lower_3sd = ma - std * std_outer
+    upper_3sd = ma + std * std_outer
+
+    lower_2sd_vals = lower_2sd.fillna(temp_df['Close']).values
+    upper_2sd_vals = upper_2sd.fillna(temp_df['Close']).values
+    lower_3sd_vals = lower_3sd.fillna(temp_df['Close']).values
+    upper_3sd_vals = upper_3sd.fillna(temp_df['Close']).values
+
+    # RSI 계산
+    rsi_series = calculate_rsi(temp_df['Close'], period=rsi_period)
+    rsi_vals = rsi_series.values
+
+    buy_signals = np.zeros(len(temp_df))
+    sell_signals = np.zeros(len(temp_df))
+
+    # 상태 기계 제어 변수
+    broke_3sd = False
+    setup_active = False
+    trigger_high = 0.0
+    setup_low = 0.0
+    setup_idx = -1
+
+    for i in range(len(temp_df)):
+        c = float(close_vals[i])
+        h = float(high_vals[i])
+        l = float(low_vals[i])
+
+        # 2SD 상단 터치 시 익절 신호
+        if c >= upper_2sd_vals[i]:
+            sell_signals[i] = 1.0
+
+        # 1단계: 3SD 하단 이탈
+        if c < lower_3sd_vals[i]:
+            if not use_rsi_filter or rsi_vals[i] <= rsi_threshold:
+                broke_3sd = True
+                setup_active = False  # 새 셋업을 위해 기존 셋업 초기화
+
+        # 2단계: 2SD 하단 안으로 복귀
+        elif broke_3sd and c > lower_2sd_vals[i]:
+            trigger_high = h
+            setup_low = l
+            setup_active = True
+            setup_idx = i
+            broke_3sd = False
+
+        # 3단계: 트리거 돌파 감지
+        if setup_active:
+            # 만료 또는 저점 이탈 시 셋업 무효화
+            if i - setup_idx > trigger_expiry:
+                setup_active = False
+            elif c < setup_low:
+                setup_active = False
+            # 종가가 복귀 캔들의 고가를 돌파 안착하면 매수 신호 발생
+            elif c > trigger_high:
+                buy_signals[i] = 1.0
+                setup_active = False
+
+    # 컬럼 추가
+    df_copy = df.copy()
+    # MultiIndex 대응
+    if isinstance(df_copy.columns, pd.MultiIndex):
+        # MultiIndex인 경우 첫 레벨 기준으로 새 컬럼을 주입
+        level0 = df_copy.columns.get_level_values(0)[0]
+        df_copy[(level0, 'lower_3sd')] = lower_3sd_vals
+        df_copy[(level0, 'lower_2sd')] = lower_2sd_vals
+        df_copy[(level0, 'upper_2sd')] = upper_2sd_vals
+        df_copy[(level0, 'upper_3sd')] = upper_3sd_vals
+        df_copy[(level0, 'is_double_bb_buy')] = buy_signals
+        df_copy[(level0, 'is_double_bb_sell')] = sell_signals
+    else:
+        df_copy['lower_3sd'] = lower_3sd_vals
+        df_copy['lower_2sd'] = lower_2sd_vals
+        df_copy['upper_2sd'] = upper_2sd_vals
+        df_copy['upper_3sd'] = upper_3sd_vals
+        df_copy['is_double_bb_buy'] = buy_signals
+        df_copy['is_double_bb_sell'] = sell_signals
+
+    return df_copy
+

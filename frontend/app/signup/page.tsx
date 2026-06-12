@@ -35,8 +35,8 @@ export default function SignupPage() {
       return;
     }
 
-    if (password.length < 4) {
-      toast.error("비밀번호는 최소 4글자 이상이어야 합니다.");
+    if (password.length < 12) {
+      toast.error("비밀번호는 최소 12글자 이상이어야 합니다.");
       return;
     }
 
@@ -50,9 +50,9 @@ export default function SignupPage() {
       const res = await authAPI.signup(username, password);
       const newToken = res.data.access_token;
       const newUsername = res.data.username;
-      const newRefreshToken = res.data.refresh_token;
+      const newRole = res.data.role;
 
-      setAuth(newToken, newUsername, newRefreshToken);
+      setAuth(newToken, newUsername, newRole);
       toast.success("회원가입이 완료되었으며, 성공적으로 로그인되었습니다!");
       router.push("/");
     } catch (err: unknown) {
@@ -93,7 +93,7 @@ export default function SignupPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-zinc-300 block">비밀번호 (4글자 이상)</label>
+            <label className="text-xs font-semibold text-zinc-300 block">비밀번호 (12글자 이상)</label>
             <input
               type="password"
               placeholder="Password"

@@ -191,7 +191,6 @@ export function BacktestTournament() {
     return colors[index] || '#64748b';
   };
 
-  const tickersList = ["AKAN", "WNW", "ASTC", "SDA", "HUBC", "MNTS", "ITP", "SES", "AEHL", "ODYS", "PRFX"];
   const chartData = getChartData();
 
   return (
@@ -206,7 +205,7 @@ export function BacktestTournament() {
               배틀 아레나 (종합 백테스트 대항전)
             </h2>
             <p className="text-xs text-zinc-400">
-              최정예 11대 포트폴리오를 대입하여 5대 전략이 과거 시간 축에서 일궈낸 자산 성장 곡선을 동적으로 시뮬레이션합니다.
+              스윙 스캐너가 실시간 발굴한 포트폴리오를 대입하여 각 전략이 과거 시간 축에서 일궈낸 자산 성장 곡선을 동적으로 시뮬레이션합니다.
             </p>
           </div>
           
@@ -495,7 +494,7 @@ export function BacktestTournament() {
                           <div className="flex-1 text-right">총 실현손익</div>
                         </div>
                         
-                        {tickersList.map((t) => {
+                        {Object.keys(selectedStrategy.ticker_stats || {}).map((t) => {
                           const stat = selectedStrategy.ticker_stats[t] || { buys: 0, sells: 0, pnl: 0 };
                           const total = stat.buys + stat.sells;
                           const isProfit = stat.pnl > 0;

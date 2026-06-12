@@ -78,6 +78,10 @@ def get_strategy(strategy_type: str) -> BaseStrategy:
         from app.strategies.regime_switching import RegimeSwitching
         return RegimeSwitching()
 
+    elif strategy_type in ["double_bb_reversion", "double_bb"]:
+        from app.strategies.double_bb_reversion import DoubleBbReversion
+        return DoubleBbReversion()
+
     elif strategy_type == "episodic_pivot":
         from app.strategies.episodic_pivot import EpisodicPivot
         return EpisodicPivot()

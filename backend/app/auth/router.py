@@ -4,13 +4,16 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from app.core.database import get_db
 from app.core.models import User, UserSettings, RefreshToken, utc_now_aware
-from app.core.config import settings
+from app.core.config import get_allowed_origins, settings
 from app.core.logging import logger
 from app.core.security import (
+    DUMMY_PASSWORD_HASH,
+    REFRESH_TOKEN_EXPIRE_DAYS,
     create_access_token,
     create_refresh_token,
     decode_refresh_token,
     get_password_hash,
+    hash_refresh_token,
     verify_password,
 )
 from app.core.dependencies import get_current_user
@@ -18,6 +21,7 @@ from datetime import timedelta
 
 router = APIRouter()
 REFRESH_COOKIE_PATH = "/api/v1/auth"
+REFRESH_COOKIE_MAX_AGE = REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
@@ -25,10 +29,11 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         key="refresh_token",
         value=token,
         httponly=True,
-        max_age=14 * 24 * 60 * 60,
-        samesite="lax",
-        secure=settings.IS_PROD,
+        max_age=REFRESH_COOKIE_MAX_AGE,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,
+        secure=settings.REFRESH_COOKIE_SECURE,
         path=REFRESH_COOKIE_PATH,
+        domain=settings.REFRESH_COOKIE_DOMAIN,
     )
 
 
@@ -36,42 +41,82 @@ def _delete_refresh_cookie(response: Response) -> None:
     response.delete_cookie(
         "refresh_token",
         path=REFRESH_COOKIE_PATH,
-        secure=settings.IS_PROD,
-        samesite="lax",
+        secure=settings.REFRESH_COOKIE_SECURE,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,
+        domain=settings.REFRESH_COOKIE_DOMAIN,
     )
 
+
+def _validate_cookie_request_origin(request: Request) -> None:
+    origin = request.headers.get("origin")
+    if origin and origin not in get_allowed_origins():
+        logger.warning("[Security] Rejected auth cookie request from untrusted origin: %s", origin)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="허용되지 않은 요청 출처입니다.")
+
+
+def _find_refresh_token(db: Session, token: str) -> RefreshToken | None:
+    token_hash = hash_refresh_token(token)
+    db_token = db.query(RefreshToken).filter(RefreshToken.token == token_hash).first()
+    if db_token:
+        return db_token
+
+    # 기존 평문 저장 세션은 첫 사용 시 회전되도록 한시적으로 호환합니다.
+    return db.query(RefreshToken).filter(RefreshToken.token == token).first()
+
+
+def _new_refresh_token(user: User, db: Session) -> str:
+    token = create_refresh_token(subject=user.id)
+    db.add(
+        RefreshToken(
+            user_id=user.id,
+            token=hash_refresh_token(token),
+            expires_at=utc_now_aware() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        )
+    )
+    return token
+
+
+def _token_response(user: User, access_token: str) -> dict:
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "username": user.username,
+        "role": user.role,
+    }
+
+
 # --- Pydantic Schemas ---
-class UserAuthSchema(BaseModel):
+class LoginSchema(BaseModel):
     username: str = Field(..., min_length=3, max_length=50, description="로그인 아이디")
-    password: str = Field(..., min_length=4, description="비밀번호")
+    password: str = Field(..., min_length=1, max_length=128, description="비밀번호")
+
+
+class SignupSchema(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50, description="로그인 아이디")
+    password: str = Field(..., min_length=12, max_length=128, description="비밀번호")
 
 class TokenResponseSchema(BaseModel):
     access_token: str
     token_type: str = "bearer"
     username: str
-    refresh_token: Optional[str] = None
-
-class RefreshRequestSchema(BaseModel):
-    refresh_token: str
-
-class LogoutRequestSchema(BaseModel):
-    refresh_token: Optional[str] = None
+    role: str
 
 class UserProfileSchema(BaseModel):
     id: int
     username: str
+    role: str
     trade_mode: str
     broker_provider: Optional[str] = None
     telegram_enabled: bool
 
 class ChangePasswordSchema(BaseModel):
     old_password: str
-    new_password: str = Field(..., min_length=4)
+    new_password: str = Field(..., min_length=12, max_length=128)
 
 # --- Routes ---
 
 @router.post("/signup", response_model=TokenResponseSchema, status_code=status.HTTP_201_CREATED)
-def signup(payload: UserAuthSchema, response: Response, db: Session = Depends(get_db)):
+def signup(payload: SignupSchema, response: Response, db: Session = Depends(get_db)):
     """
     신규 사용자 회원가입 및 초기 설정 레코드 동시 생성 API (트랜잭션 원자성 강화)
     """
@@ -95,17 +140,12 @@ def signup(payload: UserAuthSchema, response: Response, db: Session = Depends(ge
         db.add(new_settings)
 
         # 3. 회원가입 완료 후 즉시 사용 가능한 JWT 토큰 발급
-        access_token = create_access_token(subject=new_user.id)
-        refresh_token = create_refresh_token(subject=new_user.id)
-
-        # 4. Refresh Token DB 저장
-        db_rt = RefreshToken(
-            user_id=new_user.id,
-            token=refresh_token,
-            expires_at=utc_now_aware() + timedelta(days=14)
+        access_token = create_access_token(
+            subject=new_user.id,
+            token_version=new_user.token_version,
         )
-        db.add(db_rt)
-        
+        refresh_token = _new_refresh_token(new_user, db)
+
         # 변경사항 전체 일괄 커밋
         db.commit()
         logger.info(f"[Auth] New user registered successfully: {new_user.username}")
@@ -120,15 +160,10 @@ def signup(payload: UserAuthSchema, response: Response, db: Session = Depends(ge
     # HttpOnly 쿠키에 Refresh Token 설정 (쿠키 호환성 유지)
     _set_refresh_cookie(response, refresh_token)
 
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "username": new_user.username,
-        "refresh_token": refresh_token
-    }
+    return _token_response(new_user, access_token)
 
 @router.post("/login", response_model=TokenResponseSchema)
-def login(payload: UserAuthSchema, response: Response, db: Session = Depends(get_db)):
+def login(payload: LoginSchema, response: Response, db: Session = Depends(get_db)):
     """
     사용자 로그인 및 JWT 발급 API (브루트포스 방어 및 타이밍 공격 방어 포함)
     """
@@ -139,7 +174,7 @@ def login(payload: UserAuthSchema, response: Response, db: Session = Depends(get
         is_password_correct = verify_password(payload.password, user.hashed_password)
     else:
         # 동일한 부하가 걸리도록 더미 bcrypt 연산 실행
-        verify_password(payload.password, "$2b$12$DUMMYHASHFORSECURITYPURPOSESONLYDONTUSETHISONE")
+        verify_password(payload.password, DUMMY_PASSWORD_HASH)
         is_password_correct = False
 
     # 잠금 상태 체크 (유저가 존재할 때만 실행)
@@ -178,42 +213,28 @@ def login(payload: UserAuthSchema, response: Response, db: Session = Depends(get
     db.commit()
     logger.info(f"[Auth] User logged in successfully: {user.username}")
 
-    access_token = create_access_token(subject=user.id)
-    refresh_token = create_refresh_token(subject=user.id)
-
-    # Refresh Token DB 저장
-    db_rt = RefreshToken(
-        user_id=user.id,
-        token=refresh_token,
-        expires_at=utc_now_aware() + timedelta(days=14)
+    access_token = create_access_token(
+        subject=user.id,
+        token_version=user.token_version,
     )
-    db.add(db_rt)
+    refresh_token = _new_refresh_token(user, db)
     db.commit()
 
     _set_refresh_cookie(response, refresh_token)
 
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "username": user.username,
-        "refresh_token": refresh_token
-    }
+    return _token_response(user, access_token)
 
 @router.post("/refresh", response_model=TokenResponseSchema)
 def refresh_token(
-    payload: Optional[RefreshRequestSchema] = None,
-    request: Request = None,
-    response: Response = None,
-    db: Session = Depends(get_db)
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
 ):
     """
-    JSON 바디 또는 HttpOnly 쿠키의 Refresh Token을 사용해 새 Access Token을 발급합니다.
+    HttpOnly 쿠키의 Refresh Token을 회전하고 새 Access Token을 발급합니다.
     """
-    token = None
-    if payload:
-        token = payload.refresh_token
-    if not token and request:
-        token = request.cookies.get("refresh_token")
+    _validate_cookie_request_origin(request)
+    token = request.cookies.get("refresh_token")
 
     if not token:
         raise HTTPException(status_code=401, detail="Refresh token missing")
@@ -222,8 +243,9 @@ def refresh_token(
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
     # DB 토큰 검증
-    db_token = db.query(RefreshToken).filter(RefreshToken.token == token).first()
+    db_token = _find_refresh_token(db, token)
     if not db_token or db_token.is_revoked or db_token.expires_at < utc_now_aware():
+        _delete_refresh_cookie(response)
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
     if str(db_token.user_id) != token_user_id:
         raise HTTPException(status_code=401, detail="Refresh token subject mismatch")
@@ -231,34 +253,33 @@ def refresh_token(
     # 유저 조회
     user = db.query(User).filter(User.id == db_token.user_id).first()
     if not user:
+        _delete_refresh_cookie(response)
         raise HTTPException(status_code=401, detail="User not found")
 
-    access_token = create_access_token(subject=user.id)
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "username": user.username,
-        "refresh_token": token
-    }
+    db_token.is_revoked = True
+    rotated_refresh_token = _new_refresh_token(user, db)
+    access_token = create_access_token(
+        subject=user.id,
+        token_version=user.token_version,
+    )
+    db.commit()
+    _set_refresh_cookie(response, rotated_refresh_token)
+    return _token_response(user, access_token)
 
 @router.post("/logout")
 def logout(
-    payload: Optional[LogoutRequestSchema] = None,
-    request: Request = None,
-    response: Response = None,
-    db: Session = Depends(get_db)
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
 ):
     """
     로그아웃 (Refresh Token 파기 및 쿠키 삭제)
     """
-    token = None
-    if payload:
-        token = payload.refresh_token
-    if not token and request:
-        token = request.cookies.get("refresh_token")
+    _validate_cookie_request_origin(request)
+    token = request.cookies.get("refresh_token")
 
     if token:
-        db_token = db.query(RefreshToken).filter(RefreshToken.token == token).first()
+        db_token = _find_refresh_token(db, token)
         if db_token:
             db_token.is_revoked = True
             db.commit()
@@ -281,6 +302,7 @@ def change_password(
         raise HTTPException(status_code=400, detail="기존 비밀번호가 일치하지 않습니다.")
 
     current_user.hashed_password = get_password_hash(payload.new_password)
+    current_user.token_version += 1
 
     # 기존 모든 Refresh Token 무효화
     db.query(RefreshToken).filter(RefreshToken.user_id == current_user.id).update({"is_revoked": True})
@@ -299,6 +321,7 @@ def get_me(current_user: User = Depends(get_current_user)):
     return {
         "id": current_user.id,
         "username": current_user.username,
+        "role": current_user.role,
         "trade_mode": current_user.settings.trade_mode if current_user.settings else "SIMULATED",
         "broker_provider": current_user.settings.broker_provider if current_user.settings else None,
         "telegram_enabled": current_user.settings.telegram_enabled if current_user.settings else False
