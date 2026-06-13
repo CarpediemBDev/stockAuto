@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from app.core.database import get_db
 from app.core.models import User, UserSettings, RefreshToken, utc_now_aware
@@ -24,6 +24,7 @@ REFRESH_COOKIE_NAME = "refresh_token"
 REFRESH_COOKIE_PATH = "/api/v1/auth"
 LEGACY_REFRESH_COOKIE_PATHS = ("/",)
 REFRESH_COOKIE_MAX_AGE = REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+BCRYPT_MAX_PASSWORD_BYTES = 72
 
 
 def _delete_refresh_cookie_at_path(response: Response, path: str) -> None:
@@ -137,6 +138,12 @@ def _token_response(user: User, access_token: str) -> dict:
     }
 
 
+def _validate_bcrypt_password_length(password: str) -> str:
+    if len(password.encode("utf-8")) > BCRYPT_MAX_PASSWORD_BYTES:
+        raise ValueError("비밀번호는 UTF-8 기준 72바이트 이하여야 합니다.")
+    return password
+
+
 # --- Pydantic Schemas ---
 class LoginSchema(BaseModel):
     username: str = Field(..., min_length=3, max_length=50, description="로그인 아이디")
@@ -146,6 +153,9 @@ class LoginSchema(BaseModel):
 class SignupSchema(BaseModel):
     username: str = Field(..., min_length=3, max_length=50, description="로그인 아이디")
     password: str = Field(..., min_length=12, max_length=128, description="비밀번호")
+
+    _validate_password_bytes = field_validator("password")(_validate_bcrypt_password_length)
+
 
 class TokenResponseSchema(BaseModel):
     access_token: str
@@ -164,6 +174,8 @@ class UserProfileSchema(BaseModel):
 class ChangePasswordSchema(BaseModel):
     old_password: str
     new_password: str = Field(..., min_length=12, max_length=128)
+
+    _validate_password_bytes = field_validator("new_password")(_validate_bcrypt_password_length)
 
 # --- Routes ---
 

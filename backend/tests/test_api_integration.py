@@ -354,6 +354,40 @@ def test_signup_rejects_short_password(integration_app):
         assert response.status_code == 422
 
 
+def test_signup_rejects_password_over_bcrypt_byte_limit(integration_app):
+    with TestClient(integration_app) as client:
+        response = client.post(
+            "/api/v1/auth/signup",
+            json={"username": "long_password", "password": "a" * 73},
+        )
+
+        assert response.status_code == 422
+        assert "72바이트" in response.json()["detail"][0]["msg"]
+
+
+def test_change_password_rejects_password_over_bcrypt_byte_limit(integration_app):
+    with TestClient(integration_app) as client:
+        signup_response = client.post(
+            "/api/v1/auth/signup",
+            json={"username": "password_limit", "password": "initialpassword123"},
+        )
+        headers = {
+            "Authorization": f"Bearer {signup_response.json()['access_token']}",
+        }
+
+        response = client.post(
+            "/api/v1/auth/change-password",
+            json={
+                "old_password": "initialpassword123",
+                "new_password": "a" * 73,
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+        assert "72바이트" in response.json()["detail"][0]["msg"]
+
+
 def test_brute_force_defense_and_lockout_reset(integration_app, test_session_factory):
     from datetime import timedelta
     from app.core.models import utc_now_aware

@@ -45,6 +45,39 @@ test("empty login submission shows client-side validation", async ({ page }) => 
   await expect(page.getByText("아이디와 비밀번호를 모두 입력해 주세요.")).toBeVisible();
 });
 
+test("failed login does not trigger silent refresh", async ({ page }) => {
+  await page.goto("/login");
+  await page.unroute("**/api/v1/auth/refresh");
+
+  let refreshRequestCount = 0;
+  await page.route("**/api/v1/auth/refresh", async (route) => {
+    refreshRequestCount += 1;
+    await route.fulfill({
+      status: 200,
+      json: {
+        access_token: "unexpected-refreshed-token",
+        token_type: "bearer",
+        username: "existing-user",
+        role: "USER",
+      },
+    });
+  });
+  await page.route("**/api/v1/auth/login", async (route) => {
+    await route.fulfill({
+      status: 401,
+      json: { detail: "아이디 또는 비밀번호가 올바르지 않습니다." },
+    });
+  });
+
+  await page.getByPlaceholder("Username").fill("existing-user");
+  await page.getByPlaceholder("Password").fill("wrong-password");
+  await page.getByRole("button", { name: "로그인" }).click();
+
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByText("아이디 또는 비밀번호가 올바르지 않습니다.")).toBeVisible();
+  expect(refreshRequestCount).toBe(0);
+});
+
 test("HttpOnly refresh cookie survives different local ports and reload", async ({ page }) => {
   await page.unroute("**/api/v1/auth/refresh");
   let refreshSawCookie = false;

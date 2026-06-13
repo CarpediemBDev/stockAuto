@@ -114,7 +114,7 @@ def decode_refresh_token(token: str) -> Union[str, None]:
         if decoded_token.get("type") != "refresh":
             return None
         return decoded_token["sub"]
-    except jwt.PyJWTError:
+    except (jwt.PyJWTError, KeyError):
         return None
 
 

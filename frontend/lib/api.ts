@@ -31,6 +31,16 @@ export interface AuthSession {
 }
 
 let refreshSessionPromise: Promise<AuthSession> | null = null;
+const AUTH_REQUESTS_WITHOUT_REFRESH = [
+  '/auth/login',
+  '/auth/signup',
+  '/auth/refresh',
+] as const;
+
+const shouldSkipAuthRefresh = (url?: string): boolean => {
+  const requestPath = url?.split('?', 1)[0];
+  return AUTH_REQUESTS_WITHOUT_REFRESH.some((path) => requestPath?.endsWith(path));
+};
 
 const parseAuthSession = (payload: {
   data?: {
@@ -56,7 +66,10 @@ const parseAuthSession = (payload: {
 export const refreshAuthSession = (): Promise<AuthSession> => {
   if (!refreshSessionPromise) {
     refreshSessionPromise = axios
-      .post(`${API_BASE}/auth/refresh`, undefined, { withCredentials: true })
+      .post(`${API_BASE}/auth/refresh`, undefined, {
+        timeout: 15000,
+        withCredentials: true,
+      })
       .then((response) => {
         const session = parseAuthSession(response.data);
         useAuthStore.getState().setAuth(
@@ -114,7 +127,7 @@ api.interceptors.response.use(
       axiosError.response?.status === 401
       && originalRequest
       && !originalRequest._retry
-      && !originalRequest.url?.includes('/auth/refresh')
+      && !shouldSkipAuthRefresh(originalRequest.url)
     ) {
       const currentAccessToken = useAuthStore.getState().accessToken;
       const requestAuthorization = originalRequest.headers.Authorization;

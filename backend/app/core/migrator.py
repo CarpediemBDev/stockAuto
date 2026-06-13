@@ -26,6 +26,13 @@ def run_migrations_programmatically():
 
     # Alembic 설정 객체 로드
     alembic_cfg = Config(ini_path)
+    alembic_cfg.set_main_option(
+        "script_location",
+        os.path.join(backend_dir, "alembic"),
+    )
+    alembic_cfg.attributes["sqlalchemy_url"] = engine.url.render_as_string(
+        hide_password=False,
+    )
 
     # DB 테이블 현황 검사
     inspector = inspect(engine)
@@ -52,10 +59,12 @@ def run_migrations_programmatically():
 
     try:
         if has_users and not has_alembic:
-            logger.info("[Migration] 기존 데이터베이스 감지됨 (Alembic 관리 상태 아님). 최신 버전으로 스탬핑(Stamp) 처리 중...")
-            # 기존 DB의 경우 테이블 생성 단계를 건너뛰고 스키마가 최신(baseline) 상태라고 버전 테이블에 기록
-            command.stamp(alembic_cfg, "head")
-            logger.info("[Migration] 기존 데이터베이스 스탬핑 작업 완료 (head).")
+            logger.info("[Migration] 기존 데이터베이스 감지됨 (Alembic 관리 상태 아님). baseline 스탬핑 후 최신 마이그레이션을 적용합니다...")
+            # 기존 DB는 baseline 스키마까지만 이미 존재한다고 기록한 뒤,
+            # 이후 인증/주문/캐시 마이그레이션을 실제로 적용해야 합니다.
+            command.stamp(alembic_cfg, "001_baseline")
+            command.upgrade(alembic_cfg, "head")
+            logger.info("[Migration] 기존 데이터베이스 baseline 스탬핑 및 head 업그레이드 완료.")
         elif not has_users:
             logger.info("[Migration] 신규/비어있는 데이터베이스 감지됨. alembic upgrade head 실행하여 모든 테이블 생성 중...")
             # 신규 DB의 경우 모든 마이그레이션을 처음부터 순서대로 실행해 테이블 전체 생성
