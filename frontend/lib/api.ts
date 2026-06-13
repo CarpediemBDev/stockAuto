@@ -15,12 +15,6 @@ const api = axios.create({
   withCredentials: true, // HttpOnly 쿠키 통신을 위한 필수 설정
 });
 
-let isRefreshing = false;
-interface PendingRequest {
-  resolve: (token: string | null) => void;
-  reject: (reason: unknown) => void;
-}
-
 interface RetryableRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
 }
@@ -36,19 +30,7 @@ export interface AuthSession {
   role: string;
 }
 
-let failedQueue: PendingRequest[] = [];
 let refreshSessionPromise: Promise<AuthSession> | null = null;
-
-const processQueue = (error: unknown, token: string | null = null) => {
-  failedQueue.forEach(prom => {
-    if (error) {
-      prom.reject(error);
-    } else {
-      prom.resolve(token);
-    }
-  });
-  failedQueue = [];
-};
 
 const parseAuthSession = (payload: {
   data?: {
@@ -75,7 +57,15 @@ export const refreshAuthSession = (): Promise<AuthSession> => {
   if (!refreshSessionPromise) {
     refreshSessionPromise = axios
       .post(`${API_BASE}/auth/refresh`, undefined, { withCredentials: true })
-      .then((response) => parseAuthSession(response.data))
+      .then((response) => {
+        const session = parseAuthSession(response.data);
+        useAuthStore.getState().setAuth(
+          session.accessToken,
+          session.username,
+          session.role,
+        );
+        return session;
+      })
       .finally(() => {
         refreshSessionPromise = null;
       });
@@ -126,37 +116,26 @@ api.interceptors.response.use(
       && !originalRequest._retry
       && !originalRequest.url?.includes('/auth/refresh')
     ) {
-      if (isRefreshing) {
-        return new Promise<string | null>(function(resolve, reject) {
-          failedQueue.push({ resolve, reject });
-        }).then(token => {
-          if (token) {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
-          }
-          return api(originalRequest);
-        }).catch(err => {
-          return Promise.reject(err);
-        });
+      const currentAccessToken = useAuthStore.getState().accessToken;
+      const requestAuthorization = originalRequest.headers.Authorization;
+
+      // 다른 401 요청이 이미 토큰을 갱신했다면 refresh를 반복하지 않고 새 토큰으로 재시도합니다.
+      if (
+        currentAccessToken
+        && requestAuthorization !== `Bearer ${currentAccessToken}`
+      ) {
+        originalRequest._retry = true;
+        originalRequest.headers.Authorization = `Bearer ${currentAccessToken}`;
+        return api(originalRequest);
       }
 
       originalRequest._retry = true;
-      isRefreshing = true;
 
       try {
         const session = await refreshAuthSession();
-
-        // Zustand 업데이트
-        useAuthStore.getState().setAuth(
-          session.accessToken,
-          session.username,
-          session.role,
-        );
-
-        processQueue(null, session.accessToken);
         originalRequest.headers.Authorization = `Bearer ${session.accessToken}`;
         return api(originalRequest);
       } catch (refreshError: unknown) {
-        processQueue(refreshError, null);
         useAuthStore.getState().clearAuth();
         if (typeof window !== 'undefined') {
           if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/signup')) {
@@ -164,8 +143,6 @@ api.interceptors.response.use(
           }
         }
         return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
       }
     }
 

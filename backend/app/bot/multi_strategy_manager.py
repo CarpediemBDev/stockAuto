@@ -48,6 +48,34 @@ class MultiStrategyManager:
         return prefix_map.get(strategy_type, "ST_")
 
     def _get_name_for_strategy(self, strategy_type: str) -> str:
+        if not strategy_type:
+            return "미지정 전략"
+
+        # 1. DB/Cache lookup using a format like STRATEGY:KEY
+        db_key = f"STRATEGY:{strategy_type.upper().strip()}"
+        try:
+            from app.translations.translator import Translator
+            if Translator._cache and db_key in Translator._cache:
+                return Translator._cache[db_key]
+        except Exception:
+            pass
+
+        try:
+            from app.core.database import SessionLocal
+            from app.core import models
+            db = SessionLocal()
+            try:
+                db_trans = db.query(models.StockTranslation).filter(models.StockTranslation.ticker == db_key).first()
+                if db_trans:
+                    from app.translations.translator import Translator
+                    Translator._cache[db_key] = db_trans.name_ko
+                    return db_trans.name_ko
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+        # 2. Local fallback map
         name_map = {
             "regime_switching": "마스터 레짐스위칭 V2",
             "episodic_pivot": "에피소딕 피벗 (Episodic Pivot)",
@@ -64,9 +92,12 @@ class MultiStrategyManager:
             "strategy_b": "전략 B (실험용)",
             "strategy_c": "전략 C (11대 복합)",
             "exploded_c": "전략 C-폭발형 (즉시 풀비중)",
-            "asqs": "ASQS 돌파 (ASQS Breakout)"
+            "asqs": "ASQS 돌파 (ASQS Breakout)",
+            "multi_slot": "격리형 2슬롯 (EP 50% : RS 50%)",
+            "three_slot": "격리형 3슬롯 (EP 30% : ASQS 30% : RS 40%)",
+            "multi_slot_3": "격리형 3슬롯 (EP 30% : ASQS 30% : RS 40%)"
         }
-        return name_map.get(strategy_type, f"단일 전략 ({strategy_type})")
+        return name_map.get(strategy_type.lower(), f"단일 전략 ({strategy_type})")
 
     def __init__(self, strategy_type: str = "multi_slot"):
         if not strategy_type:

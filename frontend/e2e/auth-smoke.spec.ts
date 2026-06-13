@@ -57,10 +57,23 @@ test("HttpOnly refresh cookie survives different local ports and reload", async 
     });
   };
 
+  const fulfillProtected = async (route: Route, data: unknown) => {
+    const isAuthorized =
+      route.request().headers()["authorization"] === "Bearer refreshed-access-token";
+    if (!isAuthorized) {
+      await route.fulfill({
+        status: 401,
+        json: { detail: "Expired access token" },
+      });
+      return;
+    }
+    await fulfillSuccess(route, data);
+  };
+
   await page.route("**/api/v1/bot/status", (route) =>
-    fulfillSuccess(route, { is_running: false, is_real: false }),
+    fulfillProtected(route, { is_running: false, is_real: false }),
   );
-  await page.route("**/api/v1/trades", (route) => fulfillSuccess(route, []));
+  await page.route("**/api/v1/trades", (route) => fulfillProtected(route, []));
   await page.route("**/api/v1/account/balance", (route) =>
     fulfillSuccess(route, {
       total_asset: 0,
@@ -119,10 +132,15 @@ test("HttpOnly refresh cookie survives different local ports and reload", async 
   });
 
   await page.goto("/login");
+  await expect.poll(() => refreshRequestCount).toBe(1);
+  refreshRequestCount = 0;
+  refreshSawCookie = false;
   await page.getByPlaceholder("Username").fill("cookie-user");
   await page.getByPlaceholder("Password").fill("long-enough-password");
   await page.getByRole("button", { name: "로그인" }).click();
   await expect(page).toHaveURL("/");
+  await expect.poll(() => refreshRequestCount).toBe(1);
+  expect(refreshSawCookie).toBe(true);
 
   refreshRequestCount = 0;
   await page.reload();

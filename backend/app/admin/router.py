@@ -407,6 +407,10 @@ def list_users(
                 print(f"[Admin User List] Failed to fetch balance for user {user.username}: {e}")
                 profit_rate = 0.0
 
+        from app.bot.multi_strategy_manager import MultiStrategyManager
+        strategy_type = settings.strategy_type if settings else "regime_switching"
+        strategy_name = MultiStrategyManager()._get_name_for_strategy(strategy_type)
+
         result.append(
             {
                 "id": user.id,
@@ -419,7 +423,8 @@ def list_users(
                 "telegram_chat_id": settings.telegram_chat_id if settings else None,
                 "is_running": settings.is_running if settings else False,
                 "profit_rate": profit_rate,
-                "strategy_type": settings.strategy_type if settings else "regime_switching",
+                "strategy_type": strategy_type,
+                "strategy_name": strategy_name,
                 "credentials": [_credential_meta(c) for c in settings.credentials] if settings else [],
             }
         )

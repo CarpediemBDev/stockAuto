@@ -29,6 +29,7 @@ interface ManagedUser {
   is_running: boolean;
   profit_rate: number;
   strategy_type: string;
+  strategy_name?: string;
   credentials: BrokerCredentialMeta[];
 }
 
@@ -326,8 +327,8 @@ export function UserManagement() {
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-zinc-500 text-xs font-semibold">구동 알고리즘 전략</span>
-                      <span className="text-slate-300 font-bold bg-zinc-800/50 px-2 py-0.5 rounded text-[10px] border border-zinc-700/50 uppercase font-mono">
-                        {selectedUser.strategy_type?.replace(/_/g, ' ')}
+                      <span className="text-slate-300 font-bold bg-zinc-800/50 px-2 py-0.5 rounded text-[10px] border border-zinc-700/50">
+                        {selectedUser.strategy_name || selectedUser.strategy_type?.replace(/_/g, ' ')}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">

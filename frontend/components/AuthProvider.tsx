@@ -5,19 +5,14 @@ import { useAuthStore } from '../store/authStore';
 import { refreshAuthSession } from '../lib/api';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { setAuth, clearAuth, setInitialized, isInitialized } = useAuthStore();
+  const { clearAuth, setInitialized, isInitialized } = useAuthStore();
 
   useEffect(() => {
     if (isInitialized) return;
 
     const initAuth = async () => {
       try {
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('refresh_token');
-        }
-
-        const session = await refreshAuthSession();
-        setAuth(session.accessToken, session.username, session.role);
+        await refreshAuthSession();
       } catch {
         clearAuth();
       } finally {
@@ -26,7 +21,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     initAuth();
-  }, [isInitialized, setAuth, clearAuth, setInitialized]);
+  }, [isInitialized, clearAuth, setInitialized]);
 
   // 인증 상태 확인 전에는 화면을 그리지 않거나 스켈레톤을 표시하여
   // 로그인 풀림 깜빡임 현상(Flickering)을 방지합니다.

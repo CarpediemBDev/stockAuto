@@ -20,13 +20,29 @@ from app.core.dependencies import get_current_user
 from datetime import timedelta
 
 router = APIRouter()
+REFRESH_COOKIE_NAME = "refresh_token"
 REFRESH_COOKIE_PATH = "/api/v1/auth"
+LEGACY_REFRESH_COOKIE_PATHS = ("/",)
 REFRESH_COOKIE_MAX_AGE = REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
 
 
+def _delete_refresh_cookie_at_path(response: Response, path: str) -> None:
+    response.delete_cookie(
+        REFRESH_COOKIE_NAME,
+        path=path,
+        secure=settings.REFRESH_COOKIE_SECURE,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,
+        domain=settings.REFRESH_COOKIE_DOMAIN,
+    )
+
+
 def _set_refresh_cookie(response: Response, token: str) -> None:
+    for legacy_path in LEGACY_REFRESH_COOKIE_PATHS:
+        if legacy_path != REFRESH_COOKIE_PATH:
+            _delete_refresh_cookie_at_path(response, legacy_path)
+
     response.set_cookie(
-        key="refresh_token",
+        key=REFRESH_COOKIE_NAME,
         value=token,
         httponly=True,
         max_age=REFRESH_COOKIE_MAX_AGE,
@@ -38,13 +54,9 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
 
 
 def _delete_refresh_cookie(response: Response) -> None:
-    response.delete_cookie(
-        "refresh_token",
-        path=REFRESH_COOKIE_PATH,
-        secure=settings.REFRESH_COOKIE_SECURE,
-        samesite=settings.REFRESH_COOKIE_SAMESITE,
-        domain=settings.REFRESH_COOKIE_DOMAIN,
-    )
+    cookie_paths = {REFRESH_COOKIE_PATH, *LEGACY_REFRESH_COOKIE_PATHS}
+    for path in cookie_paths:
+        _delete_refresh_cookie_at_path(response, path)
 
 
 def _validate_cookie_request_origin(request: Request) -> None:
@@ -62,6 +74,46 @@ def _find_refresh_token(db: Session, token: str) -> RefreshToken | None:
 
     # 기존 평문 저장 세션은 첫 사용 시 회전되도록 한시적으로 호환합니다.
     return db.query(RefreshToken).filter(RefreshToken.token == token).first()
+
+
+def _get_refresh_cookie_candidates(request: Request) -> list[str]:
+    candidates: list[str] = []
+
+    # 쿠키 Path가 변경되면 브라우저가 같은 이름의 쿠키를 여러 개 보낼 수 있습니다.
+    for cookie_header in request.headers.getlist("cookie"):
+        for cookie_pair in cookie_header.split(";"):
+            name, separator, value = cookie_pair.strip().partition("=")
+            if separator and name == REFRESH_COOKIE_NAME and value:
+                candidates.append(value)
+
+    mapped_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if mapped_token:
+        candidates.append(mapped_token)
+
+    return list(dict.fromkeys(candidates))
+
+
+def _find_valid_refresh_cookie(
+    request: Request,
+    db: Session,
+) -> tuple[str, RefreshToken, str] | None:
+    now = utc_now_aware()
+
+    for token in _get_refresh_cookie_candidates(request):
+        token_user_id = decode_refresh_token(token)
+        if not token_user_id:
+            continue
+
+        db_token = _find_refresh_token(db, token)
+        if (
+            db_token
+            and not db_token.is_revoked
+            and db_token.expires_at >= now
+            and str(db_token.user_id) == token_user_id
+        ):
+            return token, db_token, token_user_id
+
+    return None
 
 
 def _new_refresh_token(user: User, db: Session) -> str:
@@ -234,21 +286,16 @@ def refresh_token(
     HttpOnly 쿠키의 Refresh Token을 회전하고 새 Access Token을 발급합니다.
     """
     _validate_cookie_request_origin(request)
-    token = request.cookies.get("refresh_token")
+    cookie_candidates = _get_refresh_cookie_candidates(request)
 
-    if not token:
+    if not cookie_candidates:
         raise HTTPException(status_code=401, detail="Refresh token missing")
-    token_user_id = decode_refresh_token(token)
-    if not token_user_id:
+
+    valid_cookie = _find_valid_refresh_cookie(request, db)
+    if not valid_cookie:
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
-    # DB 토큰 검증
-    db_token = _find_refresh_token(db, token)
-    if not db_token or db_token.is_revoked or db_token.expires_at < utc_now_aware():
-        _delete_refresh_cookie(response)
-        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
-    if str(db_token.user_id) != token_user_id:
-        raise HTTPException(status_code=401, detail="Refresh token subject mismatch")
+    _, db_token, _ = valid_cookie
 
     # 유저 조회
     user = db.query(User).filter(User.id == db_token.user_id).first()
@@ -276,13 +323,17 @@ def logout(
     로그아웃 (Refresh Token 파기 및 쿠키 삭제)
     """
     _validate_cookie_request_origin(request)
-    token = request.cookies.get("refresh_token")
+    cookie_candidates = _get_refresh_cookie_candidates(request)
+    revoked_token_ids: set[int] = set()
 
-    if token:
+    for token in cookie_candidates:
         db_token = _find_refresh_token(db, token)
-        if db_token:
+        if db_token and db_token.id not in revoked_token_ids:
             db_token.is_revoked = True
-            db.commit()
+            revoked_token_ids.add(db_token.id)
+
+    if revoked_token_ids:
+        db.commit()
 
     if response:
         _delete_refresh_cookie(response)

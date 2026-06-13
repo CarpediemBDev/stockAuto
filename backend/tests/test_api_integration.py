@@ -291,6 +291,33 @@ def test_refresh_cookie_rotation_hash_storage_and_origin_guard(integration_app, 
         assert replay_response.status_code == 401
 
 
+def test_refresh_uses_valid_cookie_when_legacy_root_cookie_has_same_name(integration_app):
+    with TestClient(integration_app) as client:
+        signup_response = client.post(
+            "/api/v1/auth/signup",
+            json={"username": "edge_cookie_tester", "password": "strongpassword123"},
+        )
+        assert signup_response.status_code == 201
+
+        client.cookies.set(
+            "refresh_token",
+            "legacy-invalid-token",
+            path="/",
+        )
+
+        refresh_response = client.post("/api/v1/auth/refresh")
+
+        assert refresh_response.status_code == 200
+        assert refresh_response.json()["username"] == "edge_cookie_tester"
+        set_cookie_headers = refresh_response.headers.get_list("set-cookie")
+        assert any(
+            "refresh_token=" in header
+            and "Path=/;" in header
+            and "Max-Age=0" in header
+            for header in set_cookie_headers
+        )
+
+
 def test_change_password_revokes_refresh_and_access_tokens(integration_app):
     with TestClient(integration_app) as client:
         signup_response = client.post(
