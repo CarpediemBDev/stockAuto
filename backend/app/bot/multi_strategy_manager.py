@@ -51,53 +51,11 @@ class MultiStrategyManager:
         if not strategy_type:
             return "미지정 전략"
 
-        # 1. DB/Cache lookup using a format like STRATEGY:KEY
-        db_key = f"STRATEGY:{strategy_type.upper().strip()}"
         try:
             from app.translations.translator import Translator
-            if Translator._cache and db_key in Translator._cache:
-                return Translator._cache[db_key]
+            return Translator.translate_strategy(strategy_type, "ko")
         except Exception:
-            pass
-
-        try:
-            from app.core.database import SessionLocal
-            from app.core import models
-            db = SessionLocal()
-            try:
-                db_trans = db.query(models.StockTranslation).filter(models.StockTranslation.ticker == db_key).first()
-                if db_trans:
-                    from app.translations.translator import Translator
-                    Translator._cache[db_key] = db_trans.name_ko
-                    return db_trans.name_ko
-            finally:
-                db.close()
-        except Exception:
-            pass
-
-        # 2. Local fallback map
-        name_map = {
-            "regime_switching": "마스터 레짐스위칭 V2",
-            "episodic_pivot": "에피소딕 피벗 (Episodic Pivot)",
-            "senior_simple": "시니어 단순화 (Strategy S)",
-            "qullamaggie": "쿨라매기 돌파 (Qullamaggie)",
-            "obv_only": "차트픽 OBV 매집 (OBV Only)",
-            "rsi_bb_only": "RSI 볼린저밴드 (RSI BB Only)",
-            "ema_only": "EMA 이평정배열 (EMA Only)",
-            "vwap_only": "VWAP 세력지지선 (VWAP Only)",
-            "orb_only": "토비크라벨 ORB (ORB Only)",
-            "rsi2_connors": "래리코너스 RSI 2",
-            "bb_squeeze": "존카터 BB스퀴즈 (TTM Squeeze)",
-            "strategy_a": "전략 A (태초 v1.0)",
-            "strategy_b": "전략 B (실험용)",
-            "strategy_c": "전략 C (11대 복합)",
-            "exploded_c": "전략 C-폭발형 (즉시 풀비중)",
-            "asqs": "ASQS 돌파 (ASQS Breakout)",
-            "multi_slot": "격리형 2슬롯 (EP 50% : RS 50%)",
-            "three_slot": "격리형 3슬롯 (EP 30% : ASQS 30% : RS 40%)",
-            "multi_slot_3": "격리형 3슬롯 (EP 30% : ASQS 30% : RS 40%)"
-        }
-        return name_map.get(strategy_type.lower(), f"단일 전략 ({strategy_type})")
+            return f"단일 전략 ({strategy_type})"
 
     def __init__(self, strategy_type: str = "multi_slot"):
         if not strategy_type:

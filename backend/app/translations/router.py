@@ -84,3 +84,9 @@ def delete_translation(trans_id: int, db: Session = Depends(get_db), current_adm
     db.delete(db_item)
     db.commit()
     return success_response(message=f"Successfully deleted {ticker_upper} translation.")
+
+
+@router.get("/strategies")
+def get_strategy_translations(current_user: User = Depends(get_current_user)):
+    """현재 로드된 모든 전략 다국어 번역 맵을 조회합니다."""
+    return success_response(data=Translator._strategy_cache)

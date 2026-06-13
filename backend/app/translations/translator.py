@@ -1,4 +1,6 @@
 import logging
+import os
+import yaml
 from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.core import models
@@ -9,6 +11,7 @@ logger = logging.getLogger(__name__)
 class Translator:
     _instance = None
     _cache = {}
+    _strategy_cache = {}
 
     def __new__(cls, *args, **kwargs):
         if not cls._instance:
@@ -17,22 +20,65 @@ class Translator:
 
     @classmethod
     def load_cache(cls):
-        """DB에서 한글 매핑 사전을 조회하여 메모리에 초고속 캐싱합니다."""
+        """DB에서 한글 매핑 사전을 조회하여 메모리에 초고속 캐싱하며, 전략 다국어 YAML 및 DB 찌꺼기 정리를 처리합니다."""
         db: Session = SessionLocal()
         try:
-            # 1. DB 조회
+            # 1. DB 주식 번역 조회 및 캐시 적재
             translations = db.query(models.StockTranslation).all()
-            
-            # 2. 메모리 캐시 적재
             cls._cache = {t.ticker.upper().strip(): t.name_ko for t in translations}
             logger.info(f"Successfully loaded {len(cls._cache)} stock translations into memory cache.")
             print(f"[i18n] Loaded {len(cls._cache)} stock translations from DB into memory cache.")
+
+            # 2. DB 내 STRATEGY: 레거시 데이터 자동 정리(Clean-up)
+            try:
+                deleted_count = db.query(models.StockTranslation).filter(
+                    models.StockTranslation.ticker.like("STRATEGY:%")
+                ).delete(synchronize_session=False)
+                if deleted_count > 0:
+                    db.commit()
+                    logger.info(f"Cleaned up {deleted_count} legacy strategy translations from stock_translations table.")
+                    print(f"[i18n] Cleaned up {deleted_count} legacy strategy translations from DB.")
+            except Exception as db_err:
+                logger.error(f"Failed to clean up legacy strategy translations from DB: {db_err}")
+                print(f"[i18n] Warning: Failed to clean up legacy strategy DB records: {db_err}")
             
+            # 3. 전략 다국어 YAML 파일(strategies.yml) 로드 및 캐시 적재
+            try:
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                yaml_path = os.path.join(current_dir, "strategies.yml")
+                if os.path.exists(yaml_path):
+                    with open(yaml_path, "r", encoding="utf-8") as yf:
+                        cls._strategy_cache = yaml.safe_load(yf) or {}
+                    logger.info(f"Successfully loaded {len(cls._strategy_cache)} strategy translations from YAML.")
+                    print(f"[i18n] Loaded {len(cls._strategy_cache)} strategy translations from YAML.")
+                else:
+                    logger.warning(f"strategies.yml not found at {yaml_path}")
+                    print(f"[i18n] Warning: strategies.yml not found at {yaml_path}")
+            except Exception as yaml_err:
+                logger.error(f"Failed to load strategies.yml: {yaml_err}")
+                print(f"[i18n] Error loading strategies.yml: {yaml_err}")
+
         except Exception as e:
             logger.error(f"Failed to initialize translation cache: {e}")
             print(f"[i18n] Error loading translation cache: {e}")
         finally:
             db.close()
+
+    @classmethod
+    def translate_strategy(cls, strategy_type: str, locale: str = "ko") -> str:
+        """
+        YAML 파일에서 로드된 전략 한글/영문 매핑을 서빙합니다.
+        """
+        if not strategy_type:
+            return "미지정 전략" if locale == "ko" else "Unspecified Strategy"
+
+        strategy_clean = strategy_type.lower().strip()
+        if strategy_clean in cls._strategy_cache:
+            strategy_info = cls._strategy_cache[strategy_clean]
+            return strategy_info.get(locale, strategy_type)
+
+        # Fallback: 캐시에 매핑이 없으면 기본 이름 포맷 또는 원본 반환
+        return f"단일 전략 ({strategy_type})" if locale == "ko" else strategy_type
 
     @classmethod
     def translate(cls, ticker: str, default_name: str = None, db = None) -> str:

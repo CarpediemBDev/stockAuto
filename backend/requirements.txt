@@ -13,3 +13,5 @@ apscheduler
 yfinance
 httpx
 cryptography
+PyYAML
+
