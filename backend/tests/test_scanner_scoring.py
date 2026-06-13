@@ -81,3 +81,39 @@ async def test_scan_market_expert_maps_realtime_strategy_fields(monkeypatch):
     assert result["details"]["ema_aligned"] is True
     assert result["details"]["gap"] > 0
     assert result["details"]["is_near_52w_high"] is True
+
+    # 1. 스캐너 details 딕셔너리에 전략 연동용 신규 키들이 잘 들어가 있는지 정밀 검증
+    for key in [
+        "Close", "Volume", "VWAP", "RVOL", "EMA9", "EMA20", "EMA120", 
+        "OBV_divergence", "is_double_bb_buy", "is_double_bb_sell"
+    ]:
+        assert key in result["details"], f"details에 필수 키 {key}가 누락되었습니다."
+
+    # 2. analyze_single_ticker 결과 검증
+    single_res = await scanner_module.analyze_single_ticker("NVDA")
+    assert single_res is not None
+    assert single_res["ticker"] == "NVDA"
+    for key in [
+        "Close", "Volume", "VWAP", "RVOL", "EMA9", "EMA20", "EMA120", 
+        "OBV_divergence", "is_double_bb_buy", "is_double_bb_sell"
+    ]:
+        assert key in single_res["details"], f"analyze_single_ticker details에 필수 키 {key}가 누락되었습니다."
+
+    # 3. 실제 전략 인스턴스와 연동하여 점수가 정상 산출되는지 (0점으로 차단되지 않는지) 확인
+    from app.strategies.strategy_factory import get_strategy
+    strat_c = get_strategy("complex")
+    strat_bb = get_strategy("double_bb_reversion")
+
+    # 가상의 신호가 제대로 작동하는지 검사
+    score_c = strat_c.calculate_score(result["details"], "BULLISH", is_entry=True)
+    assert score_c > 0.0, f"전략 C 점수가 0점입니다. 필터 오작동 여부를 확인하세요: {score_c}"
+
+    # 더블 볼린저 밴드 매수/매도 시그널 검증
+    result["details"]["is_double_bb_buy"] = 1.0
+    score_bb_buy = strat_bb.calculate_score(result["details"], "BULLISH", is_entry=True)
+    assert score_bb_buy == 100.0, "더블 볼밴 매수 신호가 정상 채점되지 않았습니다."
+
+    result["details"]["is_double_bb_buy"] = 0.0
+    score_bb_normal = strat_bb.calculate_score(result["details"], "BULLISH", is_entry=True)
+    assert score_bb_normal == 0.0, "더블 볼밴 일반 상태 점수가 0점이 아닙니다."
+

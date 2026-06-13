@@ -450,7 +450,17 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                         "is_obv_accumulation": is_obv_accumulation,
                         "is_vcp": is_vcp,
                         "is_cup": is_cup,
-                        "regime_mode": sentiment
+                        "regime_mode": sentiment,
+                        "Close": last_close,
+                        "Volume": cand.get('Volume', 0.0),
+                        "VWAP": cand.get('VWAP', float('nan')),
+                        "RVOL": cand.get('RVOL', 1.0),
+                        "EMA9": cand.get('EMA9', 0.0),
+                        "EMA20": cand.get('EMA20', 0.0),
+                        "EMA120": cand.get('EMA120', float('nan')),
+                        "OBV_divergence": cand.get('OBV_divergence', -1.0),
+                        "is_double_bb_buy": is_double_bb_buy,
+                        "is_double_bb_sell": is_double_bb_sell
                     }
                 })
             except Exception as item_err:
@@ -600,7 +610,17 @@ async def analyze_single_ticker(ticker: str) -> dict:
                 "is_obv_accumulation": is_obv_accumulation,
                 "is_fundamental_healthy": is_fundamental_healthy,
                 "is_smart_exit": is_smart_exit,
-                "regime_mode": sentiment
+                "regime_mode": sentiment,
+                "Close": last_close,
+                "Volume": cand.get('Volume', 0.0),
+                "VWAP": cand.get('VWAP', float('nan')),
+                "RVOL": cand.get('RVOL', 1.0),
+                "EMA9": cand.get('EMA9', 0.0),
+                "EMA20": cand.get('EMA20', 0.0),
+                "EMA120": cand.get('EMA120', float('nan')),
+                "OBV_divergence": cand.get('OBV_divergence', -1.0),
+                "is_double_bb_buy": is_double_bb_buy,
+                "is_double_bb_sell": is_double_bb_sell
             }
         }
     except Exception as e:
