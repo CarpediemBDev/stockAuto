@@ -68,14 +68,13 @@ export function BacktestTournament() {
   const [startDate, setStartDate] = useState("2025-01-01");
   const [endDate, setEndDate] = useState("2025-12-31");
 
-  const fetchResults = useCallback(async (start?: string, end?: string, signal?: AbortSignal) => {
+  const fetchResults = useCallback(async (start: string, end: string, signal?: AbortSignal) => {
     try {
       setLoading(true);
-      const params: Record<string, string> = {};
-      if (start && end) {
-        params.start_date = start;
-        params.end_date = end;
-      }
+      const params = {
+        start_date: start,
+        end_date: end,
+      };
       
       const res = await adminAPI.getBacktestTournament({ params, signal });
       setData(res.data || []);
@@ -94,9 +93,9 @@ export function BacktestTournament() {
   }, []);
 
   useEffect(() => {
-    // 디폴트 로드 (Avoid calling setState synchronously within effect)
+    // 디폴트 로드 (최초 마운트 시 2025년 기본 날짜로 대항전 조회 실행)
     Promise.resolve().then(() => {
-      fetchResults();
+      fetchResults("2025-01-01", "2025-12-31");
     });
   }, [fetchResults]);
 
@@ -290,8 +289,7 @@ export function BacktestTournament() {
                     />
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#090d16', border: '1px solid #334155', borderRadius: '12px', fontSize: '11px', color: '#cbd5e1' }}
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      formatter={(value: any) => {
+                      formatter={(value: number | string | readonly (number | string)[] | undefined) => {
                         const numericValue = typeof value === 'number' ? value : Number(value);
                         return [`$${(numericValue || 0).toLocaleString()}`, ''];
                       }}

@@ -443,7 +443,12 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
 
     # 디스크 캐시 체크
     tickers_key = "_".join(sorted(tickers_list)) if tickers_list else "default"
-    cache_dir = r"C:\Users\Im\.gemini\antigravity\brain\3a7f1012-f111-46d8-8da9-7971ca6063b4\scratch\backtest_cache"
+    
+    current_dir = os.path.dirname(os.path.abspath(__file__))  # backend/app/admin
+    app_dir = os.path.dirname(current_dir)                    # backend/app
+    backend_dir = os.path.dirname(app_dir)                    # backend
+    cache_dir = os.path.join(backend_dir, "data", "backtest_cache")
+    
     os.makedirs(cache_dir, exist_ok=True)
     cache_path = os.path.join(cache_dir, f"tournament_v2_{start_date}_{end_date}_{tickers_key}.json")
     

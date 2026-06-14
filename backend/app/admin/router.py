@@ -488,19 +488,10 @@ async def get_backtest_tournament_results(
     db: Session = Depends(get_db),
 ):
     if not start_date or not end_date:
-        import json
-        import os
-        results_path = (
-            r"C:\Users\Im\.gemini\antigravity\brain\3a7f1012-f111-46d8-8da9-7971ca6063b4"
-            r"\scratch\tournament_results.json"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="시작일(start_date)과 종료일(end_date) 매개변수는 필수입니다.",
         )
-        if not os.path.exists(results_path):
-            return []
-        try:
-            with open(results_path, "r", encoding="utf-8") as f_in:
-                return json.load(f_in)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
         from app.admin.backtest_runner import run_dynamic_tournament
