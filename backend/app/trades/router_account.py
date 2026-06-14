@@ -165,7 +165,8 @@ async def force_liquidate(
         from app.bot.scheduler import get_market_session
 
         market_session = get_market_session()
-        if market_session == "CLOSED":
+        from app.bot.market_session import MarketSession
+        if market_session == MarketSession.CLOSED:
             raise HTTPException(
                 status_code=400,
                 detail="미국 시장이 닫혀 있어 전량 청산 주문을 전송할 수 없습니다.",
@@ -173,7 +174,8 @@ async def force_liquidate(
         current_user.settings.is_running = False
         db.commit()
     else:
-        market_session = "REGULAR_MARKET"
+        from app.bot.market_session import MarketSession
+        market_session = MarketSession.REGULAR
 
     try:
         for h in holdings:

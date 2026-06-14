@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { adminAPI, isCancel } from '@/lib/api';
 import { 
   Trophy, 
@@ -59,27 +59,41 @@ interface StrategyResult {
   equity_curve: EquityPoint[];
 }
 
+async function requestTournamentResults(
+  start: string,
+  end: string,
+  signal: AbortSignal,
+): Promise<StrategyResult[]> {
+  const res = await adminAPI.getBacktestTournament({
+    params: {
+      start_date: start,
+      end_date: end,
+    },
+    signal,
+  });
+  return res.data || [];
+}
+
 export function BacktestTournament() {
   const [data, setData] = useState<StrategyResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStrategy, setSelectedStrategy] = useState<StrategyResult | null>(null);
+  const requestControllerRef = useRef<AbortController | null>(null);
   
   // 날짜 피커 제어 상태 (작년 2025년 디폴트)
   const [startDate, setStartDate] = useState("2025-01-01");
   const [endDate, setEndDate] = useState("2025-12-31");
 
-  const fetchResults = useCallback(async (start: string, end: string, signal?: AbortSignal) => {
+  const fetchResults = useCallback(async (start: string, end: string) => {
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
+
     try {
-      setLoading(true);
-      const params = {
-        start_date: start,
-        end_date: end,
-      };
-      
-      const res = await adminAPI.getBacktestTournament({ params, signal });
-      setData(res.data || []);
-      if (res.data && res.data.length > 0) {
-        setSelectedStrategy(res.data[0]); // Default to 1st rank
+      const results = await requestTournamentResults(start, end, controller.signal);
+      setData(results);
+      if (results.length > 0) {
+        setSelectedStrategy(results[0]); // Default to 1st rank
       } else {
         setSelectedStrategy(null);
       }
@@ -88,16 +102,38 @@ export function BacktestTournament() {
       const msg = reportHandledError('Failed to fetch tournament results', error);
       toast.error(`대항전 결과 데이터 로드 실패: ${msg}`);
     } finally {
-      setLoading(false);
+      if (requestControllerRef.current === controller) {
+        requestControllerRef.current = null;
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    // 디폴트 로드 (최초 마운트 시 2025년 기본 날짜로 대항전 조회 실행)
-    Promise.resolve().then(() => {
-      fetchResults("2025-01-01", "2025-12-31");
-    });
-  }, [fetchResults]);
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
+
+    void requestTournamentResults("2025-01-01", "2025-12-31", controller.signal)
+      .then((results) => {
+        setData(results);
+        setSelectedStrategy(results[0] ?? null);
+      })
+      .catch((error) => {
+        if (isCancel(error)) return;
+        const msg = reportHandledError('Failed to fetch tournament results', error);
+        toast.error(`대항전 결과 데이터 로드 실패: ${msg}`);
+      })
+      .finally(() => {
+        if (requestControllerRef.current === controller) {
+          requestControllerRef.current = null;
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
 
   const handleRunSimulation = () => {
     if (!startDate || !endDate) {
@@ -110,7 +146,8 @@ export function BacktestTournament() {
       return;
     }
     toast.info(`${startDate} ~ ${endDate} 기간에 대한 HIL 시뮬레이션 배틀을 실행합니다.`);
-    fetchResults(startDate, endDate);
+    setLoading(true);
+    void fetchResults(startDate, endDate);
   };
 
   const getRankBadge = (rank: number) => {

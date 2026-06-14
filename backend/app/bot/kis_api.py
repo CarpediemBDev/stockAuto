@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from app.core.config import settings
 from app.core.credentials import decrypt_credential
+from app.bot.market_session import ACTIVE_MARKET_SESSIONS, MarketSession
 from app.scanner.data_provider import fetch_bulk_ohlcv_sync, fetch_ticker_fast_info
 
 # 티커 → 거래소 코드 메모리 캐시 (서버 수명 동안 유지)
@@ -54,14 +55,16 @@ class KISClient:
         self.token = None
         self.token_expired_at = None
 
-    def _order_division_for_session(self, session: str) -> str:
-        if not self.is_real:
-            return "00"
-        session_code = (session or "REGULAR_MARKET").upper()
-        if session_code == "PRE_MARKET":
-            return "32"
-        if session_code == "AFTER_HOURS":
-            return "34"
+    def _order_division_for_session(self, session: MarketSession | str) -> str:
+        try:
+            session_code = MarketSession(session or MarketSession.REGULAR)
+        except ValueError as exc:
+            raise ValueError(f"Unknown market session: {session}") from exc
+        if session_code not in ACTIVE_MARKET_SESSIONS:
+            raise ValueError(f"Orders are not allowed during market session: {session_code}")
+
+        # KIS 공식 규격에서 32/34는 프리·에프터장 코드가 아니라 LOO/LOC 주문 유형입니다.
+        # 자동매매는 각 활성 세션에서 현재가 기반 지정가 주문(00)만 사용합니다.
         return "00"
 
     def get_hashkey(self, body):

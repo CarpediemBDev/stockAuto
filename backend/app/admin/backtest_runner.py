@@ -1,7 +1,8 @@
 import asyncio
-import os
+import hashlib
 import json
 import pandas as pd
+from pathlib import Path
 from typing import List, Dict, Any
 from app.bot.backtest_engine import BacktestSimulator
 from app.bot.backtest_metrics import (
@@ -10,6 +11,21 @@ from app.bot.backtest_metrics import (
 )
 from app.strategies.strategy_factory import get_strategy
 from app.core.logging import logger
+
+
+def _build_tournament_cache_path(
+    start_date: str,
+    end_date: str,
+    tickers_list: List[str] | None,
+) -> Path:
+    normalized_tickers = sorted({ticker.strip().upper() for ticker in tickers_list or [] if ticker.strip()})
+    ticker_payload = ",".join(normalized_tickers) if normalized_tickers else "default"
+    ticker_digest = hashlib.sha256(ticker_payload.encode("utf-8")).hexdigest()[:16]
+    cache_dir = Path(__file__).resolve().parents[2] / "data" / "backtest_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / (
+        f"tournament_v3_{start_date}_{end_date}_{len(normalized_tickers)}_{ticker_digest}.json"
+    )
 
 # 가상 DB 보유 레코드 모사 클래스
 class MockHolding:
@@ -441,20 +457,12 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
         except Exception as e:
             logger.error(f"[Backtest Tournament] Failed to extract tickers dynamically: {e}", exc_info=True)
 
-    # 디스크 캐시 체크
-    tickers_key = "_".join(sorted(tickers_list)) if tickers_list else "default"
+    # 긴 티커 목록이나 경로 문자가 파일명에 직접 들어가지 않도록 해시 기반 캐시 키를 사용합니다.
+    cache_path = _build_tournament_cache_path(start_date, end_date, tickers_list)
     
-    current_dir = os.path.dirname(os.path.abspath(__file__))  # backend/app/admin
-    app_dir = os.path.dirname(current_dir)                    # backend/app
-    backend_dir = os.path.dirname(app_dir)                    # backend
-    cache_dir = os.path.join(backend_dir, "data", "backtest_cache")
-    
-    os.makedirs(cache_dir, exist_ok=True)
-    cache_path = os.path.join(cache_dir, f"tournament_v2_{start_date}_{end_date}_{tickers_key}.json")
-    
-    if os.path.exists(cache_path):
+    if cache_path.exists():
         try:
-            with open(cache_path, "r", encoding="utf-8") as f_c:
+            with cache_path.open("r", encoding="utf-8") as f_c:
                 return json.load(f_c)
         except Exception as e:
             logger.warning(f"Cache loading failed, falling back to live calc: {e}")
@@ -815,7 +823,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
 
     # 캐시 저장
     try:
-        with open(cache_path, "w", encoding="utf-8") as f_w:
+        with cache_path.open("w", encoding="utf-8") as f_w:
             json.dump(results, f_w, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.warning(f"Failed to save tournament cache: {e}")

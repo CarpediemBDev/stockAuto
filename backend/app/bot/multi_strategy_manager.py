@@ -1,5 +1,6 @@
 from app.strategies.strategy_factory import get_strategy
 from app.core.logging import logger
+from app.bot.market_session import EXTENDED_MARKET_SESSIONS, MarketSession
 
 class MultiStrategyManager:
     """
@@ -121,7 +122,14 @@ class MultiStrategyManager:
         }
         logger.info(f"[MultiStrategyManager] Segmented {len(self.SLOTS)}-Slot Modular Core Engine initialized successfully for strategy_type: {strategy_type}")
 
-    def calculate_slots_allocation(self, total_asset_usd: float, cash_balance_usd: float, holdings: list, sentiment: str = "BULLISH", session: str = "REGULAR_MARKET") -> dict:
+    def calculate_slots_allocation(
+        self,
+        total_asset_usd: float,
+        cash_balance_usd: float,
+        holdings: list,
+        sentiment: str = "BULLISH",
+        session: MarketSession | str = MarketSession.REGULAR,
+    ) -> dict:
         """
         각 슬롯별로 현재의 주식 평가액과 격리된 예수금을 수학적 보존 법칙 하에 정밀 계산합니다.
         
@@ -172,7 +180,7 @@ class MultiStrategyManager:
             slot_stock_val = slot_stock_values[slot_key]
             
             # [시장 세션 방어 로직] 비정규장(PRE_MARKET, AFTER_HOURS)인 경우 신규 진입 예산 50% 삭감
-            if session in ("PRE_MARKET", "AFTER_HOURS"):
+            if session in EXTENDED_MARKET_SESSIONS:
                 slot_cash = slot_cash * 0.5
                 logger.info(f"[MultiStrategyManager] {session} detected. Applied 50% penalty to cash budget for slot {slot_key}.")
 
@@ -198,8 +206,11 @@ class MultiStrategyManager:
           유통 물량이 잠잠하게 응축(wick_ratio가 너무 높지 않은 가벼운 매집)된 5~10개 최정예 후보군만 선발합니다.
         """
         candidates = []
+        watchlist_tickers = set()
         for s in all_signals:
             ticker = s.get("ticker", "")
+            if "WATCHLIST" in s.get("source", []):
+                watchlist_tickers.add(ticker)
             details = s.get("details", {})
             rvol = details.get("rvol", 0.0)
             
@@ -217,5 +228,6 @@ class MultiStrategyManager:
         # 가중치 내림차순 정렬
         candidates.sort(key=lambda x: x[1], reverse=True)
         focused = {t for t, _ in candidates[:10]}
+        focused.update(watchlist_tickers)
                          
         return focused

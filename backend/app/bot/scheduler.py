@@ -1,7 +1,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.bot.broker_factory import get_broker_client
 from app.core.database import SessionLocal
-from app.core.models import TradeLog, Holding, ActionLog, UserSettings
+from app.core.models import TradeLog, Holding, ActionLog, UserSettings, WatchList
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
@@ -15,6 +15,13 @@ from app.core.config import settings
 from app.scanner.data_provider import fetch_ohlcv
 from app.core.telegram import send_message_async, send_daily_report_to_all_users_sync
 from app.bot.fx_cache import FXRateCache
+from app.bot.market_session import (
+    AFTER_HOURS_CLOSE,
+    EARLY_CLOSE_AFTER_HOURS_END,
+    PRE_MARKET_OPEN,
+    REGULAR_MARKET_OPEN,
+    MarketSession,
+)
 from app.trades.market_overview_cache import market_overview_cache_wrapper
 from app.scanner.swing_prediction_cache import swing_prediction_cache_wrapper
 from app.bot.us_market_calendar import nyse_regular_close
@@ -62,6 +69,7 @@ scheduler = BackgroundScheduler()
 is_processing = False # 중복 실행 방지용 플래그
 _processing_lock = threading.Lock()  # 💡 is_processing 레이스 컨디션 방지용 스레드 락
 latest_scanned_signals = [] # 글로벌 실시간 마켓 스캔 시그널 캐시용
+latest_watchlist_signals = {} # 사용자별 라우팅 전에만 사용하는 관심종목 분석 캐시
 
 # 💡 KIS API 동시성 제어 세마포어 (초당 최대 15회 호출로 자동 제한 - 429 차단 철벽 방어)
 kis_semaphore = asyncio.Semaphore(15)
@@ -119,7 +127,7 @@ async def execute_and_poll_order(broker, func, *args, **kwargs):
 ET = ZoneInfo("America/New_York") # 미국 동부 표준시(ET)는 DST를 자동으로 반영합니다
 
 
-def get_market_session(now_et: datetime | None = None) -> str:
+def get_market_session(now_et: datetime | None = None) -> MarketSession:
     """
     현재 시각 기준 미국 주식시장 세션을 반환합니다.
     - PRE_MARKET: 04:00 ~ 09:30 ET
@@ -135,19 +143,22 @@ def get_market_session(now_et: datetime | None = None) -> str:
 
     regular_close = nyse_regular_close(now_et.date())
     if regular_close is None:
-        return "CLOSED"
+        return MarketSession.CLOSED
 
-    t = now_et.time()
-    from datetime import time as dt_time
+    current_time = now_et.time()
+    after_hours_close = (
+        EARLY_CLOSE_AFTER_HOURS_END
+        if regular_close.hour == 13
+        else AFTER_HOURS_CLOSE
+    )
 
-    if dt_time(4, 0) <= t < dt_time(9, 30):
-        return "PRE_MARKET"
-    elif dt_time(9, 30) <= t < regular_close:
-        return "REGULAR_MARKET"
-    elif regular_close <= t < (dt_time(17, 0) if regular_close.hour == 13 else dt_time(20, 0)):
-        return "AFTER_HOURS"
-    else:
-        return "CLOSED"
+    if PRE_MARKET_OPEN <= current_time < REGULAR_MARKET_OPEN:
+        return MarketSession.PRE_MARKET
+    if REGULAR_MARKET_OPEN <= current_time < regular_close:
+        return MarketSession.REGULAR
+    if regular_close <= current_time < after_hours_close:
+        return MarketSession.AFTER_HOURS
+    return MarketSession.CLOSED
 
 async def get_realtime_price(ticker: str) -> float | None:
     """
@@ -214,6 +225,54 @@ class TradingFlowContext:
     all_signals: list
 
 
+def load_watchlist_tickers_by_user(db, user_ids: list[int]) -> dict[int, set[str]]:
+    watchlists = {user_id: set() for user_id in user_ids}
+    if not user_ids:
+        return watchlists
+
+    rows = db.query(WatchList.user_id, WatchList.ticker).filter(
+        WatchList.user_id.in_(user_ids)
+    ).all()
+    for user_id, raw_ticker in rows:
+        ticker = (raw_ticker or "").strip().upper()
+        if ticker and user_id in watchlists:
+            watchlists[user_id].add(ticker)
+    return watchlists
+
+
+def build_user_signal_context(
+    user_id: int,
+    market_signals: list,
+    watchlists_by_user: dict[int, set[str]],
+    watchlist_signal_map: dict[str, dict],
+) -> tuple[dict, list]:
+    user_watchlist = watchlists_by_user.get(user_id, set())
+    user_signals = []
+    included_tickers = set()
+
+    for market_signal in market_signals:
+        ticker = market_signal.get("ticker")
+        if not ticker:
+            continue
+        signal = dict(market_signal)
+        sources = list(signal.get("source", []))
+        if ticker in user_watchlist and "WATCHLIST" not in sources:
+            sources.append("WATCHLIST")
+        signal["source"] = sources
+        user_signals.append(signal)
+        included_tickers.add(ticker)
+
+    for ticker in sorted(user_watchlist - included_tickers):
+        cached_signal = watchlist_signal_map.get(ticker)
+        if not cached_signal:
+            continue
+        signal = dict(cached_signal)
+        signal["source"] = ["WATCHLIST"]
+        user_signals.append(signal)
+
+    return {signal["ticker"]: signal for signal in user_signals}, user_signals
+
+
 def prepare_trading_flow_context(
     db,
     user_id: int,
@@ -238,7 +297,7 @@ def prepare_trading_flow_context(
         return None
 
     holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
-    if session == "CLOSED" and not holdings:
+    if session == MarketSession.CLOSED and not holdings:
         if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, ("closed_no_holdings", user_id)):
             log_action(
                 db,
@@ -373,7 +432,7 @@ async def build_target_signals(ctx: TradingFlowContext) -> list | None:
             target_signals.append(sig)
 
     if not target_signals and not ctx.holdings:
-        if ctx.session != "CLOSED" and should_log_with_cooldown(SCANNER_CACHE_EMPTY_LOG_CACHE, ("empty_signals", ctx.user_id), 600.0):
+        if ctx.session != MarketSession.CLOSED and should_log_with_cooldown(SCANNER_CACHE_EMPTY_LOG_CACHE, ("empty_signals", ctx.user_id), 600.0):
             log_action(
                 ctx.db,
                 ctx.user_id,
@@ -385,6 +444,16 @@ async def build_target_signals(ctx: TradingFlowContext) -> list | None:
     return target_signals
 
 async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict) -> None:
+    if ctx.session == MarketSession.CLOSED:
+        if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, ("closed_sell", ctx.user_id)):
+            log_action(
+                ctx.db,
+                ctx.user_id,
+                "[SELL SKIP] US market is closed. Exit signals will be reevaluated in the next active session.",
+                "INFO",
+            )
+        return
+
     db = ctx.db
     user_id = ctx.user_id
     holdings = ctx.holdings
@@ -804,7 +873,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
     user_id = ctx.user_id
     ms_manager = ctx.ms_manager
 
-    if ctx.session == "CLOSED":
+    if ctx.session == MarketSession.CLOSED:
         if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, ("closed_buy", user_id)):
             log_action(db, user_id, "[BUY SKIP] US market is currently closed. No new buy orders placed.", "INFO")
         return False
@@ -1050,7 +1119,7 @@ async def refresh_scanner_cache():
     마켓 스캐너 캐시를 독립적으로 갱신하는 전용 비동기 함수 (10분 주기).
     자동매매 루프와 완전히 분리되어 Rate Limit 위험 없이 안전하게 동작합니다.
     """
-    global latest_scanned_signals, _scanner_refresh_in_progress
+    global latest_scanned_signals, latest_watchlist_signals, _scanner_refresh_in_progress
 
     with _scanner_refresh_lock:
         if _scanner_refresh_in_progress:
@@ -1061,14 +1130,46 @@ async def refresh_scanner_cache():
     try:
         # 장 외 시간 API 비용/호출 낭비 방지 가드
         session = get_market_session()
-        if session == "CLOSED":
+        if session == MarketSession.CLOSED:
             logger.info("[Scanner Cache] Market is closed. Skipping scan to save API quotas.")
             return
 
         logger.info("[Scanner Cache] Starting 10-min market scan refresh cycle...")
         signals = await scan_overseas_market()
         latest_scanned_signals = signals
-        logger.info(f"[Scanner Cache] Refresh complete. Cached {len(signals)} signals.")
+        market_signal_map = {signal["ticker"]: signal for signal in signals}
+
+        db = SessionLocal()
+        try:
+            active_user_ids = [
+                row[0]
+                for row in db.query(UserSettings.user_id)
+                .filter(UserSettings.is_running == True)
+                .all()
+            ]
+            watchlists_by_user = load_watchlist_tickers_by_user(db, active_user_ids)
+        finally:
+            db.close()
+
+        watchlist_tickers = set().union(*watchlists_by_user.values()) if watchlists_by_user else set()
+        missing_watchlist_tickers = sorted(watchlist_tickers - market_signal_map.keys())
+        analyzed = await asyncio.gather(
+            *(
+                analyze_single_ticker(ticker, bypass_fundamental=True)
+                for ticker in missing_watchlist_tickers
+            ),
+            return_exceptions=True,
+        )
+        latest_watchlist_signals = {
+            ticker: signal
+            for ticker, signal in zip(missing_watchlist_tickers, analyzed)
+            if isinstance(signal, dict)
+        }
+        logger.info(
+            "[Scanner Cache] Refresh complete. Cached %s market signals and %s isolated watchlist signals.",
+            len(signals),
+            len(latest_watchlist_signals),
+        )
     except Exception as e:
         logger.exception("[Scanner Cache] ERROR during market scan")
     finally:
@@ -1116,7 +1217,7 @@ async def async_trading_loop():
         }
 
         session = get_market_session()
-        if session == "CLOSED":
+        if session == MarketSession.CLOSED:
             if not holding_user_ids:
                 if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, "scheduler_closed_no_holdings"):
                     logger.info("[Scheduler] Market is closed and no active users have holdings. Skipping all user flows.")
@@ -1124,11 +1225,28 @@ async def async_trading_loop():
         exchange_rate = FXRateCache.get_rate()
 
         sentiment = await check_market_sentiment()
-        all_signals = latest_scanned_signals
-        signal_map = {s['ticker']: s for s in all_signals}
+        market_signals = latest_scanned_signals
+        watchlists_by_user = load_watchlist_tickers_by_user(db, active_user_ids)
 
         # 3. 각 활성 유저별 자동매매 시나리오 병렬 실행
-        tasks = [run_user_trading_flow(u.user_id, signal_map, all_signals, exchange_rate, sentiment, session) for u in active_users]
+        tasks = []
+        for user in active_users:
+            signal_map, all_signals = build_user_signal_context(
+                user.user_id,
+                market_signals,
+                watchlists_by_user,
+                latest_watchlist_signals,
+            )
+            tasks.append(
+                run_user_trading_flow(
+                    user.user_id,
+                    signal_map,
+                    all_signals,
+                    exchange_rate,
+                    sentiment,
+                    session,
+                )
+            )
         await asyncio.gather(*tasks)
 
     except Exception as e:

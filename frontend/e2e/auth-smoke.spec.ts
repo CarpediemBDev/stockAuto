@@ -46,7 +46,12 @@ test("empty login submission shows client-side validation", async ({ page }) => 
 });
 
 test("failed login does not trigger silent refresh", async ({ page }) => {
+  const initialRefreshResponse = page.waitForResponse(
+    (response) => response.url().includes("/api/v1/auth/refresh"),
+  );
   await page.goto("/login");
+  await initialRefreshResponse;
+  await expect(page.getByRole("heading", { name: "StockAuto 로그인" })).toBeVisible();
   await page.unroute("**/api/v1/auth/refresh");
 
   let refreshRequestCount = 0;

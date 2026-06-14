@@ -1,3 +1,5 @@
+from datetime import date
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -8,6 +10,7 @@ from app.bot.order_reconciler import disable_auto_resume_for_user, has_unresolve
 from app.core.credentials import CredentialCryptoError, decrypt_credential, encrypt_credential
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, get_current_admin_user
+from app.core.logging import logger
 from app.core.models import ActionLog, User, UserSettings, BrokerCredential, utc_now_aware
 
 router = APIRouter()
@@ -30,6 +33,8 @@ class VerifyCurrentSchema(BaseModel):
     broker_name: str
 
 VALID_TRADE_MODES = {"SIMULATED", "MOCK", "REAL"}
+BACKTEST_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+BACKTEST_TICKER_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.-]{0,14}$")
 PLACEHOLDER_VALUES = {
     "YOUR_APP_KEY_HERE",
     "your_virtual_app_key_here",
@@ -50,6 +55,53 @@ def _normalize_trade_mode(mode: str) -> str:
             detail="지원하지 않는 트레이딩 모드입니다. SIMULATED, MOCK, REAL 중 하나를 선택하세요.",
         )
     return normalized
+
+
+def _parse_backtest_date(value: Optional[str], field_name: str) -> date:
+    if not value or not BACKTEST_DATE_PATTERN.fullmatch(value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name}은 YYYY-MM-DD 형식이어야 합니다.",
+        )
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name}에 유효한 날짜를 입력하세요.",
+        ) from exc
+
+
+def _parse_backtest_tickers(tickers: Optional[str]) -> list[str] | None:
+    if not tickers:
+        return None
+
+    parsed = []
+    seen = set()
+    for raw_ticker in tickers.split(","):
+        ticker = raw_ticker.strip().upper()
+        if not ticker:
+            continue
+        if not BACKTEST_TICKER_PATTERN.fullmatch(ticker):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"지원하지 않는 티커 형식입니다: {ticker}",
+            )
+        if ticker not in seen:
+            parsed.append(ticker)
+            seen.add(ticker)
+
+    if not parsed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="백테스트할 티커를 하나 이상 입력하세요.",
+        )
+    if len(parsed) > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="백테스트 티커는 최대 100개까지 입력할 수 있습니다.",
+        )
+    return parsed
 
 def _is_missing_or_placeholder(value: Optional[str]) -> bool:
     normalized = (value or "").strip()
@@ -487,18 +539,28 @@ async def get_backtest_tournament_results(
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
-    if not start_date or not end_date:
+    parsed_start_date = _parse_backtest_date(start_date, "시작일(start_date)")
+    parsed_end_date = _parse_backtest_date(end_date, "종료일(end_date)")
+    if parsed_start_date > parsed_end_date:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="시작일(start_date)과 종료일(end_date) 매개변수는 필수입니다.",
+            detail="시작일은 종료일보다 늦을 수 없습니다.",
         )
+    parsed_tickers = _parse_backtest_tickers(tickers)
 
     try:
         from app.admin.backtest_runner import run_dynamic_tournament
-        parsed_tickers = [t.strip().upper() for t in tickers.split(",")] if tickers else None
-        return await run_dynamic_tournament(start_date, end_date, tickers_list=parsed_tickers, db=db)
+        return await run_dynamic_tournament(
+            parsed_start_date.isoformat(),
+            parsed_end_date.isoformat(),
+            tickers_list=parsed_tickers,
+            db=db,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
+        logger.exception("[Backtest Tournament] Dynamic tournament execution failed")
         raise HTTPException(
-            status_code=500,
-            detail=f"동적 백테스트 실행 중 오류가 발생했습니다: {str(exc)}",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="동적 백테스트 실행 중 오류가 발생했습니다.",
         ) from exc

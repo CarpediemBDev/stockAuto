@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 import app.bot.scheduler as scheduler
-from app.core.models import Holding, UserSettings
+from app.core.models import Holding, UserSettings, WatchList
 
 
 class FakeQuery:
@@ -21,9 +21,10 @@ class FakeQuery:
 
 
 class FakeSession:
-    def __init__(self, active_users, holding_user_ids):
+    def __init__(self, active_users, holding_user_ids, watchlist_rows=None):
         self.active_users = active_users
         self.holding_user_ids = holding_user_ids
+        self.watchlist_rows = watchlist_rows or []
         self.closed = False
         self.rolled_back = False
 
@@ -33,6 +34,8 @@ class FakeSession:
             return FakeQuery(self.active_users)
         if first_entity is Holding.user_id:
             return FakeQuery([(user_id,) for user_id in self.holding_user_ids])
+        if first_entity is WatchList.user_id:
+            return FakeQuery(self.watchlist_rows)
         return FakeQuery([])
 
     def rollback(self):
@@ -48,7 +51,11 @@ async def test_async_trading_loop_injects_cycle_context_once(monkeypatch):
         SimpleNamespace(user_id=1, is_running=True),
         SimpleNamespace(user_id=2, is_running=True),
     ]
-    fake_db = FakeSession(active_users=active_users, holding_user_ids=[])
+    fake_db = FakeSession(
+        active_users=active_users,
+        holding_user_ids=[],
+        watchlist_rows=[(1, "AAPL"), (2, "MSFT")],
+    )
     flow_calls = []
     sentiment_calls = 0
     fx_calls = 0
@@ -76,7 +83,13 @@ async def test_async_trading_loop_injects_cycle_context_once(monkeypatch):
         )
 
     scheduler.is_processing = False
-    scheduler.latest_scanned_signals = [{"ticker": "QQQ", "price": 100.0}]
+    scheduler.latest_scanned_signals = [
+        {"ticker": "QQQ", "price": 100.0, "source": ["MARKET"]}
+    ]
+    scheduler.latest_watchlist_signals = {
+        "AAPL": {"ticker": "AAPL", "price": 200.0},
+        "MSFT": {"ticker": "MSFT", "price": 300.0},
+    }
 
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: fake_db)
     monkeypatch.setattr(scheduler, "get_market_session", lambda: "REGULAR_MARKET")
@@ -94,7 +107,13 @@ async def test_async_trading_loop_injects_cycle_context_once(monkeypatch):
     assert all(call["exchange_rate"] == 1517.56 for call in flow_calls)
     assert all(call["sentiment"] == "BULLISH" for call in flow_calls)
     assert all(call["session"] == "REGULAR_MARKET" for call in flow_calls)
-    assert all(call["signal_map"] == {"QQQ": {"ticker": "QQQ", "price": 100.0}} for call in flow_calls)
+    calls_by_user = {call["user_id"]: call for call in flow_calls}
+    assert set(calls_by_user[1]["signal_map"]) == {"QQQ", "AAPL"}
+    assert set(calls_by_user[2]["signal_map"]) == {"QQQ", "MSFT"}
+    assert "MSFT" not in calls_by_user[1]["signal_map"]
+    assert "AAPL" not in calls_by_user[2]["signal_map"]
+    assert calls_by_user[1]["signal_map"]["AAPL"]["source"] == ["WATCHLIST"]
+    assert calls_by_user[2]["signal_map"]["MSFT"]["source"] == ["WATCHLIST"]
 
 
 def test_start_scheduler_registers_swing_prediction_jobs(monkeypatch):

@@ -474,7 +474,7 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
 async def scan_overseas_market(bypass_tickers: set = None) -> list:
     return await scan_market_expert(bypass_tickers=bypass_tickers)
 
-async def analyze_single_ticker(ticker: str) -> dict:
+async def analyze_single_ticker(ticker: str, bypass_fundamental: bool = False) -> dict:
     """
     보유 종목에 대한 실시간 정밀 기술적 지표 및 스코어를 산출합니다. (폭락/약세 판정용)
     """
@@ -526,7 +526,7 @@ async def analyze_single_ticker(ticker: str) -> dict:
         is_fundamental_healthy = await check_fundamental_health(ticker)
 
         fundamental_penalty = 0
-        if not is_fundamental_healthy:
+        if not is_fundamental_healthy and not bypass_fundamental:
             fundamental_penalty = 40
 
         vwap = calculate_vwap(df_5m)

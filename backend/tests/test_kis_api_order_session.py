@@ -57,12 +57,12 @@ def capture_order_request(
 @pytest.mark.parametrize(
     ("method_name", "session", "trade_mode", "expected_order_division", "expected_tr_id"),
     [
-        ("buy_overseas_order", "PRE_MARKET", "REAL", "32", "TTTT1002U"),
+        ("buy_overseas_order", "PRE_MARKET", "REAL", "00", "TTTT1002U"),
         ("buy_overseas_order", "REGULAR_MARKET", "REAL", "00", "TTTT1002U"),
-        ("buy_overseas_order", "AFTER_HOURS", "REAL", "34", "TTTT1002U"),
-        ("sell_overseas_order", "PRE_MARKET", "REAL", "32", "TTTT1006U"),
+        ("buy_overseas_order", "AFTER_HOURS", "REAL", "00", "TTTT1002U"),
+        ("sell_overseas_order", "PRE_MARKET", "REAL", "00", "TTTT1006U"),
         ("sell_overseas_order", "REGULAR_MARKET", "REAL", "00", "TTTT1006U"),
-        ("sell_overseas_order", "AFTER_HOURS", "REAL", "34", "TTTT1006U"),
+        ("sell_overseas_order", "AFTER_HOURS", "REAL", "00", "TTTT1006U"),
         ("buy_overseas_order", "PRE_MARKET", "MOCK", "00", "VTTT1002U"),
         ("sell_overseas_order", "AFTER_HOURS", "MOCK", "00", "VTTT1006U"),
     ],
@@ -82,3 +82,10 @@ def test_kis_overseas_orders_use_market_session_order_division(
     assert body["ORD_QTY"] == "3"
     assert body["ORD_DVSN"] == expected_order_division
     assert captured["headers"]["tr_id"] == expected_tr_id
+
+
+def test_kis_order_rejects_closed_market_session():
+    client = make_kis_client("REAL")
+
+    with pytest.raises(ValueError, match="CLOSED"):
+        client._order_division_for_session("CLOSED")
