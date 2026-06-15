@@ -42,21 +42,21 @@ class Translator:
                 logger.error(f"Failed to clean up legacy strategy translations from DB: {db_err}")
                 print(f"[i18n] Warning: Failed to clean up legacy strategy DB records: {db_err}")
             
-            # 3. 전략 다국어 YAML 파일(strategies.yml) 로드 및 캐시 적재
+            # 3. DB strategies 테이블에서 전략 번역 로드 (SSOT 단일화)
             try:
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                yaml_path = os.path.join(current_dir, "strategies.yml")
-                if os.path.exists(yaml_path):
-                    with open(yaml_path, "r", encoding="utf-8") as yf:
-                        cls._strategy_cache = yaml.safe_load(yf) or {}
-                    logger.info(f"Successfully loaded {len(cls._strategy_cache)} strategy translations from YAML.")
-                    print(f"[i18n] Loaded {len(cls._strategy_cache)} strategy translations from YAML.")
-                else:
-                    logger.warning(f"strategies.yml not found at {yaml_path}")
-                    print(f"[i18n] Warning: strategies.yml not found at {yaml_path}")
-            except Exception as yaml_err:
-                logger.error(f"Failed to load strategies.yml: {yaml_err}")
-                print(f"[i18n] Error loading strategies.yml: {yaml_err}")
+                db_strategies = db.query(models.Strategy).all()
+                cls._strategy_cache = {
+                    s.strategy_type: {
+                        "ko": s.name_ko,
+                        "en": s.name_en or s.strategy_type
+                    }
+                    for s in db_strategies
+                }
+                logger.info(f"Successfully loaded {len(cls._strategy_cache)} strategy translations from DB strategies table.")
+                print(f"[i18n] Loaded {len(cls._strategy_cache)} strategy translations from DB strategies table.")
+            except Exception as db_strategy_err:
+                logger.error(f"Failed to load strategies from DB: {db_strategy_err}")
+                print(f"[i18n] Error loading strategies from DB: {db_strategy_err}")
 
         except Exception as e:
             logger.error(f"Failed to initialize translation cache: {e}")

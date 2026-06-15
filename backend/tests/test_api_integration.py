@@ -71,7 +71,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
     config = make_alembic_config(db_url)
 
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "cc508504ea6c"
+    assert script.get_current_head() == "b7d8e9f01234"
 
     command.upgrade(config, "head")
 
@@ -91,6 +91,8 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             "broker_orders",
             "broker_credentials",
             "alembic_version",
+            "strategies",
+            "account_equity_snapshots",
         }
 
         user_settings_columns = {column["name"] for column in inspector.get_columns("user_settings")}
@@ -100,6 +102,10 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
         trade_log_columns = {column["name"] for column in inspector.get_columns("trade_logs")}
         market_overview_columns = {column["name"] for column in inspector.get_columns("market_overview_snapshots")}
         swing_prediction_columns = {column["name"] for column in inspector.get_columns("swing_prediction_snapshots")}
+        equity_snapshot_columns = {
+            column["name"]
+            for column in inspector.get_columns("account_equity_snapshots")
+        }
         assert "strategy_type" in user_settings_columns
         assert "role" in user_columns
         assert "token_version" in user_columns
@@ -144,6 +150,28 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             "sync_status",
             "created_at",
         } <= swing_prediction_columns
+        assert {
+            "user_id",
+            "total_asset",
+            "cash_balance",
+            "stock_balance",
+            "profit_rate",
+            "fx_rate",
+            "trade_mode",
+            "captured_at",
+        } <= equity_snapshot_columns
+
+        for table_name in ("user_settings", "holdings", "trade_logs", "broker_orders"):
+            foreign_keys = inspector.get_foreign_keys(table_name)
+            assert not any(
+                foreign_key["referred_table"] == "strategies"
+                for foreign_key in foreign_keys
+            )
+            assert any(
+                foreign_key["referred_table"] == "users"
+                and foreign_key["constrained_columns"] == ["user_id"]
+                for foreign_key in foreign_keys
+            )
     finally:
         engine.dispose()
 

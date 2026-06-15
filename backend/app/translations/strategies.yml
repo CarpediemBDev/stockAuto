@@ -98,11 +98,11 @@ morning_gap_fade:
   ko: "시초가 갭페이드"
   en: "Morning Fade"
 multi_slot:
-  ko: "마스터 레짐스위칭"
-  en: "Regime Switching"
+  ko: "격리형 2슬롯 (EP 50% : RS 50%)"
+  en: "Modular 2-Slot (EP 50% : RS 50%)"
 multi_slot_3:
-  ko: "마스터 레짐스위칭"
-  en: "Regime Switching"
+  ko: "격리형 3슬롯 (EP 30% : ASQS 30% : RS 40%)"
+  en: "Modular 3-Slot (EP 30% : ASQS 30% : RS 40%)"
 obv_only:
   ko: "차트픽 OBV 매집"
   en: "OBV Only"
@@ -209,8 +209,8 @@ sympathy:
   ko: "테마 2등주 짝짓기"
   en: "Sympathy Play"
 three_slot:
-  ko: "마스터 레짐스위칭"
-  en: "Regime Switching"
+  ko: "격리형 3슬롯 (EP 30% : ASQS 30% : RS 40%)"
+  en: "Modular 3-Slot (EP 30% : ASQS 30% : RS 40%)"
 trend_stabilization:
   ko: "Trend Stabilization Pullback"
   en: "Trend Stabilization"

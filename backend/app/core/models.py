@@ -26,6 +26,15 @@ def utc_now_aware():
     """Timezone-aware datetime을 반환합니다."""
     return datetime.now(UTC)
 
+class Strategy(Base):
+    __tablename__ = "strategies"
+
+    strategy_type = Column(String, primary_key=True, index=True)
+    name_ko = Column(String, nullable=False)
+    name_en = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+
 class User(Base):
     __tablename__ = "users"
 
@@ -48,6 +57,7 @@ class User(Base):
     watch_lists = relationship("WatchList", back_populates="user", cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     broker_orders = relationship("BrokerOrder", back_populates="user", cascade="all, delete-orphan")
+    equity_snapshots = relationship("AccountEquitySnapshot", back_populates="user", cascade="all, delete-orphan")
 
 class RefreshToken(Base):
     """안전한 토큰 갱신 및 다중 기기 강제 로그아웃을 위한 세션 테이블"""
@@ -203,6 +213,22 @@ class BrokerOrder(Base):
         UniqueConstraint("user_id", "broker_order_no", name="_user_broker_order_uc"),
         Index("ix_broker_orders_user_status", "user_id", "status"),
     )
+
+class AccountEquitySnapshot(Base):
+    """관리자 자산 곡선에 사용하는 실제 계좌 평가 시점별 스냅샷."""
+    __tablename__ = "account_equity_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    total_asset = Column(Float, nullable=False)
+    cash_balance = Column(Float, nullable=True)
+    stock_balance = Column(Float, nullable=True)
+    profit_rate = Column(Float, nullable=True)
+    fx_rate = Column(Float, nullable=True)
+    trade_mode = Column(String, nullable=False)
+    captured_at = Column(AwareDateTime, default=utc_now_aware, nullable=False, index=True)
+
+    user = relationship("User", back_populates="equity_snapshots")
 
 class ActionLog(Base):
     """봇의 실시간 사용자별 활동 기록 (스캔, 판단, 시스템 메시지 등)"""

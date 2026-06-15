@@ -42,49 +42,76 @@ class LocalSimulatedBroker(BaseBroker):
         if exchange_rate is None:
             exchange_rate = FXRateCache.get_rate()
 
-        # 누적 실현 손익 계산 (TradeLog 기준 매매 누적 성과)
-        total_realized_pnl_usd = sum(log.realized_pnl for log in trade_logs) if trade_logs else 0.0
-        total_realized_pnl_krw = total_realized_pnl_usd * exchange_rate
+        # 💡 [환율 왜곡 보정] 원화 기준의 시작 예수금을 USD 기준으로 선형 환산
+        initial_cash_usd = initial_cash / exchange_rate
 
-        total_purchase_krw = 0.0
-        total_eval_krw = 0.0
+        # 누적 실현 손익 계산 (TradeLog 기준 매매 누적 성과 - USD 기준)
+        total_realized_pnl_usd = sum(log.realized_pnl for log in trade_logs) if trade_logs else 0.0
+
+        total_purchase_usd = 0.0
+        total_eval_usd = 0.0
 
         if holdings:
-            tickers = [h.ticker for h in holdings]
+            # 💡 [캐시 최적화] 스케줄러 캐시로부터 실시간 가격을 먼저 매핑하여 yfinance 무차별 호출 차단
+            cache_prices = {}
             try:
-                data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
-                for h in holdings:
-                    clean_t = h.ticker
-                    current_price = h.avg_price  # 기본 폴백값
-                    try:
-                        if len(tickers) == 1:
-                            if isinstance(data.columns, pd.MultiIndex):
-                                df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else data.dropna()
+                from app.bot.scheduler import latest_scanned_signals, latest_watchlist_signals
+                for s in latest_scanned_signals:
+                    if "ticker" in s and "price" in s:
+                        cache_prices[s["ticker"]] = float(s["price"])
+                for t, s in latest_watchlist_signals.items():
+                    if isinstance(s, dict) and "price" in s:
+                        cache_prices[t] = float(s["price"])
+            except Exception as ce:
+                print(f"[SimulatedBroker] Failed to load scheduler cache: {ce}")
+
+            tickers_to_fetch = []
+            for h in holdings:
+                if h.ticker in cache_prices:
+                    current_price = cache_prices[h.ticker]
+                    total_purchase_usd += (h.avg_price * h.quantity)
+                    total_eval_usd += (current_price * h.quantity)
+                else:
+                    tickers_to_fetch.append(h.ticker)
+
+            if tickers_to_fetch:
+                try:
+                    data = fetch_bulk_ohlcv_sync(tickers_to_fetch, period="1d", interval="1m", group_by="ticker")
+                    for h in holdings:
+                        if h.ticker not in tickers_to_fetch:
+                            continue
+                        clean_t = h.ticker
+                        current_price = h.avg_price  # 기본 폴백값
+                        try:
+                            if len(tickers_to_fetch) == 1:
+                                if isinstance(data.columns, pd.MultiIndex):
+                                    df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else data.dropna()
+                                else:
+                                    df = data.dropna()
                             else:
-                                df = data.dropna()
-                        else:
-                            if isinstance(data.columns, pd.MultiIndex):
-                                df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else pd.DataFrame()
-                            else:
-                                df = data.dropna()
+                                if isinstance(data.columns, pd.MultiIndex):
+                                    df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else pd.DataFrame()
+                                else:
+                                    df = data.dropna()
 
-                        if not df.empty:
-                            current_price = float(df['Close'].iloc[-1])
-                    except Exception as e:
-                        print(f"[SimulatedBroker] Failed to parse price for {h.ticker}: {e}")
+                            if not df.empty:
+                                current_price = float(df['Close'].iloc[-1])
+                        except Exception as e:
+                            print(f"[SimulatedBroker] Failed to parse price for {h.ticker}: {e}")
 
-                    # KRW 기준 누적금 계산
-                    total_purchase_krw += (h.avg_price * h.quantity) * exchange_rate
-                    total_eval_krw += (current_price * h.quantity) * exchange_rate
-            except Exception as e:
-                print(f"[SimulatedBroker] Failed to download prices: {e}")
-                for h in holdings:
-                    total_purchase_krw += (h.avg_price * h.quantity) * exchange_rate
-                    total_eval_krw += (h.avg_price * h.quantity) * exchange_rate
+                        total_purchase_usd += (h.avg_price * h.quantity)
+                        total_eval_usd += (current_price * h.quantity)
+                except Exception as e:
+                    print(f"[SimulatedBroker] Failed to download prices: {e}")
+                    for h in holdings:
+                        if h.ticker in tickers_to_fetch:
+                            total_purchase_usd += (h.avg_price * h.quantity)
+                            total_eval_usd += (h.avg_price * h.quantity)
 
-        # 남은 가상 예수금 = 초기 예수금 + 누적 실현 손익 - 현재 보유 종목들의 총 매입 금액
-        cash_balance = max(0.0, initial_cash + total_realized_pnl_krw - total_purchase_krw)
-        stock_balance = total_eval_krw
+        # 💡 [환율 왜곡 보정] 남은 가상 예수금을 USD 기준으로 산출한 뒤 최종 시점에 환율을 곱하여 원화 환산
+        cash_balance_usd = max(0.0, initial_cash_usd + total_realized_pnl_usd - total_purchase_usd)
+        cash_balance = cash_balance_usd * exchange_rate
+        stock_balance = total_eval_usd * exchange_rate
         total_asset = cash_balance + stock_balance
 
         # 가상 수익률 계산
@@ -117,30 +144,24 @@ class LocalSimulatedBroker(BaseBroker):
         if exchange_rate is None:
             exchange_rate = FXRateCache.get_rate()
 
-        tickers = [h.ticker for h in holdings]
+        # 💡 [캐시 최적화] 스케줄러 캐시로부터 실시간 가격을 먼저 매핑하여 yfinance 무차별 호출 차단
+        cache_prices = {}
         try:
-            data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
-            result = []
-            for h in holdings:
-                clean_t = h.ticker
-                current_price = h.avg_price  # 기본 폴백값
-                try:
-                    if len(tickers) == 1:
-                        if isinstance(data.columns, pd.MultiIndex):
-                            df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else data.dropna()
-                        else:
-                            df = data.dropna()
-                    else:
-                        if isinstance(data.columns, pd.MultiIndex):
-                            df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else pd.DataFrame()
-                        else:
-                            df = data.dropna()
+            from app.bot.scheduler import latest_scanned_signals, latest_watchlist_signals
+            for s in latest_scanned_signals:
+                if "ticker" in s and "price" in s:
+                    cache_prices[s["ticker"]] = float(s["price"])
+            for t, s in latest_watchlist_signals.items():
+                if isinstance(s, dict) and "price" in s:
+                    cache_prices[t] = float(s["price"])
+        except Exception as ce:
+            print(f"[SimulatedBroker] Failed to load scheduler cache: {ce}")
 
-                    if not df.empty:
-                        current_price = float(df['Close'].iloc[-1])
-                except Exception as e:
-                    print(f"[SimulatedBroker] Failed to get price for {h.ticker}: {e}")
+        result = []
+        tickers_to_fetch = []
 
+        for h in holdings:
+            if h.ticker in cache_prices:
                 result.append({
                     "id": h.id,
                     "ticker": h.ticker,
@@ -148,29 +169,66 @@ class LocalSimulatedBroker(BaseBroker):
                     "avg_price": h.avg_price,
                     "quantity": h.quantity,
                     "highest_price": h.highest_price,
-                    "current_price": current_price,
+                    "current_price": cache_prices[h.ticker],
                     "fx_rate": exchange_rate,
                     "is_mock": True,
                     "provider": "Simulated"
                 })
-            return result
-        except Exception as e:
-            print(f"[SimulatedBroker] Error downloading live prices: {e}")
-            result = []
-            for h in holdings:
-                result.append({
-                    "id": h.id,
-                    "ticker": h.ticker,
-                    "ticker_name": h.ticker_name,
-                    "avg_price": h.avg_price,
-                    "quantity": h.quantity,
-                    "highest_price": h.highest_price,
-                    "current_price": h.avg_price * 1.02,
-                    "fx_rate": exchange_rate,
-                    "is_mock": True,
-                    "provider": "Simulated"
-                })
-            return result
+            else:
+                tickers_to_fetch.append(h)
+
+        if tickers_to_fetch:
+            tickers = [h.ticker for h in tickers_to_fetch]
+            try:
+                data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
+                for h in tickers_to_fetch:
+                    clean_t = h.ticker
+                    current_price = h.avg_price  # 기본 폴백값
+                    try:
+                        if len(tickers) == 1:
+                            if isinstance(data.columns, pd.MultiIndex):
+                                df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else data.dropna()
+                            else:
+                                df = data.dropna()
+                        else:
+                            if isinstance(data.columns, pd.MultiIndex):
+                                df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else pd.DataFrame()
+                            else:
+                                df = data.dropna()
+
+                        if not df.empty:
+                            current_price = float(df['Close'].iloc[-1])
+                    except Exception as e:
+                        print(f"[SimulatedBroker] Failed to get price for {h.ticker}: {e}")
+
+                    result.append({
+                        "id": h.id,
+                        "ticker": h.ticker,
+                        "ticker_name": h.ticker_name,
+                        "avg_price": h.avg_price,
+                        "quantity": h.quantity,
+                        "highest_price": h.highest_price,
+                        "current_price": current_price,
+                        "fx_rate": exchange_rate,
+                        "is_mock": True,
+                        "provider": "Simulated"
+                    })
+            except Exception as e:
+                print(f"[SimulatedBroker] Error downloading live prices: {e}")
+                for h in tickers_to_fetch:
+                    result.append({
+                        "id": h.id,
+                        "ticker": h.ticker,
+                        "ticker_name": h.ticker_name,
+                        "avg_price": h.avg_price,
+                        "quantity": h.quantity,
+                        "highest_price": h.highest_price,
+                        "current_price": h.avg_price,  # 💡 [예외 처리 리스크 개선] 통신 장애 시 강제 2% 펌핑 대신 평단가 적용
+                        "fx_rate": exchange_rate,
+                        "is_mock": True,
+                        "provider": "Simulated"
+                    })
+        return result
 
     def _get_live_price(self, ticker: str) -> float | None:
         """yfinance에서 단일 종목의 최신 가격을 조회합니다."""

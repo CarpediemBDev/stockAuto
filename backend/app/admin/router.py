@@ -11,7 +11,14 @@ from app.core.credentials import CredentialCryptoError, decrypt_credential, encr
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, get_current_admin_user
 from app.core.logging import logger
-from app.core.models import ActionLog, User, UserSettings, BrokerCredential, utc_now_aware
+from app.core.models import (
+    AccountEquitySnapshot,
+    ActionLog,
+    BrokerCredential,
+    User,
+    UserSettings,
+    utc_now_aware,
+)
 
 router = APIRouter()
 
@@ -202,7 +209,6 @@ def _verify_credential_values(
     if missing_fields:
         return False, f"{broker_name} 연동 정보가 누락되었거나 기본값입니다: {', '.join(missing_fields)}"
 
-    # Create dummy credential to inject into factory/client
     class TempCred:
         def __init__(self):
             self.user_id = user_id
@@ -260,7 +266,6 @@ def update_user_settings(
             detail="미해결 주문 재조정 중에는 거래 모드를 변경할 수 없습니다.",
         )
 
-    # Validate if switching to MOCK/REAL that the selected broker_provider is verified
     if trade_mode in {"MOCK", "REAL"}:
         provider = payload.broker_provider
         cred = db.query(BrokerCredential).filter_by(user_id=current_user.id, broker_name=provider).first()
@@ -340,7 +345,6 @@ def save_credential(
     cred.verified_trade_mode = trade_mode
     cred.verified_at = utc_now_aware()
 
-    # Automatically set as default provider if it's the first one
     if not db_settings.broker_provider:
         db_settings.broker_provider = payload.broker_name
 
@@ -414,7 +418,7 @@ def delete_credential(
             status_code=status.HTTP_409_CONFLICT,
             detail="미해결 주문 재조정 중에는 인증정보를 삭제할 수 없습니다.",
         )
-    
+
     cred = db.query(BrokerCredential).filter_by(user_id=current_user.id, broker_name=broker_name).first()
     if cred:
         db.delete(cred)
@@ -434,34 +438,77 @@ def list_users(
 ):
     users = db.query(User).all()
     result = []
+
+    from app.bot.fx_cache import FXRateCache
+    exchange_rate = FXRateCache.get_rate()
+
     for user in users:
         settings = user.settings
-        
+
         profit_rate = 0.0
+        balance_loaded = False
         if settings:
             try:
                 is_simulated = settings.trade_mode == "SIMULATED"
                 has_verified_cred = False
-                
+
                 if not is_simulated and settings.broker_provider:
                     for cred in settings.credentials:
                         if cred.broker_name == settings.broker_provider and cred.verification_status == "verified":
                             has_verified_cred = True
                             break
-                
+
+                # 💡 [성능 최적화] 동일 유저에 대한 Broker 객체 생성 및 잔고 조회를 1회로 통합
                 if is_simulated or has_verified_cred:
                     from app.bot.broker_factory import get_broker_client
                     broker = get_broker_client(settings)
                     balance = broker.get_account_balance()
                     profit_rate = balance.get("profit_rate", 0.0)
+                    balance_loaded = True
+                    total_asset = balance.get("total_asset")
+                    if total_asset is not None:
+                        captured_at = utc_now_aware()
+                        latest_snapshot = db.query(AccountEquitySnapshot).filter(
+                            AccountEquitySnapshot.user_id == user.id
+                        ).order_by(AccountEquitySnapshot.captured_at.desc()).first()
+                        should_record = (
+                            latest_snapshot is None
+                            or latest_snapshot.total_asset != float(total_asset)
+                            or (captured_at - latest_snapshot.captured_at).total_seconds() >= 60
+                        )
+                        if should_record:
+                            db.add(AccountEquitySnapshot(
+                                user_id=user.id,
+                                total_asset=float(total_asset),
+                                cash_balance=balance.get("cash_balance"),
+                                stock_balance=balance.get("stock_balance"),
+                                profit_rate=profit_rate,
+                                fx_rate=balance.get("fx_rate", exchange_rate),
+                                trade_mode=settings.trade_mode,
+                                captured_at=captured_at,
+                            ))
+                            db.flush()
             except Exception as e:
-                # API 호출 에러 발생 시 안전하게 0.0%로 폴백하여 어드민 대시보드 마비 차단
                 print(f"[Admin User List] Failed to fetch balance for user {user.username}: {e}")
                 profit_rate = 0.0
 
         from app.bot.multi_strategy_manager import MultiStrategyManager
         strategy_type = settings.strategy_type if settings else "regime_switching"
         strategy_name = MultiStrategyManager()._get_name_for_strategy(strategy_type)
+
+        snapshots = db.query(AccountEquitySnapshot).filter(
+            AccountEquitySnapshot.user_id == user.id
+        ).order_by(AccountEquitySnapshot.captured_at.desc()).limit(500).all()
+        snapshots.reverse()
+        if not balance_loaded and snapshots and snapshots[-1].profit_rate is not None:
+            profit_rate = snapshots[-1].profit_rate
+        equity_curve = [
+            {
+                "timestamp": snapshot.captured_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "total": round(snapshot.total_asset, 2),
+            }
+            for snapshot in snapshots
+        ]
 
         result.append(
             {
@@ -478,10 +525,15 @@ def list_users(
                 "strategy_type": strategy_type,
                 "strategy_name": strategy_name,
                 "credentials": [_credential_meta(c) for c in settings.credentials] if settings else [],
+                "equity_curve": equity_curve,
             }
         )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("[Admin User List] Failed to persist account equity snapshots")
     return result
-
 
 @router.post("/users/{user_id}/toggle-bot")
 def toggle_user_bot(

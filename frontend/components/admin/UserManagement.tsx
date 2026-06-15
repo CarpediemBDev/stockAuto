@@ -1,8 +1,33 @@
 'use client';
-
-import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Loader2, Play, Square, Trash2, X, Calendar, Bot, Key, Send, Shield } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  Users,
+  Loader2,
+  Play,
+  Square,
+  Trash2,
+  X,
+  Calendar,
+  Bot,
+  Key,
+  Send,
+  Shield,
+  Trophy,
+  TrendingUp,
+  TrendingDown
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  type TooltipValueType,
+} from 'recharts';
 import api from '@/lib/api';
 import { toast } from "sonner";
 import { getErrorMessage } from '@/lib/utils';
@@ -15,6 +40,11 @@ interface BrokerCredentialMeta {
   verified_trade_mode: string | null;
   verified_at: string | null;
   credential_error: string | null;
+}
+
+interface EquityPoint {
+  timestamp: string;
+  total: number;
 }
 
 interface ManagedUser {
@@ -31,6 +61,7 @@ interface ManagedUser {
   strategy_type: string;
   strategy_name?: string;
   credentials: BrokerCredentialMeta[];
+  equity_curve?: EquityPoint[];
 }
 
 export function UserManagement() {
@@ -38,29 +69,34 @@ export function UserManagement() {
   const [loading, setLoading] = useState<boolean>(true);
   const [actionUserId, setActionUserId] = useState<number | null>(null);
   const [selectedUser, setSelectedUser] = useState<ManagedUser | null>(null);
-
-  const fetchUsers = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await api.get("/admin/users");
-      setUsersList(res.data);
-      // Sync drawer data if open
-      setSelectedUser((prev) => {
-        if (!prev) return null;
-        const updated = res.data.find((u: ManagedUser) => u.id === prev.id);
-        return updated || null;
-      });
-    } catch (error) {
-      toast.error(`사용자 목록을 불러오는 데 실패했습니다: ${getErrorMessage(error)}`);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [sortByProfit, setSortByProfit] = useState<boolean>(true); // 기본적으로 수익률 기준 정렬 활성화
+  const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchUsers();
-  }, [fetchUsers]);
+    let active = true;
+    api.get("/admin/users")
+      .then((res) => {
+        if (active) {
+          setUsersList(res.data);
+          // Sync drawer data if open
+          setSelectedUser((prev) => {
+            if (!prev) return null;
+            const updated = res.data.find((u: ManagedUser) => u.id === prev.id);
+            return updated || null;
+          });
+          setLoading(false);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          toast.error(`사용자 목록을 불러오는 데 실패했습니다: ${getErrorMessage(error)}`);
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshTrigger]);
 
   // Esc key to close drawer
   useEffect(() => {
@@ -78,7 +114,7 @@ export function UserManagement() {
     try {
       const res = await api.post(`/admin/users/${userId}/toggle-bot`);
       toast.success(res.data.is_running ? "봇이 성공적으로 가동되었습니다." : "봇이 일시정지 되었습니다.");
-      fetchUsers();
+      setRefreshTrigger(prev => prev + 1);
     } catch (error) {
       toast.error(`봇 상태 변경에 실패했습니다: ${getErrorMessage(error)}`);
     } finally {
@@ -95,7 +131,7 @@ export function UserManagement() {
       await api.post(`/admin/users/${userId}/delete`);
       toast.success(`[${username}] 계정이 안전하게 영구 삭제되었습니다.`);
       setSelectedUser(null); // Close drawer on success
-      fetchUsers();
+      setRefreshTrigger(prev => prev + 1);
     } catch (error) {
       toast.error(`사용자 삭제에 실패했습니다: ${getErrorMessage(error)}`);
     } finally {
@@ -103,17 +139,213 @@ export function UserManagement() {
     }
   };
 
+  // Recharts를 위한 모든 경쟁 사용자의 자산 성장 곡선 병합 데이터 산출
+  const getChartData = () => {
+    if (!usersList || usersList.length === 0) return [];
+
+    // 타임스탬프 기준의 모든 지점들을 정렬하여 유니크 타임라인 확보
+    const timelineSet = new Set<string>();
+    usersList.forEach(u => {
+      if (u.equity_curve) {
+        u.equity_curve.forEach((point: EquityPoint) => {
+          timelineSet.add(point.timestamp);
+        });
+      }
+    });
+
+    const sortedTimeline = Array.from(timelineSet).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+
+    return sortedTimeline.map(ts => {
+      // 차트 가독성을 위해 'HH:MM:SS' 또는 'MM-DD HH:MM' 형태로 시간 포맷팅
+      let formattedTime = ts;
+      try {
+        const d = new Date(ts);
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const date = String(d.getDate()).padStart(2, '0');
+        const hours = String(d.getHours()).padStart(2, '0');
+        const minutes = String(d.getMinutes()).padStart(2, '0');
+        formattedTime = `${month}-${date} ${hours}:${minutes}`;
+      } catch {
+        formattedTime = ts.split(' ')[1] || ts;
+      }
+
+      const chartItem: Record<string, string | number> = { timestamp: formattedTime };
+
+      usersList.forEach(u => {
+        if (!u.equity_curve || u.equity_curve.length === 0) return;
+        // 해당 타임스탬프 이하의 가장 최근 평가액을 매핑
+        let lastVal = 10000000.0;
+        for (let i = 0; i < u.equity_curve.length; i++) {
+          if (new Date(u.equity_curve[i].timestamp).getTime() <= new Date(ts).getTime()) {
+            lastVal = u.equity_curve[i].total;
+          } else {
+            break;
+          }
+        }
+        chartItem[u.username] = Math.round(lastVal);
+      });
+      return chartItem;
+    });
+  };
+
+  const getLineColor = (index: number) => {
+    const colors = [
+      '#3b82f6', // 1: Blue
+      '#f59e0b', // 2: Gold
+      '#10b981', // 3: Emerald
+      '#ec4899', // 4: Pink
+      '#8b5cf6', // 5: Purple
+      '#06b6d4', // 6: Cyan
+      '#f43f5e', // 7: Rose
+    ];
+    return colors[index % colors.length];
+  };
+
+  const getRankBadge = (rank: number) => {
+    switch (rank) {
+      case 1:
+        return (
+          <span className="w-5 h-5 rounded-full bg-gradient-to-br from-amber-300 via-amber-500 to-yellow-600 text-slate-950 font-bold flex items-center justify-center text-[10px] shadow-md shadow-amber-500/20">
+            1
+          </span>
+        );
+      case 2:
+        return (
+          <span className="w-5 h-5 rounded-full bg-gradient-to-br from-slate-200 via-zinc-400 to-zinc-600 text-slate-950 font-bold flex items-center justify-center text-[10px] shadow-md shadow-slate-500/10">
+            2
+          </span>
+        );
+      case 3:
+        return (
+          <span className="w-5 h-5 rounded-full bg-gradient-to-br from-amber-600 via-amber-700 to-amber-900 text-slate-100 font-bold flex items-center justify-center text-[10px]">
+            3
+          </span>
+        );
+      default:
+        return (
+          <span className="w-5 h-5 rounded-full bg-zinc-800 text-zinc-400 font-bold flex items-center justify-center text-[10px] border border-zinc-700/50">
+            {rank}
+          </span>
+        );
+    }
+  };
+
+  const getReturnBadge = (rate: number) => {
+    const isPositive = rate > 0;
+    const isNegative = rate < 0;
+    return (
+      <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono tracking-tight flex items-center gap-0.5 w-fit border
+        ${isPositive
+          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+          : isNegative
+            ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+            : 'bg-zinc-800 text-zinc-500 border-zinc-750'}`}>
+        {isPositive ? <TrendingUp size={10} /> : isNegative ? <TrendingDown size={10} /> : null}
+        {rate > 0 ? '+' : ''}{rate.toFixed(2)}%
+      </span>
+    );
+  };
+
+  const formatTooltipValue = (value: TooltipValueType | undefined) => {
+    const numericValue = Array.isArray(value) ? value[0] : value;
+    return [`${Number(numericValue ?? 0).toLocaleString()}원`, ''];
+  };
+
+  // 정렬 규칙 적용된 유저 목록
+  const sortedUsers = [...usersList].sort((a, b) => {
+    if (sortByProfit) {
+      return (b.profit_rate || 0) - (a.profit_rate || 0);
+    }
+    return a.id - b.id;
+  });
+
+  const chartData = getChartData();
+
   return (
     <div className="space-y-6">
+      {/* 상단 랭킹 종합 차트 보드 */}
+      {!loading && usersList.length > 0 && chartData.length > 0 && (
+        <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-5 shadow-xl space-y-4">
+          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+              <Trophy size={16} className="text-amber-400" />
+              실시간 아레나 리그 자산 성장 추이
+            </h3>
+            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+              REAL-TIME EQUITY CURVE COMPARISON
+            </span>
+          </div>
+
+          <div className="h-[240px] min-h-[240px] w-full min-w-0 overflow-hidden text-slate-400">
+            <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={180}>
+              <LineChart data={chartData} margin={{ top: 10, right: 30, left: 10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b/20" vertical={false} />
+                <XAxis
+                  dataKey="timestamp"
+                  stroke="#475569"
+                  fontSize={9}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="#475569"
+                  fontSize={9}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v) => `${(v / 10000).toLocaleString()}만`}
+                />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#090d16', border: '1px solid #334155', borderRadius: '12px', fontSize: '10px', color: '#cbd5e1' }}
+                  formatter={formatTooltipValue}
+                />
+                <Legend
+                  verticalAlign="top"
+                  height={28}
+                  iconType="circle"
+                  iconSize={6}
+                  wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }}
+                />
+                {usersList.map((user, idx) => (
+                  <Line
+                    key={user.username}
+                    type="monotone"
+                    dataKey={user.username}
+                    stroke={getLineColor(idx)}
+                    strokeWidth={user.username === 'admin' ? 2 : 1.5}
+                    dot={false}
+                    activeDot={{ r: 3 }}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* 사용자 관리 테이블 보드 */}
       <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl space-y-4">
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <Users size={18} className="text-blue-400" />
-            사용자 관리
+            사용자 관리 & 실시간 아레나
           </h2>
-          <span className="text-[10px] text-zinc-400 font-semibold bg-zinc-800 px-2 py-0.5 rounded">
-            TOTAL: {usersList.length} USERS
-          </span>
+          <div className="flex items-center gap-3">
+            {/* 랭킹 정렬 토글 스위치 */}
+            <button
+              onClick={() => setSortByProfit(!sortByProfit)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all duration-200 cursor-pointer ${
+                sortByProfit
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  : 'bg-zinc-800/50 text-zinc-400 border-zinc-700/50'
+              }`}
+            >
+              <Trophy size={13} className={sortByProfit ? 'text-amber-400 animate-pulse' : 'text-zinc-500'} />
+              수익률 랭킹순
+            </button>
+            <span className="text-[10px] text-zinc-400 font-semibold bg-zinc-800 px-2 py-0.5 rounded">
+              TOTAL: {usersList.length} USERS
+            </span>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -131,84 +363,101 @@ export function UserManagement() {
             <table className="min-w-full divide-y divide-zinc-800/60">
               <thead>
                 <tr className="text-left text-xs uppercase text-zinc-500 font-bold tracking-wider">
-                  <th className="px-6 py-3.5">ID</th>
+                  <th className="px-6 py-3.5 text-center w-12">순위</th>
                   <th className="px-6 py-3.5">사용자명</th>
                   <th className="px-6 py-3.5">투자 모드</th>
+                  <th className="px-6 py-3.5">연동 전략</th>
                   <th className="px-6 py-3.5">텔레그램</th>
                   <th className="px-6 py-3.5">봇 상태</th>
-                  <th className="px-6 py-3.5">수익률</th>
+                  <th className="px-6 py-3.5">실시간 수익률</th>
                   <th className="px-6 py-3.5 text-right">관리</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/40 text-sm">
-                {usersList.map((user) => (
-                  <tr 
-                    key={user.id} 
-                    onClick={() => setSelectedUser(user)}
-                    className={`transition-colors duration-150 cursor-pointer hover:bg-zinc-800/20 ${selectedUser?.id === user.id ? 'bg-zinc-800/35' : ''}`}
-                  >
-                    <td className="px-6 py-4 text-xs font-mono text-zinc-500 font-bold">{user.id}</td>
-                    <td className="px-6 py-4 font-bold text-slate-300">{user.username}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded text-[10px] font-bold ${
-                        user.trade_mode === 'REAL' ? 'bg-red-500/10 text-red-400' :
-                        user.trade_mode === 'MOCK' ? 'bg-amber-500/10 text-amber-400' :
-                        'bg-blue-500/10 text-blue-400'
-                      }`}>
-                        {user.trade_mode}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 rounded text-[10px] font-bold ${
-                        user.telegram_enabled ? 'bg-indigo-500/10 text-indigo-400' : 'bg-zinc-800 text-zinc-500'
-                      }`}>
-                        {user.telegram_enabled ? 'ON' : 'OFF'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`w-2 h-2 rounded-full ${user.is_running ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-600'}`}></span>
-                        <span className={`text-[10px] font-bold ${user.is_running ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                          {user.is_running ? 'RUNNING' : 'STOPPED'}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 font-mono">
-                      {user.profit_rate !== undefined ? (
-                        <span className={`text-xs font-bold ${
-                          user.profit_rate > 0 ? 'text-emerald-400' :
-                          user.profit_rate < 0 ? 'text-blue-400' : 'text-zinc-500'
+                {sortedUsers.map((user, index) => {
+                  const rank = index + 1;
+                  return (
+                    <tr
+                      key={user.id}
+                      onClick={() => setSelectedUser(user)}
+                      className={`transition-colors duration-150 cursor-pointer hover:bg-zinc-800/20 ${selectedUser?.id === user.id ? 'bg-zinc-800/35' : ''}`}
+                    >
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex justify-center">
+                          {sortByProfit ? getRankBadge(rank) : (
+                            <span className="text-xs font-mono text-zinc-500 font-bold">{user.id}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 font-bold text-slate-300">
+                        <div className="flex items-center gap-2">
+                          {user.username}
+                          {user.role === 'ADMIN' && (
+                            <span className="text-[9px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-black">
+                              ADMIN
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded text-[10px] font-bold border ${
+                          user.trade_mode === 'REAL' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                          user.trade_mode === 'MOCK' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                          'bg-blue-500/10 text-blue-400 border-blue-500/20'
                         }`}>
-                          {user.profit_rate > 0 ? `+${user.profit_rate.toFixed(2)}%` : `${user.profit_rate.toFixed(2)}%`}
+                          {user.trade_mode}
                         </span>
-                      ) : (
-                        <span className="text-zinc-600 text-xs">-</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-right space-x-2">
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); handleToggleUserBot(user.id); }}
-                        disabled={actionUserId === user.id}
-                        className={`p-1.5 rounded-lg transition-colors ${
-                          user.is_running 
-                            ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20' 
-                            : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
-                        }`}
-                        title={user.is_running ? "봇 정지" : "봇 가동"}
-                      >
-                        {actionUserId === user.id ? <Loader2 size={16} className="animate-spin" /> : user.is_running ? <Square size={16} /> : <Play size={16} />}
-                      </button>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); handleDeleteUser(user.id, user.username); }}
-                        disabled={actionUserId === user.id || user.username === 'admin'}
-                        className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                        title="계정 영구 삭제"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-6 py-4 text-slate-400 font-semibold text-xs">
+                        {user.strategy_name || user.strategy_type?.replace(/_/g, ' ')}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded text-[10px] font-bold ${
+                          user.telegram_enabled ? 'bg-indigo-500/10 text-indigo-400' : 'bg-zinc-800 text-zinc-500'
+                        }`}>
+                          {user.telegram_enabled ? 'ON' : 'OFF'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${user.is_running ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-600'}`}></span>
+                          <span className={`text-[10px] font-bold ${user.is_running ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                            {user.is_running ? 'RUNNING' : 'STOPPED'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 font-mono">
+                        {user.profit_rate !== undefined ? getReturnBadge(user.profit_rate) : (
+                          <span className="text-zinc-600 text-xs">-</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleToggleUserBot(user.id); }}
+                            disabled={actionUserId === user.id}
+                            className={`p-1.5 rounded-lg transition-colors cursor-pointer border ${
+                              user.is_running
+                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
+                                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                            }`}
+                            title={user.is_running ? "봇 정지" : "봇 가동"}
+                          >
+                            {actionUserId === user.id ? <Loader2 size={16} className="animate-spin" /> : user.is_running ? <Square size={16} /> : <Play size={16} />}
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteUser(user.id, user.username); }}
+                            disabled={actionUserId === user.id || user.username === 'admin'}
+                            className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                            title="계정 영구 삭제"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -263,8 +512,8 @@ export function UserManagement() {
                     <div className="text-lg font-bold text-slate-200">{selectedUser.username}</div>
                   </div>
                   <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold flex items-center gap-1 ${
-                    selectedUser.role === 'ADMIN' 
-                      ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' 
+                    selectedUser.role === 'ADMIN'
+                      ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
                       : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
                   }`}>
                     <Shield size={10} />
@@ -313,15 +562,7 @@ export function UserManagement() {
                     </div>
                     <div className="flex justify-between items-center font-sans">
                       <span className="text-zinc-500 text-xs font-semibold">실시간 봇 수익률</span>
-                      {selectedUser.profit_rate !== undefined ? (
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono border ${
-                          selectedUser.profit_rate > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                          selectedUser.profit_rate < 0 ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                          'bg-zinc-800 text-zinc-500 border-zinc-700/50'
-                        }`}>
-                          {selectedUser.profit_rate > 0 ? `+${selectedUser.profit_rate.toFixed(2)}%` : `${selectedUser.profit_rate.toFixed(2)}%`}
-                        </span>
-                      ) : (
+                      {selectedUser.profit_rate !== undefined ? getReturnBadge(selectedUser.profit_rate) : (
                         <span className="text-zinc-500 text-xs font-semibold">-</span>
                       )}
                     </div>
@@ -334,8 +575,8 @@ export function UserManagement() {
                     <div className="flex justify-between items-center">
                       <span className="text-zinc-500 text-xs font-semibold">주요 증권사</span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        selectedUser.trade_mode === 'SIMULATED' 
-                          ? 'bg-zinc-800 text-zinc-500 border border-zinc-700/30' 
+                        selectedUser.trade_mode === 'SIMULATED'
+                          ? 'bg-zinc-800 text-zinc-500 border border-zinc-700/30'
                           : 'text-slate-300 bg-zinc-800/50 border border-zinc-700/50'
                       }`}>
                         {selectedUser.trade_mode === 'SIMULATED' ? '없음 (가상 시뮬레이터)' : selectedUser.broker_provider}
@@ -422,21 +663,21 @@ export function UserManagement() {
                 <button
                   onClick={() => handleToggleUserBot(selectedUser.id)}
                   disabled={actionUserId === selectedUser.id}
-                  className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all duration-205 cursor-pointer ${
+                  className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all duration-205 cursor-pointer border ${
                     selectedUser.is_running
-                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20'
+                      ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
                       : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20'
                   }`}
                 >
                   {actionUserId === selectedUser.id ? (
-                    <Loader2 size={14} className="animate-spin" />
+                    <Loader2 size={16} className="animate-spin" />
                   ) : selectedUser.is_running ? (
                     <>
-                      <Square size={14} /> 봇 일시 정지
+                      <Square size={16} /> 봇 일시 정지
                     </>
                   ) : (
                     <>
-                      <Play size={14} /> 봇 거래 기동
+                      <Play size={16} /> 봇 거래 기동
                     </>
                   )}
                 </button>
@@ -447,9 +688,10 @@ export function UserManagement() {
                   className="px-4 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 disabled:opacity-30 disabled:cursor-not-allowed text-xs font-bold transition-all duration-200 cursor-pointer"
                   title="계정 영구 삭제"
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={16} />
                 </button>
               </div>
+
             </motion.div>
           </>
         )}

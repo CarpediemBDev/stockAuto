@@ -88,13 +88,11 @@ def run_migrations_programmatically():
 def seed_competitive_users():
     """대결 참가용 5대 경쟁 어드민 유저 자동 Seeding"""
     from app.core.database import SessionLocal
-    from app.core.models import User, UserSettings
+    from app.core.models import User, UserSettings, Strategy
     from app.core.security import get_password_hash
 
     db = SessionLocal()
     try:
-        import secrets
-
         # 복잡한 환경 변수 및 난수 분기 로직을 전면 제거하고 기본값 'admin'을 직접 해싱
         logger.info("[Seeder] 경쟁용 사용자 및 관리자 비밀번호를 'admin'으로 자동 설정합니다.")
         hashed_pw_admin = get_password_hash("admin")
@@ -111,13 +109,55 @@ def seed_competitive_users():
             {"username": "admin8", "strategy": "asqs"},
             {"username": "admin9", "strategy": "bb_squeeze"},
             {"username": "admin10", "strategy": "rsi2_connors"},
+            {"username": "admin11", "strategy": "strategy_c"},
         ]
+
+        # 💡 [전략 테이블 동기화] strategies.yml 파일의 내용을 DB strategies 테이블에 Upsert 합니다.
+        import yaml
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        app_dir = os.path.dirname(current_dir)
+        yaml_path = os.path.join(app_dir, "translations", "strategies.yml")
+
+        if os.path.exists(yaml_path):
+            with open(yaml_path, "r", encoding="utf-8") as yf:
+                yaml_strategies = yaml.safe_load(yf) or {}
+
+            # DB의 strategies 테이블 데이터 업서트
+            for s_type, info in yaml_strategies.items():
+                name_ko = info.get("ko", s_type)
+                name_en = info.get("en", s_type)
+
+                db_strategy = db.query(Strategy).filter(Strategy.strategy_type == s_type).first()
+                if not db_strategy:
+                    db_strategy = Strategy(
+                        strategy_type=s_type,
+                        name_ko=name_ko,
+                        name_en=name_en
+                    )
+                    db.add(db_strategy)
+                else:
+                    db_strategy.name_ko = name_ko
+                    db_strategy.name_en = name_en
+            db.commit()
+            logger.info(f"[Seeder] {len(yaml_strategies)}개 전략 번역 데이터를 DB strategies 테이블에 동기화 완료했습니다.")
+
+            # 1. 시더 유저 전략 키 검증
+            for comp in competitors:
+                strategy = comp["strategy"]
+                if strategy not in yaml_strategies:
+                    raise ValueError(
+                        f"전략 식별자 '{strategy}'가 '{yaml_path}'에 정의되어 있지 않습니다. "
+                        "데이터베이스 시더와 번역 파일 간의 정합성이 맞지 않습니다."
+                    )
+            logger.info("[Validator] 모든 시드 전략 식별자가 strategies.yml에 존재함을 확인했습니다.")
+        else:
+            logger.warning(f"[Validator] strategies.yml 파일을 찾을 수 없어 전략 테이블 동기화를 생략합니다: {yaml_path}")
 
         for comp in competitors:
             # 유저 존재 여부 검사
             existing_user = db.query(User).filter(User.username == comp["username"]).first()
             if not existing_user:
-                logger.info(f"[Seeder] 신규 유저 생성 중: {comp['username']} (전략: {comp['strategy']})")
+                logger.info(f"[Seeder] 신규 경쟁 유저 생성 중: {comp['username']} (전략: {comp['strategy']})")
 
                 is_admin = (comp["username"] == "admin")
                 hashed_pw = hashed_pw_admin if is_admin else hashed_pw_others
@@ -125,31 +165,36 @@ def seed_competitive_users():
 
                 new_user = User(username=comp["username"], hashed_password=hashed_pw, role=user_role)
                 db.add(new_user)
-                db.commit()
+                db.flush()  # 💡 [트랜잭션 최적화] user_id 획득을 위해 commit 대신 flush 사용
                 db.refresh(new_user)
 
-                # 시딩 계정도 명시적으로 시작하기 전까지 자동매매를 정지 상태로 둡니다.
+                # 대결 참여를 위해 is_running=True, trade_mode="SIMULATED"로 세팅
                 new_settings = UserSettings(
                     user_id=new_user.id,
                     strategy_type=comp["strategy"],
                     trade_mode="SIMULATED",
-                    is_running=False,
+                    is_running=True,
                 )
                 db.add(new_settings)
-                db.commit()
-                logger.info(f"[Seeder] 경쟁 유저 {comp['username']} 세팅 완료.")
+                logger.info(f"[Seeder] 경쟁 유저 {comp['username']} 세팅 완료 (자동 매매 활성화).")
             else:
-                # 이미 존재하더라도 설정 확인 및 업데이트
+                # 기존 사용자가 직접 변경한 전략, 거래 모드, 봇 상태는 보존합니다.
                 settings = existing_user.settings
                 if not settings:
                     settings = UserSettings(
                         user_id=existing_user.id,
                         strategy_type=comp["strategy"],
                         trade_mode="SIMULATED",
-                        is_running=False,
+                        is_running=True,
                     )
                     db.add(settings)
-                    db.commit()
+                    logger.info(f"[Seeder] 기존 경쟁 유저 {comp['username']}의 누락 설정을 생성했습니다.")
+                else:
+                    logger.info(f"[Seeder] 기존 경쟁 유저 {comp['username']}의 사용자 설정을 보존합니다.")
+
+        # 💡 [트랜잭션 최적화] 모든 경쟁 유저 시딩 작업 완료 후 일괄 커밋 수행
+        db.commit()
+        logger.info("[Seeder] 모든 경쟁 유저 일괄 커밋 완료.")
 
     except Exception as seed_err:
         logger.error(f"[Seeder] 데이터베이스 시딩 실패: {seed_err}")

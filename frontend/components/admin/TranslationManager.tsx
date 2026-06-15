@@ -1,6 +1,5 @@
 'use client';
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Globe, Plus, Search, Edit2, Trash2, Check, X, Loader2 } from 'lucide-react';
 import { translationAPI } from '@/lib/api';
 import { getErrorMessage } from '@/lib/utils';
@@ -22,26 +21,29 @@ export function TranslationManager() {
   const [newTicker, setNewTicker] = useState<string>("");
   const [newNameKo, setNewNameKo] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingName, setEditingName] = useState<string>("");
-
-  const fetchTranslations = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await translationAPI.getAll();
-      setTranslations(res.data);
-    } catch (error) {
-      toast.error(`사전 데이터 로드 실패: ${getErrorMessage(error)}`);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchTranslations();
-  }, [fetchTranslations]);
+    let active = true;
+    translationAPI.getAll()
+      .then((res) => {
+        if (active) {
+          setTranslations(res.data);
+          setLoading(false);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          toast.error(`사전 데이터 로드 실패: ${getErrorMessage(error)}`);
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshTrigger]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,7 +61,7 @@ export function TranslationManager() {
       toast.success(`${tickerClean} (${nameClean}) 등록 완료! (메모리 캐시 자동 핫싱크)`);
       setNewTicker("");
       setNewNameKo("");
-      fetchTranslations();
+      setRefreshTrigger(prev => prev + 1);
     } catch (error) {
       toast.error(`번역 등록 실패: ${getErrorMessage(error)}`);
     } finally {
@@ -83,7 +85,7 @@ export function TranslationManager() {
       await translationAPI.update(id, nameClean);
       toast.success("번역이 수정되었으며 백엔드 캐시가 즉시 동기화되었습니다!");
       setEditingId(null);
-      fetchTranslations();
+      setRefreshTrigger(prev => prev + 1);
     } catch (error) {
       toast.error(`수정 실패: ${getErrorMessage(error)}`);
     }
@@ -97,7 +99,7 @@ export function TranslationManager() {
     try {
       await translationAPI.delete(id);
       toast.success(`${ticker} 번역 매핑이 성공적으로 제거되었습니다.`);
-      fetchTranslations();
+      setRefreshTrigger(prev => prev + 1);
     } catch (error) {
       toast.error(`삭제 실패: ${getErrorMessage(error)}`);
     }
@@ -232,18 +234,20 @@ export function TranslationManager() {
                             <span className="text-slate-100 font-medium">{item.name_ko}</span>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-right space-x-2">
-                          {editingId === item.id ? (
-                            <>
-                              <button onClick={() => handleUpdate(item.id)} className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20" title="저장"><Check size={16} /></button>
-                              <button onClick={() => setEditingId(null)} className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:bg-zinc-700" title="취소"><X size={16} /></button>
-                            </>
-                          ) : (
-                            <>
-                              <button onClick={() => startEdit(item)} className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20" title="수정"><Edit2 size={16} /></button>
-                              <button onClick={() => handleDelete(item.id, item.ticker)} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20" title="삭제"><Trash2 size={16} /></button>
-                            </>
-                          )}
+                        <td className="px-6 py-4">
+                          <div className="flex items-center justify-end gap-2">
+                            {editingId === item.id ? (
+                              <>
+                                <button onClick={() => handleUpdate(item.id)} className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20" title="저장"><Check size={16} /></button>
+                                <button onClick={() => setEditingId(null)} className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:bg-zinc-700" title="취소"><X size={16} /></button>
+                              </>
+                            ) : (
+                              <>
+                                <button onClick={() => startEdit(item)} className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20" title="수정"><Edit2 size={16} /></button>
+                                <button onClick={() => handleDelete(item.id, item.ticker)} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20" title="삭제"><Trash2 size={16} /></button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
