@@ -1,7 +1,6 @@
-import asyncio
 import json
-import subprocess
 import os
+import asyncio
 from app.core.logging import logger
 
 async def fetch_toss_market_scanners() -> dict[str, list[str]]:
@@ -24,8 +23,10 @@ async def fetch_toss_market_scanners() -> dict[str, list[str]]:
         
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=45.0)
         
+        stderr_text = stderr.decode("utf-8", errors="replace").strip()
+
         if process.returncode != 0:
-            logger.error(f"[TossCrawler] Node script failed: {stderr.decode('utf-8')}")
+            logger.error(f"[TossCrawler] Node script failed: {stderr_text}")
             return {}
             
         output = stdout.decode("utf-8").strip()
@@ -38,6 +39,15 @@ async def fetch_toss_market_scanners() -> dict[str, list[str]]:
         results = json.loads(json_output)
         
         total_found = sum(len(tickers) for tickers in results.values())
+        if total_found == 0:
+            if stderr_text:
+                logger.error(f"[TossCrawler] Empty result with scraper stderr: {stderr_text}")
+            else:
+                logger.warning("[TossCrawler] Empty result from Toss scraper.")
+            return {}
+
+        if stderr_text:
+            logger.warning(f"[TossCrawler] Scraper completed with stderr: {stderr_text}")
         logger.info(f"[TossCrawler] Successfully extracted {total_found} tickers across 6 tabs.")
         
         return results

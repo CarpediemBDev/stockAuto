@@ -1,8 +1,34 @@
 const puppeteer = require('puppeteer');
 
+function uniq(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function normalizeTicker(rawText) {
+  const lines = String(rawText || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    const cleaned = line.replace(/^\d+\s*/, '').trim();
+    if (/^[A-Z][A-Z0-9.-]{0,9}$/.test(cleaned)) {
+      return cleaned;
+    }
+  }
+  return null;
+}
+
 async function scrapeRankings() {
-  const browser = await puppeteer.launch({ headless: 'new' });
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
   const page = await browser.newPage();
+  await page.setUserAgent(
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+    '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+  );
   
   // 6 tabs we want to click
   const tabs = [
@@ -35,7 +61,8 @@ async function scrapeRankings() {
   };
   
   page.on('response', async response => {
-    if (response.url().includes('ranking') || response.url().includes('realtime/stock')) {
+    const url = response.url();
+    if (url.includes('ranking') || url.includes('realtime/stock')) {
       try {
         const json = await response.json();
         // Extract tickers from json.result or similar structure
@@ -51,16 +78,65 @@ async function scrapeRankings() {
     }
   });
 
+  async function extractVisibleTickers() {
+    return await page.evaluate(() => {
+      function uniq(values) {
+        return [...new Set(values.filter(Boolean))];
+      }
+
+      function normalizeTicker(rawText) {
+        const lines = String(rawText || '')
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean);
+
+        for (const line of lines) {
+          const cleaned = line.replace(/^\d+\s*/, '').trim();
+          if (/^[A-Z][A-Z0-9.-]{0,9}$/.test(cleaned)) {
+            return cleaned;
+          }
+        }
+        return null;
+      }
+
+      const byHref = new Map();
+      for (const anchor of document.querySelectorAll('a[href*="/stocks/"][href$="/order"]')) {
+        const href = anchor.href;
+        if (!byHref.has(href)) {
+          byHref.set(href, []);
+        }
+        byHref.get(href).push(anchor.innerText);
+      }
+
+      return uniq(
+        [...byHref.values()]
+          .map((texts) => normalizeTicker(texts.join('\n')))
+          .filter(Boolean)
+      );
+    });
+  }
+
   try {
-      await page.goto('https://tossinvest.com', { waitUntil: 'networkidle2', timeout: 30000 });
-      await new Promise(r => setTimeout(r, 2000));
+      await page.goto('https://www.tossinvest.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForSelector('button[value], a[href*="/stocks/"][href$="/order"]', { timeout: 15000 });
+      await new Promise(r => setTimeout(r, 3000));
       
       for (const tab of tabs) {
           currentTab = tab;
           try {
-              await page.click(`button[value='${tab}']`);
-              // Wait for API to return
-              await new Promise(r => setTimeout(r, 1500));
+              const clicked = await page.evaluate((tabValue) => {
+                const button = document.querySelector(`button[value="${tabValue}"]`);
+                if (!button) return false;
+                button.click();
+                return true;
+              }, tab);
+              if (!clicked) {
+                console.error(`Failed to find ${tab}`);
+                continue;
+              }
+              await new Promise(r => setTimeout(r, 2000));
+              const targetKey = tabMapping[currentTab];
+              results[targetKey] = uniq([...results[targetKey], ...await extractVisibleTickers()]);
           } catch(e) {
               console.error(`Failed to click ${tab}`);
           }

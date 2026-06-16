@@ -1,5 +1,4 @@
 import pytest
-import asyncio
 from unittest.mock import patch, MagicMock
 from app.scanner.toss_crawler import fetch_toss_market_scanners
 from app.scanner.discovery import get_seed_tickers
@@ -48,13 +47,47 @@ async def test_fetch_toss_market_scanners_failure_fallback():
         assert results == {}
 
 @pytest.mark.asyncio
-async def test_discovery_fallback_to_yahoo():
+async def test_fetch_toss_market_scanners_empty_result_with_stderr_is_failure():
+    mock_process = MagicMock()
+    mock_process.returncode = 0
+
+    async def mock_communicate():
+        return b'{"TOSS_TOTAL_AMT": [], "TOSS_TOTAL_VOL": []}', b'Navigation timeout'
+
+    mock_process.communicate = mock_communicate
+
+    with patch('asyncio.create_subprocess_exec', return_value=mock_process):
+        results = await fetch_toss_market_scanners()
+        assert results == {}
+
+@pytest.mark.asyncio
+async def test_discovery_merges_toss_and_yahoo():
+    with patch(
+        'app.scanner.discovery.fetch_toss_market_scanners',
+        return_value={"TOSS_TOTAL_AMT": ["AAPL", "TSLA"]},
+    ) as mock_toss:
+        mock_yahoo_results = {"YAHOO_ACTIVE": ["AAPL", "AMZN"]}
+        with patch('app.scanner.discovery.fetch_yahoo_market_scanners', return_value=mock_yahoo_results) as mock_yahoo:
+            tickers, source_map = await get_seed_tickers()
+
+            mock_toss.assert_called_once()
+            mock_yahoo.assert_called_once()
+
+            assert "AAPL" in tickers
+            assert "TSLA" in tickers
+            assert "AMZN" in tickers
+            assert "TOSS_TOTAL_AMT" in source_map["AAPL"]
+            assert "YAHOO_ACTIVE" in source_map["AAPL"]
+            assert "TOSS_TOTAL_AMT" in source_map["TSLA"]
+            assert "YAHOO_ACTIVE" in source_map["AMZN"]
+            assert "MARKET" in source_map["AAPL"]
+
+@pytest.mark.asyncio
+async def test_discovery_uses_yahoo_when_toss_is_empty():
     """
     Toss 수집 결과가 비어있을 경우 discovery.py가 Yahoo Finance 로직을 호출하는지 검증
     """
-    # 1. Toss Crawler는 실패(빈 딕셔너리 반환)했다고 가정
     with patch('app.scanner.discovery.fetch_toss_market_scanners', return_value={}):
-        # 2. Yahoo Finance Crawler는 성공했다고 가정
         mock_yahoo_results = {"YAHOO_ACTIVE": ["AMZN"]}
         with patch('app.scanner.discovery.fetch_yahoo_market_scanners', return_value=mock_yahoo_results) as mock_yahoo:
             tickers, source_map = await get_seed_tickers()

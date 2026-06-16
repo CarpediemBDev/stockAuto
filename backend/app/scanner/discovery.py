@@ -52,19 +52,24 @@ async def get_seed_tickers() -> tuple[list, dict[str, list[str]]]:
 
     source_map: dict[str, set[str]] = {}
 
-    # 1. 1순위 시드 수집: 토스증권 WTS 크롤링
-    scanners_results = {}
-    try:
-        scanners_results = await fetch_toss_market_scanners()
-    except Exception as e:
-        print(f"[Discovery] Toss crawler failed: {e}. Falling back to Yahoo Finance.")
+    toss_results, yahoo_results = await asyncio.gather(
+        fetch_toss_market_scanners(),
+        fetch_yahoo_market_scanners(),
+        return_exceptions=True,
+    )
 
-    # 2. Fallback 로직: 토스 수집에 실패했거나 데이터가 없으면 Yahoo Finance API 호출
+    scanners_results: dict[str, list[str]] = {}
+    for source_name, result in (("Toss", toss_results), ("Yahoo", yahoo_results)):
+        if isinstance(result, Exception):
+            print(f"[Discovery] {source_name} scanners failed: {result}")
+            continue
+        if result:
+            scanners_results.update(result)
+
     if not scanners_results or not any(scanners_results.values()):
-        print("[Discovery] Using Yahoo Finance as Fallback...")
-        scanners_results = await fetch_yahoo_market_scanners()
+        print("[Discovery] Toss and Yahoo sources failed. Using safety tech list only.")
 
-    # 3. 출처 꼬리표(Source Tag) 부착
+    # 출처 꼬리표(Source Tag) 부착
     for tag, tickers in scanners_results.items():
         for t in tickers:
             source_map.setdefault(t, set()).add(tag)
