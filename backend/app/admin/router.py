@@ -680,8 +680,12 @@ def get_system_logs(
 ):
     return db.query(ActionLog).order_by(ActionLog.created_at.desc()).limit(100).all()
 
+from fastapi import BackgroundTasks
+from fastapi.responses import JSONResponse
+
 @router.get("/backtest/tournament")
 async def get_backtest_tournament_results(
+    background_tasks: BackgroundTasks,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     tickers: Optional[str] = None,
@@ -698,13 +702,32 @@ async def get_backtest_tournament_results(
     parsed_tickers = _parse_backtest_tickers(tickers)
 
     try:
-        from app.admin.backtest_runner import run_dynamic_tournament
-        return await run_dynamic_tournament(
-            parsed_start_date.isoformat(),
-            parsed_end_date.isoformat(),
-            tickers_list=parsed_tickers,
-            db=db,
+        from app.admin.backtest_runner import (
+            get_dynamic_tickers_list,
+            check_tournament_cache,
+            _build_tournament_cache_path,
+            run_dynamic_tournament_task
         )
+        
+        tickers_list = get_dynamic_tickers_list(parsed_tickers, db)
+        start_str = parsed_start_date.isoformat()
+        end_str = parsed_end_date.isoformat()
+
+        # 1. Check if cache exists
+        cached = check_tournament_cache(start_str, end_str, tickers_list)
+        if cached is not None:
+            return {"status": "done", "data": cached}
+
+        # 2. Check if currently running
+        cache_path = _build_tournament_cache_path(start_str, end_str, tickers_list)
+        lock_path = cache_path.with_suffix(".lock")
+        if lock_path.exists():
+            return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content={"status": "processing"})
+
+        # 3. Start background task
+        background_tasks.add_task(run_dynamic_tournament_task, start_str, end_str, tickers_list, lock_path)
+        return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content={"status": "processing"})
+
     except HTTPException:
         raise
     except Exception as exc:

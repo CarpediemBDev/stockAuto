@@ -447,11 +447,7 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
         **calculate_performance_metrics(equity_curve, initial_value=initial_cash),
     }
  
-async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: List[str] = None, db = None) -> List[Dict[str, Any]]:
-    """과거 지정된 특정 기간(start_date ~ end_date) 동안 5대 전략 토너먼트 배틀을 실행하고 그 통계와 자산 곡선을 캐시/반환합니다."""
-    
-    # 💡 [요구사항 반영] tickers_list가 없고 db 세션이 주어졌다면,
-    # 과거 '매수/매도 이력(TradeLog)', '현재 보유종목(Holding)', '관심종목(WatchList)'의 합집합을 구해 중복제거한 종목들로 백테스트를 동적 가동합니다.
+def get_dynamic_tickers_list(tickers_list: List[str] = None, db = None) -> List[str]:
     if not tickers_list and db:
         try:
             from app.core.models import WatchList, Holding, TradeLog
@@ -465,16 +461,39 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
             logger.info(f"[Backtest Tournament] Dynamically extracted {len(tickers_list)} tickers from Watchlist, Holdings, and TradeLogs: {tickers_list}")
         except Exception as e:
             logger.error(f"[Backtest Tournament] Failed to extract tickers dynamically: {e}", exc_info=True)
+    return tickers_list
 
-    # 긴 티커 목록이나 경로 문자가 파일명에 직접 들어가지 않도록 해시 기반 캐시 키를 사용합니다.
+def check_tournament_cache(start_date: str, end_date: str, tickers_list: List[str] = None) -> dict | None:
     cache_path = _build_tournament_cache_path(start_date, end_date, tickers_list)
-    
     if cache_path.exists():
         try:
             with cache_path.open("r", encoding="utf-8") as f_c:
                 return _apply_strategy_display_names(json.load(f_c))
         except Exception as e:
             logger.warning(f"Cache loading failed, falling back to live calc: {e}")
+    return None
+
+async def run_dynamic_tournament_task(start_date: str, end_date: str, tickers_list: List[str], lock_path: Path):
+    try:
+        # Create lock
+        lock_path.touch(exist_ok=True)
+        results = await _run_dynamic_tournament_internal(start_date, end_date, tickers_list)
+        return results
+    except Exception as e:
+        logger.error(f"Error in background tournament: {e}", exc_info=True)
+    finally:
+        if lock_path.exists():
+            lock_path.unlink()
+
+async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: List[str] = None, db = None) -> List[Dict[str, Any]]:
+    # Legacy wrapper if someone calls it directly
+    tickers_list = get_dynamic_tickers_list(tickers_list, db)
+    cached = check_tournament_cache(start_date, end_date, tickers_list)
+    if cached: return cached
+    return await _run_dynamic_tournament_internal(start_date, end_date, tickers_list)
+
+async def _run_dynamic_tournament_internal(start_date: str, end_date: str, tickers_list: List[str] = None) -> List[Dict[str, Any]]:
+    """과거 지정된 특정 기간(start_date ~ end_date) 동안 5대 전략 토너먼트 배틀을 실행하고 그 통계와 자산 곡선을 캐시/반환합니다."""
             
     if not tickers_list:
         from app.scanner.discovery import get_seed_tickers

@@ -59,24 +59,13 @@ interface StrategyResult {
   equity_curve: EquityPoint[];
 }
 
-async function requestTournamentResults(
-  start: string,
-  end: string,
-  signal: AbortSignal,
-): Promise<StrategyResult[]> {
-  const res = await adminAPI.getBacktestTournament({
-    params: {
-      start_date: start,
-      end_date: end,
-    },
-    signal,
-  });
-  return res.data || [];
-}
+
 
 export function BacktestTournament() {
   const [data, setData] = useState<StrategyResult[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isPolling, setIsPolling] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [selectedStrategy, setSelectedStrategy] = useState<StrategyResult | null>(null);
   const requestControllerRef = useRef<AbortController | null>(null);
   
@@ -88,52 +77,54 @@ export function BacktestTournament() {
     requestControllerRef.current?.abort();
     const controller = new AbortController();
     requestControllerRef.current = controller;
+    setLoading(true);
+    setIsPolling(false);
+    setElapsedSeconds(0);
+
+    const startTime = Date.now();
+    const timerId = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
 
     try {
-      const results = await requestTournamentResults(start, end, controller.signal);
-      setData(results);
-      if (results.length > 0) {
-        setSelectedStrategy(results[0]); // Default to 1st rank
-      } else {
-        setSelectedStrategy(null);
+      while (!controller.signal.aborted) {
+        const res = await adminAPI.getBacktestTournament({
+          params: { start_date: start, end_date: end },
+          signal: controller.signal,
+        });
+
+        if (res.status === 202 || res.data?.status === 'processing') {
+          setIsPolling(true);
+          // Wait 10 seconds before polling again
+          await new Promise(resolve => setTimeout(resolve, 10000));
+        } else {
+          const results = res.data?.data || res.data || [];
+          setData(results);
+          setSelectedStrategy(results[0] ?? null);
+          break;
+        }
       }
     } catch (error) {
       if (isCancel(error)) return;
       const msg = reportHandledError('Failed to fetch tournament results', error);
       toast.error(`대항전 결과 데이터 로드 실패: ${msg}`);
     } finally {
+      clearInterval(timerId);
       if (requestControllerRef.current === controller) {
         requestControllerRef.current = null;
         setLoading(false);
+        setIsPolling(false);
       }
     }
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    requestControllerRef.current = controller;
-
-    void requestTournamentResults("2025-01-01", "2025-12-31", controller.signal)
-      .then((results) => {
-        setData(results);
-        setSelectedStrategy(results[0] ?? null);
-      })
-      .catch((error) => {
-        if (isCancel(error)) return;
-        const msg = reportHandledError('Failed to fetch tournament results', error);
-        toast.error(`대항전 결과 데이터 로드 실패: ${msg}`);
-      })
-      .finally(() => {
-        if (requestControllerRef.current === controller) {
-          requestControllerRef.current = null;
-          setLoading(false);
-        }
-      });
-
+    // eslint-disable-next-line
+    void fetchResults("2025-01-01", "2025-12-31");
     return () => {
-      controller.abort();
+      requestControllerRef.current?.abort();
     };
-  }, []);
+  }, [fetchResults]);
 
   const handleRunSimulation = () => {
     if (!startDate || !endDate) {
@@ -284,9 +275,24 @@ export function BacktestTournament() {
         {loading ? (
           <div className="py-36 flex flex-col items-center justify-center gap-4">
             <Loader2 size={44} className="animate-spin text-blue-500" />
-            <div className="text-center space-y-1">
-              <span className="text-xs text-slate-300 font-bold tracking-wider animate-pulse block">HIL 시뮬레이터 가상 환경 기동 중...</span>
-              <span className="text-[10px] text-zinc-500 block">yfinance 로컬 캐시로부터 15개 기술 지표 오실레이터 및 수급 벡터 로딩 중</span>
+            <div className="text-center space-y-2">
+              {isPolling ? (
+                <>
+                  <div className="flex items-center justify-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-xs text-emerald-400 font-bold tracking-wider">서버에서 백그라운드 시뮬레이션을 진행 중입니다...</span>
+                  </div>
+                  <span className="text-[11px] text-zinc-400 block font-mono bg-zinc-900/50 py-1 px-3 rounded-full border border-zinc-800 inline-block">
+                    경과 시간: {Math.floor(elapsedSeconds / 60).toString().padStart(2, '0')}:{(elapsedSeconds % 60).toString().padStart(2, '0')} (약 3~4분 소요)
+                  </span>
+                  <span className="text-[10px] text-zinc-500 block">이 화면을 벗어나도 백테스트는 계속 진행됩니다.</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs text-slate-300 font-bold tracking-wider animate-pulse block">HIL 시뮬레이터 가상 환경 기동 중...</span>
+                  <span className="text-[10px] text-zinc-500 block">yfinance 로컬 캐시로부터 15개 기술 지표 오실레이터 및 수급 벡터 로딩 중</span>
+                </>
+              )}
             </div>
           </div>
         ) : data.length === 0 ? (
