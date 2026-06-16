@@ -21,6 +21,8 @@ interface Holding {
   is_mock?: boolean;
   provider?: string;
   fx_rate?: number;
+  strategy_type?: string;
+  strategy_name?: string;
 }
 
 interface NewsInfo {
@@ -234,20 +236,9 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {holdings.map((h) => {
-          // Parse strategy prefix from ticker string
-          let cleanTicker = h.ticker;
-          let strategyLabel = "";
-          let strategyBadgeClass = "";
-          
-          if (h.ticker.startsWith("EP_")) {
-            cleanTicker = h.ticker.substring(3);
-            strategyLabel = "⚡ EP (에피소딕 피벗)";
-            strategyBadgeClass = "bg-blue-500/15 text-blue-400 border-blue-500/30";
-          } else if (h.ticker.startsWith("RS_")) {
-            cleanTicker = h.ticker.substring(3);
-            strategyLabel = "👑 RS V2 (레짐 스위칭)";
-            strategyBadgeClass = "bg-amber-500/15 text-amber-400 border-amber-500/30";
-          }
+          const cleanTicker = h.ticker.replace(/^[A-Z0-9]+_/, "");
+          const strategyLabel = h.strategy_name || h.strategy_type?.replaceAll("_", " ") || "";
+          const strategyBadgeClass = "bg-blue-500/15 text-blue-400 border-blue-500/30";
 
           const currentPrice = h.current_price !== undefined ? h.current_price : h.avg_price * 1.02;
           const profitRate = ((currentPrice - h.avg_price) / h.avg_price) * 100;

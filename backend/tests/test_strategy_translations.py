@@ -1,10 +1,12 @@
-import pytest
+from pathlib import Path
+
 from app.translations.translator import Translator
 from app.core.database import SessionLocal
 from app.core import models
+from app.strategies.strategy_factory import get_strategy
 
 def test_strategy_translation_values():
-    # Load cache (should load YAML file automatically)
+    # 전략 번역은 strategies 테이블에서만 로드합니다.
     Translator.load_cache()
 
     # Test existing strategy translations in ko and en
@@ -60,3 +62,25 @@ def test_legacy_strategy_database_cleanup():
 
     finally:
         db.close()
+
+
+def test_strategy_yaml_has_been_removed():
+    backend_root = Path(__file__).resolve().parents[1]
+    assert not (backend_root / "app" / "translations" / "strategies.yml").exists()
+
+
+def test_database_strategy_catalog_matches_executable_registry():
+    Translator.load_cache()
+    db = SessionLocal()
+    try:
+        strategy_keys = {
+            row[0]
+            for row in db.query(models.Strategy.strategy_type).all()
+        }
+    finally:
+        db.close()
+
+    composite_keys = {"multi_slot", "multi_slot_3", "three_slot"}
+    for strategy_key in sorted(strategy_keys - composite_keys):
+        strategy = get_strategy(strategy_key)
+        assert strategy.name == Translator.translate_strategy(strategy_key, "ko")

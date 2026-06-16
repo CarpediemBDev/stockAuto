@@ -8,6 +8,7 @@ Create Date: 2026-06-15 23:55:00.000000
 from typing import Sequence, Union
 
 from alembic import op
+import sqlalchemy as sa
 
 
 revision: str = "b7d8e9f01234"
@@ -25,13 +26,27 @@ STRATEGY_FOREIGN_KEYS = (
 
 
 def upgrade() -> None:
+    inspector = sa.inspect(op.get_bind())
     for table_name, constraint_name in STRATEGY_FOREIGN_KEYS:
+        existing_names = {
+            foreign_key.get("name")
+            for foreign_key in inspector.get_foreign_keys(table_name)
+        }
+        if constraint_name not in existing_names:
+            continue
         with op.batch_alter_table(table_name, schema=None) as batch_op:
             batch_op.drop_constraint(constraint_name, type_="foreignkey")
 
 
 def downgrade() -> None:
+    inspector = sa.inspect(op.get_bind())
     for table_name, constraint_name in STRATEGY_FOREIGN_KEYS:
+        existing_names = {
+            foreign_key.get("name")
+            for foreign_key in inspector.get_foreign_keys(table_name)
+        }
+        if constraint_name in existing_names:
+            continue
         with op.batch_alter_table(table_name, schema=None) as batch_op:
             batch_op.create_foreign_key(
                 constraint_name,

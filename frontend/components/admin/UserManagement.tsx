@@ -174,7 +174,7 @@ export function UserManagement() {
       usersList.forEach(u => {
         if (!u.equity_curve || u.equity_curve.length === 0) return;
         // 해당 타임스탬프 이하의 가장 최근 평가액을 매핑
-        let lastVal = 10000000.0;
+        let lastVal: number | undefined;
         for (let i = 0; i < u.equity_curve.length; i++) {
           if (new Date(u.equity_curve[i].timestamp).getTime() <= new Date(ts).getTime()) {
             lastVal = u.equity_curve[i].total;
@@ -182,7 +182,9 @@ export function UserManagement() {
             break;
           }
         }
-        chartItem[u.username] = Math.round(lastVal);
+        if (lastVal !== undefined) {
+          chartItem[`user_${u.id}`] = Math.round(lastVal);
+        }
       });
       return chartItem;
     });
@@ -260,6 +262,9 @@ export function UserManagement() {
   });
 
   const chartData = getChartData();
+  const chartUsers = usersList.filter(
+    user => user.equity_curve && user.equity_curve.length > 0
+  );
 
   return (
     <div className="space-y-6">
@@ -305,11 +310,12 @@ export function UserManagement() {
                   iconSize={6}
                   wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }}
                 />
-                {usersList.map((user, idx) => (
+                {chartUsers.map((user, idx) => (
                   <Line
                     key={user.username}
                     type="monotone"
-                    dataKey={user.username}
+                    dataKey={`user_${user.id}`}
+                    name={user.username}
                     stroke={getLineColor(idx)}
                     strokeWidth={user.username === 'admin' ? 2 : 1.5}
                     dot={false}

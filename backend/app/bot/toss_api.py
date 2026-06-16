@@ -2,6 +2,7 @@ import requests
 import json
 from datetime import datetime, timedelta
 from app.core.credentials import decrypt_credential
+from app.core.exceptions import StockAutoException
 
 class TossClient:
     def __init__(self, db_credential=None, trade_mode: str = "SIMULATED"):
@@ -127,7 +128,6 @@ class TossClient:
         token = self.get_access_token()
         account_seq = self.get_account_sequence()
         if not token or not account_seq:
-            from app.core.exceptions import StockAutoException
             raise StockAutoException(
                 code="INVALID_TOSS_CREDENTIALS",
                 message="토스증권 API 토큰 또는 계좌 시퀀스를 발급받지 못했습니다.",
@@ -150,6 +150,15 @@ class TossClient:
                 data = res.json()
                 result = data.get("result", {})
                 summary = result.get("summary", {})
+                if (
+                    not isinstance(summary, dict)
+                    or "totalAssetAmount" not in summary
+                ):
+                    raise StockAutoException(
+                        code="TOSS_BALANCE_UNAVAILABLE",
+                        message="토스증권 자산 응답에 총자산 정보가 없습니다.",
+                        status_code=502,
+                    )
                 
                 # 금액 파싱 (문자열로 응답되므로 형변환 시 예외 가드 장착)
                 def parse_amount(val, default=0.0):
@@ -175,11 +184,19 @@ class TossClient:
                     "provider": "TOSS"
                 }
             else:
-                print(f"[Toss API] Assets query failed with status {res.status_code}: {res.text}")
-                return {"total_asset": 0, "cash_balance": 0, "stock_balance": 0, "profit_rate": 0.0}
+                raise StockAutoException(
+                    code="TOSS_BALANCE_UNAVAILABLE",
+                    message=f"토스증권 자산 조회에 실패했습니다. HTTP {res.status_code}",
+                    status_code=502,
+                )
+        except StockAutoException:
+            raise
         except Exception as e:
-            print(f"[Toss API] Exception during assets query: {e}")
-            return {"total_asset": 0, "cash_balance": 0, "stock_balance": 0, "profit_rate": 0.0}
+            raise StockAutoException(
+                code="TOSS_BALANCE_UNAVAILABLE",
+                message="토스증권 자산을 조회하지 못했습니다.",
+                status_code=502,
+            ) from e
 
     def buy_overseas_order(self, ticker: str, quantity: int, price: float = 0, session: str = "REGULAR_MARKET", client_order_id: str | None = None) -> dict:
         """
@@ -333,5 +350,3 @@ class TossClient:
         except Exception as e:
             print(f"[Toss API] Exception during assets list query: {e}")
             return []
-
-

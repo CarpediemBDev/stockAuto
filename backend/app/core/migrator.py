@@ -112,46 +112,21 @@ def seed_competitive_users():
             {"username": "admin11", "strategy": "strategy_c"},
         ]
 
-        # 💡 [전략 테이블 동기화] strategies.yml 파일의 내용을 DB strategies 테이블에 Upsert 합니다.
-        import yaml
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        app_dir = os.path.dirname(current_dir)
-        yaml_path = os.path.join(app_dir, "translations", "strategies.yml")
-
-        if os.path.exists(yaml_path):
-            with open(yaml_path, "r", encoding="utf-8") as yf:
-                yaml_strategies = yaml.safe_load(yf) or {}
-
-            # DB의 strategies 테이블 데이터 업서트
-            for s_type, info in yaml_strategies.items():
-                name_ko = info.get("ko", s_type)
-                name_en = info.get("en", s_type)
-
-                db_strategy = db.query(Strategy).filter(Strategy.strategy_type == s_type).first()
-                if not db_strategy:
-                    db_strategy = Strategy(
-                        strategy_type=s_type,
-                        name_ko=name_ko,
-                        name_en=name_en
-                    )
-                    db.add(db_strategy)
-                else:
-                    db_strategy.name_ko = name_ko
-                    db_strategy.name_en = name_en
-            db.commit()
-            logger.info(f"[Seeder] {len(yaml_strategies)}개 전략 번역 데이터를 DB strategies 테이블에 동기화 완료했습니다.")
-
-            # 1. 시더 유저 전략 키 검증
-            for comp in competitors:
-                strategy = comp["strategy"]
-                if strategy not in yaml_strategies:
-                    raise ValueError(
-                        f"전략 식별자 '{strategy}'가 '{yaml_path}'에 정의되어 있지 않습니다. "
-                        "데이터베이스 시더와 번역 파일 간의 정합성이 맞지 않습니다."
-                    )
-            logger.info("[Validator] 모든 시드 전략 식별자가 strategies.yml에 존재함을 확인했습니다.")
-        else:
-            logger.warning(f"[Validator] strategies.yml 파일을 찾을 수 없어 전략 테이블 동기화를 생략합니다: {yaml_path}")
+        strategy_keys = {
+            row[0]
+            for row in db.query(Strategy.strategy_type).all()
+        }
+        missing_strategy_keys = sorted(
+            comp["strategy"]
+            for comp in competitors
+            if comp["strategy"] not in strategy_keys
+        )
+        if missing_strategy_keys:
+            raise ValueError(
+                "경쟁 계정에 필요한 전략이 strategies 테이블에 없습니다: "
+                + ", ".join(missing_strategy_keys)
+            )
+        logger.info("[Validator] 모든 시드 전략 식별자가 strategies 테이블에 존재함을 확인했습니다.")
 
         for comp in competitors:
             # 유저 존재 여부 검사
@@ -199,5 +174,6 @@ def seed_competitive_users():
     except Exception as seed_err:
         logger.error(f"[Seeder] 데이터베이스 시딩 실패: {seed_err}")
         db.rollback()
+        raise
     finally:
         db.close()

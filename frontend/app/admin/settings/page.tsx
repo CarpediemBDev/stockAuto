@@ -20,7 +20,22 @@ import {
 import api, { authAPI } from "@/lib/api";
 
 type SubTab = "environment" | "telegram" | "danger";
-type TradeMode = "SIMULATED" | "MOCK" | "REAL";
+type TradeMode = string;
+
+interface TradeModeOption {
+  id: string;
+  label: string;
+  description: string;
+  tone: string;
+  requires_credentials: boolean;
+}
+
+interface BrokerOption {
+  id: string;
+  label: string;
+  tone: string;
+  supported_modes: string[];
+}
 
 interface CredentialMeta {
   broker_name: string;
@@ -34,11 +49,14 @@ interface CredentialMeta {
 
 interface UserSettings {
   trade_mode: TradeMode;
-  broker_provider: string;
+  broker_provider: string | null;
   telegram_chat_id: string;
   telegram_enabled: boolean;
   global_bot_username?: string;
   credentials: CredentialMeta[];
+  available_trade_modes: TradeModeOption[];
+  available_brokers: BrokerOption[];
+  simulated_initial_cash_krw: number;
 }
 
 interface CredentialForm {
@@ -55,18 +73,21 @@ const EMPTY_FORM: CredentialForm = {
 
 const DEFAULT_SETTINGS: UserSettings = {
   trade_mode: "SIMULATED",
-  broker_provider: "KIS",
+  broker_provider: null,
   telegram_chat_id: "",
   telegram_enabled: false,
   global_bot_username: "",
   credentials: [],
+  available_trade_modes: [],
+  available_brokers: [],
+  simulated_initial_cash_krw: 0,
 };
 
-function normalizeTradeMode(value: unknown): TradeMode {
-  if (value === "MOCK" || value === "REAL") {
-    return value;
-  }
-  return "SIMULATED";
+function normalizeTradeMode(value: unknown, modes: TradeModeOption[]): TradeMode {
+  const normalized = typeof value === "string" ? value : "";
+  return modes.some((mode) => mode.id === normalized)
+    ? normalized
+    : modes[0]?.id || "SIMULATED";
 }
 
 export default function PersonalSettingsPage() {
@@ -75,14 +96,8 @@ export default function PersonalSettingsPage() {
   const [dbSettings, setDbSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   
   // Per-broker form state
-  const [forms, setForms] = useState<Record<string, CredentialForm>>({
-    KIS: { ...EMPTY_FORM },
-    TOSS: { ...EMPTY_FORM }
-  });
-  const [localVerified, setLocalVerified] = useState<Record<string, boolean>>({
-    KIS: false,
-    TOSS: false
-  });
+  const [forms, setForms] = useState<Record<string, CredentialForm>>({});
+  const [localVerified, setLocalVerified] = useState<Record<string, boolean>>({});
 
   const [username, setUsername] = useState<string>("");
   const [subTab, setSubTab] = useState<SubTab>("environment");
@@ -114,16 +129,26 @@ export default function PersonalSettingsPage() {
   }, [isInitialized, isAuthenticated, storedUsername, router]);
 
   const applySettings = useCallback((data: Partial<UserSettings>) => {
+    const availableTradeModes = data.available_trade_modes || [];
+    const availableBrokers = data.available_brokers || [];
+    const brokerProvider = data.broker_provider || availableBrokers[0]?.id || null;
     setDbSettings({
-      trade_mode: normalizeTradeMode(data.trade_mode),
-      broker_provider: data.broker_provider || "KIS",
+      trade_mode: normalizeTradeMode(data.trade_mode, availableTradeModes),
+      broker_provider: brokerProvider,
       telegram_chat_id: data.telegram_chat_id || "",
       telegram_enabled: Boolean(data.telegram_enabled),
       global_bot_username: data.global_bot_username || "stockauto_official_bot",
       credentials: data.credentials || [],
+      available_trade_modes: availableTradeModes,
+      available_brokers: availableBrokers,
+      simulated_initial_cash_krw: data.simulated_initial_cash_krw || 0,
     });
-    setForms({ KIS: { ...EMPTY_FORM }, TOSS: { ...EMPTY_FORM } });
-    setLocalVerified({ KIS: false, TOSS: false });
+    setForms(Object.fromEntries(
+      availableBrokers.map((broker) => [broker.id, { ...EMPTY_FORM }])
+    ));
+    setLocalVerified(Object.fromEntries(
+      availableBrokers.map((broker) => [broker.id, false])
+    ));
   }, []);
 
   const fetchSettings = useCallback(async () => {
@@ -144,12 +169,15 @@ export default function PersonalSettingsPage() {
     fetchSettings();
   }, [isAuthenticated, fetchSettings]);
 
-  const activeBroker = dbSettings.broker_provider || "KIS";
+  const activeBroker = dbSettings.broker_provider || dbSettings.available_brokers[0]?.id || "";
   const activeCred = useMemo(() => {
     return dbSettings.credentials.find((c) => c.broker_name === activeBroker);
   }, [dbSettings.credentials, activeBroker]);
 
-  const isTradeModeRealMock = dbSettings.trade_mode === "MOCK" || dbSettings.trade_mode === "REAL";
+  const activeTradeMode = dbSettings.available_trade_modes.find(
+    (mode) => mode.id === dbSettings.trade_mode
+  );
+  const requiresBrokerCredentials = Boolean(activeTradeMode?.requires_credentials);
   const isVerifiedForSelectedMode = useMemo(() => {
     if (!activeCred) return false;
     return (
@@ -168,12 +196,16 @@ export default function PersonalSettingsPage() {
   }, [activeCred, isVerifiedForSelectedMode]);
 
   const handleVerifyCredential = async (provider: string) => {
-    if (!isTradeModeRealMock) {
-      toast.info(`SIMULATED 모드는 ${provider} 인증정보가 필요하지 않습니다.`);
+    if (!requiresBrokerCredentials) {
+      toast.info(`${dbSettings.trade_mode} 모드는 ${provider} 인증정보가 필요하지 않습니다.`);
       return;
     }
 
     const form = forms[provider];
+    if (!form) {
+      toast.error("선택한 증권사 입력 폼을 초기화하지 못했습니다.");
+      return;
+    }
     if (!form.app_key.trim() || !form.app_secret.trim() || !form.account_no.trim()) {
       toast.error("APP KEY, APP SECRET, ACCOUNT NO를 모두 입력하세요.");
       return;
@@ -225,7 +257,7 @@ export default function PersonalSettingsPage() {
       return;
     }
 
-    if (isTradeModeRealMock) {
+    if (requiresBrokerCredentials) {
       if (!isVerifiedForSelectedMode) {
          toast.error(`${dbSettings.trade_mode} 모드를 저장하려면 선택한 증권사(${activeBroker})의 인증정보를 입력 후 검증해주세요.`);
          return;
@@ -319,35 +351,21 @@ export default function PersonalSettingsPage() {
     }
   };
 
-  const modeCards: Array<{
-    id: TradeMode;
-    label: string;
-    color: string;
-    icon: typeof ShieldCheck;
-    body: string;
-  }> = [
-    {
-      id: "SIMULATED",
-      label: "SIMULATED",
-      color: "text-blue-400 border-blue-500 bg-blue-500/5",
-      icon: ShieldCheck,
-      body: "실시간 가격 기반 가상 투자 모드",
-    },
-    {
-      id: "MOCK",
-      label: "MOCK",
-      color: "text-amber-400 border-amber-500 bg-amber-500/5",
-      icon: Server,
-      body: "모의투자 연동 모드 (KIS 전용)",
-    },
-    {
-      id: "REAL",
-      label: "REAL",
-      color: "text-red-400 border-red-500 bg-red-500/5",
-      icon: ShieldAlert,
-      body: "실전 계좌 기반 자동매매 모드",
-    },
-  ];
+  const modeToneClasses: Record<string, string> = {
+    blue: "text-blue-400 border-blue-500 bg-blue-500/5",
+    amber: "text-amber-400 border-amber-500 bg-amber-500/5",
+    red: "text-red-400 border-red-500 bg-red-500/5",
+  };
+  const modeIcons: Record<string, typeof ShieldCheck> = {
+    SIMULATED: ShieldCheck,
+    MOCK: Server,
+    REAL: ShieldAlert,
+  };
+  const modeCards = dbSettings.available_trade_modes.map((mode) => ({
+    ...mode,
+    color: modeToneClasses[mode.tone] || modeToneClasses.blue,
+    icon: modeIcons[mode.id] || Server,
+  }));
 
   if (isLoading || !isInitialized || !isAuthenticated) {
     return (
@@ -420,7 +438,7 @@ export default function PersonalSettingsPage() {
                             <span className="font-bold text-xs">{mode.label}</span>
                             <Icon className="w-4 h-4" />
                           </div>
-                          <p className="text-[10px] text-zinc-500 leading-relaxed">{mode.body}</p>
+                          <p className="text-[10px] text-zinc-500 leading-relaxed">{mode.description}</p>
                         </button>
                       );
                     })}
@@ -435,7 +453,7 @@ export default function PersonalSettingsPage() {
                     </h2>
                   </div>
 
-                  {dbSettings.trade_mode === "SIMULATED" ? (
+                  {!requiresBrokerCredentials ? (
                     <div className="p-4 rounded-lg border border-blue-500/20 bg-blue-500/5 flex items-center gap-3">
                       <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0" />
                       <p className="text-[11px] text-zinc-400 leading-relaxed">
@@ -447,24 +465,24 @@ export default function PersonalSettingsPage() {
                       <div>
                         <label className="block text-xs font-semibold text-zinc-400 mb-1.5">Provider</label>
                         <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setDbSettings(prev => ({ ...prev, broker_provider: "KIS" }))}
-                            className={`flex-1 py-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
-                              dbSettings.broker_provider === "KIS" ? "border-amber-500 bg-amber-500/10 text-amber-400" : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-800"
-                            }`}
-                          >
-                            한국투자증권 (KIS)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDbSettings(prev => ({ ...prev, broker_provider: "TOSS" }))}
-                            className={`flex-1 py-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
-                              dbSettings.broker_provider === "TOSS" ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-800"
-                            }`}
-                          >
-                            토스증권 (TOSS)
-                          </button>
+                          {dbSettings.available_brokers
+                            .filter((broker) => broker.supported_modes.includes(dbSettings.trade_mode))
+                            .map((broker) => (
+                              <button
+                                key={broker.id}
+                                type="button"
+                                onClick={() => setDbSettings(prev => ({ ...prev, broker_provider: broker.id }))}
+                                className={`flex-1 py-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                                  dbSettings.broker_provider === broker.id
+                                    ? broker.tone === "amber"
+                                      ? "border-amber-500 bg-amber-500/10 text-amber-400"
+                                      : "border-blue-500 bg-blue-500/10 text-blue-400"
+                                    : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-800"
+                                }`}
+                              >
+                                {broker.label} ({broker.id})
+                              </button>
+                            ))}
                         </div>
                       </div>
 
@@ -759,7 +777,8 @@ export default function PersonalSettingsPage() {
                         모의투자 자산 초기화
                       </h3>
                       <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">
-                        SIMULATED 모드의 보유 주식, 거래 기록, 행동 로그를 초기화합니다.
+                        SIMULATED 모드의 보유 주식, 거래 기록, 행동 로그를 초기화하고
+                        가상 시작자금 {dbSettings.simulated_initial_cash_krw.toLocaleString()}원 기준으로 복원합니다.
                       </p>
                     </div>
                     <div className="mt-4">

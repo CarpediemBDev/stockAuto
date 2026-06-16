@@ -103,13 +103,10 @@ export function AccountBalance({
         cash: value.cash,
         stock_value: value.stock_value,
         total: value.cash + value.stock_value,
-        name: value.name || (key === "episodic_pivot" ? "에피소딕 피벗 (Episodic Pivot)" : key === "regime_switching" ? "마스터 레짐스위칭 V2" : key),
+        name: value.name || key.replaceAll("_", " "),
         weight: value.weight || 0.5
       }))
-    : [
-        { key: "episodic_pivot", cash: balance.cash_balance * 0.5, stock_value: balance.stock_balance * 0.5, total: (balance.cash_balance + balance.stock_balance) * 0.5, name: "에피소딕 피벗 (Episodic Pivot)", weight: 0.5 },
-        { key: "regime_switching", cash: balance.cash_balance * 0.5, stock_value: balance.stock_balance * 0.5, total: (balance.cash_balance + balance.stock_balance) * 0.5, name: "마스터 레짐스위칭 V2", weight: 0.5 }
-      ];
+    : [];
 
   const totalCalculated = walletAllocations.reduce((sum, item) => sum + item.total, 0);
   const denom = totalCalculated > 0 ? totalCalculated : 1;

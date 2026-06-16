@@ -1,4 +1,5 @@
 from datetime import date
+import math
 import re
 from typing import Optional
 
@@ -6,7 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.bot.broker_factory import (
+    create_broker_verification_client,
+    get_broker_catalog,
+    normalize_broker_provider,
+)
 from app.bot.order_reconciler import disable_auto_resume_for_user, has_unresolved_orders
+from app.core.config import TRADE_MODE_CATALOG, VALID_TRADE_MODES, settings as app_settings
 from app.core.credentials import CredentialCryptoError, decrypt_credential, encrypt_credential
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, get_current_admin_user
@@ -24,7 +31,7 @@ router = APIRouter()
 
 class SettingsUpdateSchema(BaseModel):
     trade_mode: str
-    broker_provider: str
+    broker_provider: Optional[str] = None
     telegram_chat_id: Optional[str] = None
     telegram_enabled: Optional[bool] = False
 
@@ -39,7 +46,8 @@ class VerifyCurrentSchema(BaseModel):
     trade_mode: Optional[str] = None
     broker_name: str
 
-VALID_TRADE_MODES = {"SIMULATED", "MOCK", "REAL"}
+EQUITY_SNAPSHOT_INTERVAL_SECONDS = 60
+EQUITY_SNAPSHOT_RETENTION_LIMIT = 500
 BACKTEST_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 BACKTEST_TICKER_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.-]{0,14}$")
 PLACEHOLDER_VALUES = {
@@ -62,6 +70,16 @@ def _normalize_trade_mode(mode: str) -> str:
             detail="지원하지 않는 트레이딩 모드입니다. SIMULATED, MOCK, REAL 중 하나를 선택하세요.",
         )
     return normalized
+
+
+def _normalize_broker_provider(provider: Optional[str]) -> str:
+    try:
+        return normalize_broker_provider(provider)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 def _parse_backtest_date(value: Optional[str], field_name: str) -> date:
@@ -170,6 +188,9 @@ def _settings_response(db_settings: UserSettings) -> dict:
         "is_running": bool(getattr(db_settings, "is_running", False)) if db_settings else False,
         "global_bot_username": os.getenv("TELEGRAM_BOT_USERNAME", "stockauto_official_bot"),
         "credentials": [_credential_meta(c) for c in credentials],
+        "available_trade_modes": list(TRADE_MODE_CATALOG),
+        "available_brokers": get_broker_catalog(),
+        "simulated_initial_cash_krw": app_settings.SIMULATED_INITIAL_CASH_KRW,
     }
 
 def _ensure_db_settings(current_user: User, db: Session) -> UserSettings:
@@ -218,14 +239,11 @@ def _verify_credential_values(
             self.account_no = account_no
 
     try:
-        if broker_name == "KIS":
-            from app.bot.kis_api import KISClient
-            client = KISClient(db_credential=TempCred(), trade_mode=mode)
-        elif broker_name == "TOSS":
-            from app.bot.toss_api import TossClient
-            client = TossClient(db_credential=TempCred(), trade_mode=mode)
-        else:
-            return False, f"지원하지 않는 증권사입니다: {broker_name}"
+        client = create_broker_verification_client(
+            broker_name,
+            TempCred(),
+            mode,
+        )
 
         token = client.get_access_token()
         if not token:
@@ -259,6 +277,11 @@ def update_user_settings(
 ):
     trade_mode = _normalize_trade_mode(payload.trade_mode)
     db_settings = _ensure_db_settings(current_user, db)
+    provider = (
+        _normalize_broker_provider(payload.broker_provider)
+        if payload.broker_provider
+        else None
+    )
 
     if trade_mode != (db_settings.trade_mode or "SIMULATED").upper() and has_unresolved_orders(db, current_user.id):
         raise HTTPException(
@@ -267,7 +290,11 @@ def update_user_settings(
         )
 
     if trade_mode in {"MOCK", "REAL"}:
-        provider = payload.broker_provider
+        if not provider:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{trade_mode} 모드에서는 증권사를 선택해야 합니다.",
+            )
         cred = db.query(BrokerCredential).filter_by(user_id=current_user.id, broker_name=provider).first()
         if not cred or cred.verification_status != "verified" or cred.verified_trade_mode != trade_mode:
             raise HTTPException(
@@ -276,7 +303,7 @@ def update_user_settings(
             )
 
     db_settings.trade_mode = trade_mode
-    db_settings.broker_provider = payload.broker_provider
+    db_settings.broker_provider = provider
     db_settings.telegram_chat_id = payload.telegram_chat_id
     db_settings.telegram_enabled = payload.telegram_enabled
 
@@ -316,10 +343,11 @@ def save_credential(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="SIMULATED 모드는 인증정보 저장이 필요하지 않습니다.",
         )
+    broker_name = _normalize_broker_provider(payload.broker_name)
 
     success, message = _verify_credential_values(
         trade_mode,
-        payload.broker_name,
+        broker_name,
         payload.app_key,
         payload.app_secret,
         payload.account_no,
@@ -329,9 +357,9 @@ def save_credential(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
     db_settings = _ensure_db_settings(current_user, db)
-    cred = db.query(BrokerCredential).filter_by(user_id=current_user.id, broker_name=payload.broker_name).first()
+    cred = db.query(BrokerCredential).filter_by(user_id=current_user.id, broker_name=broker_name).first()
     if not cred:
-        cred = BrokerCredential(user_id=current_user.id, broker_name=payload.broker_name)
+        cred = BrokerCredential(user_id=current_user.id, broker_name=broker_name)
         db.add(cred)
 
     try:
@@ -346,7 +374,7 @@ def save_credential(
     cred.verified_at = utc_now_aware()
 
     if not db_settings.broker_provider:
-        db_settings.broker_provider = payload.broker_name
+        db_settings.broker_provider = broker_name
 
     db.commit()
     db.refresh(db_settings)
@@ -463,18 +491,33 @@ def list_users(
                     from app.bot.broker_factory import get_broker_client
                     broker = get_broker_client(settings)
                     balance = broker.get_account_balance()
-                    profit_rate = balance.get("profit_rate", 0.0)
-                    balance_loaded = True
+                    if not isinstance(balance, dict):
+                        raise ValueError("증권사 잔고 응답 형식이 올바르지 않습니다.")
+
                     total_asset = balance.get("total_asset")
+                    if total_asset is None or not math.isfinite(float(total_asset)):
+                        raise ValueError("증권사 잔고 응답에 유효한 총자산이 없습니다.")
+
+                    profit_rate = float(balance.get("profit_rate", 0.0))
+                    if not math.isfinite(profit_rate):
+                        raise ValueError("증권사 잔고 응답에 유효한 수익률이 없습니다.")
+                    balance_loaded = True
                     if total_asset is not None:
                         captured_at = utc_now_aware()
-                        latest_snapshot = db.query(AccountEquitySnapshot).filter(
-                            AccountEquitySnapshot.user_id == user.id
-                        ).order_by(AccountEquitySnapshot.captured_at.desc()).first()
+                        latest_snapshot = (
+                            db.query(AccountEquitySnapshot)
+                            .filter(
+                                AccountEquitySnapshot.user_id == user.id,
+                                AccountEquitySnapshot.trade_mode == settings.trade_mode,
+                            )
+                            .order_by(AccountEquitySnapshot.captured_at.desc())
+                            .first()
+                        )
                         should_record = (
                             latest_snapshot is None
-                            or latest_snapshot.total_asset != float(total_asset)
-                            or (captured_at - latest_snapshot.captured_at).total_seconds() >= 60
+                            or (
+                                captured_at - latest_snapshot.captured_at
+                            ).total_seconds() >= EQUITY_SNAPSHOT_INTERVAL_SECONDS
                         )
                         if should_record:
                             db.add(AccountEquitySnapshot(
@@ -488,23 +531,42 @@ def list_users(
                                 captured_at=captured_at,
                             ))
                             db.flush()
+                            expired_snapshots = (
+                                db.query(AccountEquitySnapshot)
+                                .filter(
+                                    AccountEquitySnapshot.user_id == user.id,
+                                    AccountEquitySnapshot.trade_mode == settings.trade_mode,
+                                )
+                                .order_by(AccountEquitySnapshot.captured_at.desc())
+                                .offset(EQUITY_SNAPSHOT_RETENTION_LIMIT)
+                                .all()
+                            )
+                            for expired_snapshot in expired_snapshots:
+                                db.delete(expired_snapshot)
             except Exception as e:
-                print(f"[Admin User List] Failed to fetch balance for user {user.username}: {e}")
+                logger.warning(
+                    "[Admin User List] Failed to fetch balance for user %s: %s",
+                    user.username,
+                    e,
+                )
                 profit_rate = 0.0
 
-        from app.bot.multi_strategy_manager import MultiStrategyManager
+        from app.translations.translator import Translator
         strategy_type = settings.strategy_type if settings else "regime_switching"
-        strategy_name = MultiStrategyManager()._get_name_for_strategy(strategy_type)
+        strategy_name = Translator.translate_strategy(strategy_type, "ko")
 
         snapshots = db.query(AccountEquitySnapshot).filter(
-            AccountEquitySnapshot.user_id == user.id
+            AccountEquitySnapshot.user_id == user.id,
+            AccountEquitySnapshot.trade_mode == (
+                settings.trade_mode if settings else "SIMULATED"
+            ),
         ).order_by(AccountEquitySnapshot.captured_at.desc()).limit(500).all()
         snapshots.reverse()
         if not balance_loaded and snapshots and snapshots[-1].profit_rate is not None:
             profit_rate = snapshots[-1].profit_rate
         equity_curve = [
             {
-                "timestamp": snapshot.captured_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp": snapshot.captured_at.isoformat(),
                 "total": round(snapshot.total_asset, 2),
             }
             for snapshot in snapshots

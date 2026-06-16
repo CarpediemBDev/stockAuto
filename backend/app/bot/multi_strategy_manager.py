@@ -10,23 +10,6 @@ class MultiStrategyManager:
     2. regime_switching [50% Cash] (RS_) - 상승장 한정 불타기 피라미딩 엔진
     """
     
-    SLOTS = {
-        "episodic_pivot": {
-            "weight": 0.50,
-            "prefix": "EP_",
-            "name": "에피소딕 피벗 (Episodic Pivot)",
-            "strategy_key": "episodic_pivot"
-        },
-        "regime_switching": {
-            "weight": 0.50,
-            "prefix": "RS_",
-            "name": "마스터 레짐스위칭 V2",
-            "strategy_key": "regime_switching"
-        }
-    }
-    
-
-
     def _get_prefix_for_strategy(self, strategy_type: str) -> str:
         prefix_map = {
             "regime_switching": "RS_",
@@ -58,6 +41,14 @@ class MultiStrategyManager:
         except Exception:
             return f"단일 전략 ({strategy_type})"
 
+    def _build_slot(self, strategy_key: str, weight: float, prefix: str) -> dict:
+        return {
+            "weight": weight,
+            "prefix": prefix,
+            "name": self._get_name_for_strategy(strategy_key),
+            "strategy_key": strategy_key,
+        }
+
     def __init__(self, strategy_type: str = "multi_slot"):
         if not strategy_type:
             strategy_type = "multi_slot"
@@ -67,40 +58,15 @@ class MultiStrategyManager:
         if strategy_type == "multi_slot":
             # 2슬롯 분할 모드 (기본값)
             self.SLOTS = {
-                "episodic_pivot": {
-                    "weight": 0.50,
-                    "prefix": "EP_",
-                    "name": "에피소딕 피벗 (Episodic Pivot)",
-                    "strategy_key": "episodic_pivot"
-                },
-                "regime_switching": {
-                    "weight": 0.50,
-                    "prefix": "RS_",
-                    "name": "마스터 레짐스위칭 V2",
-                    "strategy_key": "regime_switching"
-                }
+                "episodic_pivot": self._build_slot("episodic_pivot", 0.50, "EP_"),
+                "regime_switching": self._build_slot("regime_switching", 0.50, "RS_"),
             }
         elif strategy_type in ["three_slot", "multi_slot_3"]:
             # 3슬롯 분할 모드 (EP 30% : ASQS 30% : RS 40%)
             self.SLOTS = {
-                "episodic_pivot": {
-                    "weight": 0.30,
-                    "prefix": "EP_",
-                    "name": "에피소딕 피벗 (Episodic Pivot)",
-                    "strategy_key": "episodic_pivot"
-                },
-                "asqs": {
-                    "weight": 0.30,
-                    "prefix": "ASQS_",
-                    "name": "ASQS 돌파 (ASQS Breakout)",
-                    "strategy_key": "asqs"
-                },
-                "regime_switching": {
-                    "weight": 0.40,
-                    "prefix": "RS_",
-                    "name": "마스터 레짐스위칭 V2",
-                    "strategy_key": "regime_switching"
-                }
+                "episodic_pivot": self._build_slot("episodic_pivot", 0.30, "EP_"),
+                "asqs": self._build_slot("asqs", 0.30, "ASQS_"),
+                "regime_switching": self._build_slot("regime_switching", 0.40, "RS_"),
             }
         else:
             # 단일 전략 100% 모드

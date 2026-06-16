@@ -45,8 +45,14 @@ async def get_balance(
         ms_manager = MultiStrategyManager(strategy_type=strategy_type)
         exchange_rate = FXRateCache.get_rate()
 
-        total_asset_krw = balance.get("total_asset", 10000000.0)
-        cash_balance_krw = balance.get("cash_balance", 10000000.0)
+        total_asset_krw = balance.get(
+            "total_asset",
+            app_settings.SIMULATED_INITIAL_CASH_KRW,
+        )
+        cash_balance_krw = balance.get(
+            "cash_balance",
+            app_settings.SIMULATED_INITIAL_CASH_KRW,
+        )
 
         total_asset_usd = total_asset_krw / exchange_rate
         cash_balance_usd = cash_balance_krw / exchange_rate
@@ -82,7 +88,13 @@ async def get_balance(
             ms_manager = MultiStrategyManager(strategy_type=current_user.settings.strategy_type if current_user.settings else "regime_switching")
             balance["wallet_allocation"] = {
                 slot_key: {
-                    "cash": int(balance.get("cash_balance", 10000000.0) * slot_info["weight"]),
+                    "cash": int(
+                        balance.get(
+                            "cash_balance",
+                            app_settings.SIMULATED_INITIAL_CASH_KRW,
+                        )
+                        * slot_info["weight"]
+                    ),
                     "stock_value": 0,
                     "name": slot_info.get("name", slot_key),
                     "weight": slot_info.get("weight", 1.0)
@@ -90,22 +102,58 @@ async def get_balance(
                 for slot_key, slot_info in ms_manager.SLOTS.items()
             }
         except Exception:
+            from app.translations.translator import Translator
+
+            fallback_cash = balance.get(
+                "cash_balance",
+                app_settings.SIMULATED_INITIAL_CASH_KRW,
+            )
             balance["wallet_allocation"] = {
-                "regime_switching": {"cash": int(balance.get("cash_balance", 10000000.0) * 0.5), "stock_value": 0, "name": "마스터 레짐스위칭 V2", "weight": 0.5},
-                "episodic_pivot": {"cash": int(balance.get("cash_balance", 10000000.0) * 0.5), "stock_value": 0, "name": "에피소딕 피벗 (Episodic Pivot)", "weight": 0.5}
+                "regime_switching": {
+                    "cash": int(fallback_cash * 0.5),
+                    "stock_value": 0,
+                    "name": Translator.translate_strategy("regime_switching", "ko"),
+                    "weight": 0.5,
+                },
+                "episodic_pivot": {
+                    "cash": int(fallback_cash * 0.5),
+                    "stock_value": 0,
+                    "name": Translator.translate_strategy("episodic_pivot", "ko"),
+                    "weight": 0.5,
+                },
             }
         balance["focused_radar_tickers"] = []
 
     return success_response(data=balance)
 
 @router.get("/holdings")
-def get_holdings(current_user: User = Depends(get_current_user)):
+def get_holdings(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """
     현재 로그인한 사용자의 UserSettings에 맞춰 알맞은 증권사 API(또는 로컬 시뮬레이터)를 호출하여
     현재 보유 중인 종목 리스트와 개별 수익률을 가져옵니다.
     """
     broker = get_broker_client(current_user.settings)
     holdings = broker.get_holdings()
+    from app.translations.translator import Translator
+
+    db_holdings = db.query(Holding).filter(Holding.user_id == current_user.id).all()
+    strategy_by_ticker = {
+        holding.ticker: holding.strategy_type
+        for holding in db_holdings
+    }
+    for holding in holdings:
+        strategy_type = holding.get("strategy_type") or strategy_by_ticker.get(
+            holding.get("ticker")
+        )
+        if strategy_type:
+            holding["strategy_type"] = strategy_type
+            holding["strategy_name"] = Translator.translate_strategy(
+                strategy_type,
+                "ko",
+            )
     return success_response(data=holdings)
 
 @router.post("/reset-balance")

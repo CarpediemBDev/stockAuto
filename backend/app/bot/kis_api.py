@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from app.core.config import settings
 from app.core.credentials import decrypt_credential
+from app.core.exceptions import StockAutoException
 from app.bot.market_session import ACTIVE_MARKET_SESSIONS, MarketSession
 from app.scanner.data_provider import fetch_bulk_ohlcv_sync, fetch_ticker_fast_info
 
@@ -138,7 +139,6 @@ class KISClient:
         token = self.get_access_token()
         if not token:
             # KISClient는 __init__에서 SIMULATED 모드를 차단하므로, 여기 도달 시 반드시 MOCK/REAL 모드임
-            from app.core.exceptions import StockAutoException
             raise StockAutoException(
                 code="INVALID_KIS_CREDENTIALS",
                 message="한국투자증권(KIS) API 인증 토큰을 발급받지 못했습니다. 증권사 서버 장애이거나 키 만료 상태일 수 있습니다. "
@@ -169,6 +169,12 @@ class KISClient:
             if res.status_code == 200:
                 data = res.json()
                 output2 = data.get("output2", {})
+                if not isinstance(output2, dict) or "tot_asst_amt" not in output2:
+                    raise StockAutoException(
+                        code="KIS_BALANCE_UNAVAILABLE",
+                        message="한국투자증권 잔고 응답에 총자산 정보가 없습니다.",
+                        status_code=502,
+                    )
 
                 # KIS 해외 주식 잔고 API output2 매핑
                 total_asset = int(float(output2.get("tot_asst_amt", 0)))
@@ -195,11 +201,22 @@ class KISClient:
                     "provider": "KIS Live" if self.is_real else "KIS Mock"
                 }
             else:
-                print(f"[KIS API] Overseas balance check failed: {res.text}")
-                return {"total_asset": 0, "cash_balance": 0, "stock_balance": 0, "profit_rate": 0.0}
+                raise StockAutoException(
+                    code="KIS_BALANCE_UNAVAILABLE",
+                    message=(
+                        "한국투자증권 해외주식 잔고 조회에 실패했습니다. "
+                        f"HTTP {res.status_code}"
+                    ),
+                    status_code=502,
+                )
+        except StockAutoException:
+            raise
         except Exception as e:
-            print(f"[KIS API] Error checking overseas balance: {e}")
-            return {"total_asset": 0, "cash_balance": 0, "stock_balance": 0, "profit_rate": 0.0}
+            raise StockAutoException(
+                code="KIS_BALANCE_UNAVAILABLE",
+                message="한국투자증권 해외주식 잔고를 조회하지 못했습니다.",
+                status_code=502,
+            ) from e
 
     def _get_exchange_code(self, ticker: str) -> str:
         """

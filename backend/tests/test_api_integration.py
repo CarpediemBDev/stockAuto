@@ -71,7 +71,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
     config = make_alembic_config(db_url)
 
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "b7d8e9f01234"
+    assert script.get_current_head() == "c8e9f0123456"
 
     command.upgrade(config, "head")
 
@@ -172,6 +172,53 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
                 and foreign_key["constrained_columns"] == ["user_id"]
                 for foreign_key in foreign_keys
             )
+
+        with engine.connect() as connection:
+            strategy_count = connection.exec_driver_sql(
+                "SELECT COUNT(*) FROM strategies"
+            ).scalar_one()
+            strategy_name = connection.exec_driver_sql(
+                "SELECT name_ko FROM strategies WHERE strategy_type = 'multi_slot'"
+            ).scalar_one()
+            assert strategy_count == 85
+            assert strategy_name == "격리형 2슬롯 (EP 50% : RS 50%)"
+    finally:
+        engine.dispose()
+
+
+def test_strategy_catalog_migration_only_fills_missing_rows(tmp_path):
+    db_path = tmp_path / "strategy_catalog_repair.db"
+    db_url = f"sqlite:///{db_path}"
+    config = make_alembic_config(db_url)
+
+    command.upgrade(config, "b7d8e9f01234")
+    engine = create_engine(db_url)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "INSERT INTO strategies "
+                "(strategy_type, name_ko, name_en, is_active) "
+                "VALUES ('regime_switching', '관리자 수정명', "
+                "'Regime Switching', 1)"
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(db_url)
+    try:
+        with engine.connect() as connection:
+            custom_name = connection.exec_driver_sql(
+                "SELECT name_ko FROM strategies "
+                "WHERE strategy_type = 'regime_switching'"
+            ).scalar_one()
+            restored_name = connection.exec_driver_sql(
+                "SELECT name_ko FROM strategies "
+                "WHERE strategy_type = 'multi_slot_3'"
+            ).scalar_one()
+            assert custom_name == "관리자 수정명"
+            assert restored_name == "격리형 3슬롯 (EP 30% : ASQS 30% : RS 40%)"
     finally:
         engine.dispose()
 

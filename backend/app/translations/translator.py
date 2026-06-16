@@ -1,6 +1,4 @@
 import logging
-import os
-import yaml
 from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.core import models
@@ -20,7 +18,7 @@ class Translator:
 
     @classmethod
     def load_cache(cls):
-        """DB에서 한글 매핑 사전을 조회하여 메모리에 초고속 캐싱하며, 전략 다국어 YAML 및 DB 찌꺼기 정리를 처리합니다."""
+        """DB의 종목·전략 번역을 메모리에 캐싱하고 레거시 데이터를 정리합니다."""
         db: Session = SessionLocal()
         try:
             # 1. DB 주식 번역 조회 및 캐시 적재
@@ -66,9 +64,7 @@ class Translator:
 
     @classmethod
     def translate_strategy(cls, strategy_type: str, locale: str = "ko") -> str:
-        """
-        YAML 파일에서 로드된 전략 한글/영문 매핑을 서빙합니다.
-        """
+        """strategies 테이블에서 캐싱한 전략 한글/영문 매핑을 반환합니다."""
         if not strategy_type:
             return "미지정 전략" if locale == "ko" else "Unspecified Strategy"
 

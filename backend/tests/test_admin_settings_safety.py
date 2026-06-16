@@ -13,6 +13,7 @@ from app.admin.router import (
     update_user_settings,
 )
 from app.core.credentials import ENCRYPTED_PREFIX, decrypt_credential
+from app.core.config import TRADE_MODE_CATALOG, settings as app_settings
 from app.core.models import BrokerCredential
 
 class FakeQuery:
@@ -185,6 +186,27 @@ def test_get_user_settings_returns_only_safe_metadata():
     assert c_meta["has_credentials"] is True
     assert c_meta["account_no_masked"] == "8765...-01"
     assert c_meta["verification_status"] == "verified"
+    assert result["available_trade_modes"] == list(TRADE_MODE_CATALOG)
+    assert {broker["id"] for broker in result["available_brokers"]} == {"KIS", "TOSS"}
+    assert result["simulated_initial_cash_krw"] == app_settings.SIMULATED_INITIAL_CASH_KRW
+
+
+def test_settings_save_rejects_unregistered_broker():
+    current_settings = make_settings()
+    current_user = SimpleNamespace(id=1, settings=current_settings)
+
+    with pytest.raises(HTTPException) as exc_info:
+        update_user_settings(
+            payload=SettingsUpdateSchema(
+                trade_mode="MOCK",
+                broker_provider="UNKNOWN",
+            ),
+            current_user=current_user,
+            db=FakeDb(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "지원하지 않는 증권사" in exc_info.value.detail
 
 
 def test_save_credential_encrypts_and_returns_safe_response(monkeypatch):

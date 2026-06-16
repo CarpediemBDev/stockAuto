@@ -11,6 +11,15 @@ from app.bot.backtest_metrics import (
 )
 from app.strategies.strategy_factory import get_strategy
 from app.core.logging import logger
+from app.translations.translator import Translator
+
+
+def _apply_strategy_display_names(results: list[dict]) -> list[dict]:
+    for result in results:
+        strategy_type = result.get("strategy_type")
+        if strategy_type:
+            result["name"] = Translator.translate_strategy(strategy_type, "ko")
+    return results
 
 
 def _build_tournament_cache_path(
@@ -463,7 +472,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
     if cache_path.exists():
         try:
             with cache_path.open("r", encoding="utf-8") as f_c:
-                return json.load(f_c)
+                return _apply_strategy_display_names(json.load(f_c))
         except Exception as e:
             logger.warning(f"Cache loading failed, falling back to live calc: {e}")
             
@@ -522,7 +531,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
             
     results.append({
         "strategy_type": "strategy_c_ep",
-        "name": "에피소딕피벗 C 표준형 🎯",
+        "name": Translator.translate_strategy("strategy_c_ep", "ko"),
         "final_value": report_ep_c["final_value"],
         "total_pnl": report_ep_c["total_pnl"],
         "total_return_rate": report_ep_c["total_return_rate"],
@@ -566,7 +575,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
             
     results.append({
         "strategy_type": "senior_simple",
-        "name": "시니어 단순화 (Strategy S) 🥈",
+        "name": Translator.translate_strategy("senior_simple", "ko"),
         "final_value": report_senior["final_value"],
         "total_pnl": report_senior["total_pnl"],
         "total_return_rate": report_senior["total_return_rate"],
@@ -610,7 +619,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
             
     results.append({
         "strategy_type": "regime_switching",
-        "name": "마스터 레짐스위칭 V2 👑",
+        "name": Translator.translate_strategy("regime_switching", "ko"),
         "final_value": report_master["final_value"],
         "total_pnl": report_master["total_pnl"],
         "total_return_rate": report_master["total_return_rate"],
@@ -647,7 +656,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
     
     results.append({
         "strategy_type": "multi_slot_3",
-        "name": "🔄 격리형 3슬롯 (EP 30% : ASQS 30% : RS 40%)",
+        "name": Translator.translate_strategy("multi_slot_3", "ko"),
         "final_value": report_3slot["final_value"],
         "total_pnl": report_3slot["total_pnl"],
         "total_return_rate": report_3slot["total_return_rate"],
@@ -678,7 +687,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
     
     results.append({
         "strategy_type": "multi_slot",
-        "name": "🛡️ 격리형 2슬롯 (EP 50% : RS 50%) [ASQS 배제]",
+        "name": Translator.translate_strategy("multi_slot", "ko"),
         "final_value": report_2slot["final_value"],
         "total_pnl": report_2slot["total_pnl"],
         "total_return_rate": report_2slot["total_return_rate"],
@@ -722,7 +731,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
             
     results.append({
         "strategy_type": "premarket_breakout",
-        "name": "프리마켓 고점 돌파 ⚡",
+        "name": Translator.translate_strategy("premarket_breakout", "ko"),
         "final_value": report_pb["final_value"],
         "total_pnl": report_pb["total_pnl"],
         "total_return_rate": report_pb["total_return_rate"],
@@ -766,7 +775,7 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
             
     results.append({
         "strategy_type": "trend_stabilization",
-        "name": "추세 안정화 눌림목 📉",
+        "name": Translator.translate_strategy("trend_stabilization", "ko"),
         "final_value": report_ts["final_value"],
         "total_pnl": report_ts["total_pnl"],
         "total_return_rate": report_ts["total_return_rate"],
@@ -828,4 +837,4 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
     except Exception as e:
         logger.warning(f"Failed to save tournament cache: {e}")
         
-    return results
+    return _apply_strategy_display_names(results)

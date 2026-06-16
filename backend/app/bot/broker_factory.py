@@ -1,21 +1,65 @@
-from app.bot.kis_broker import KISBroker
-from app.bot.toss_broker import TossBroker
-from app.bot.simulated_broker import LocalSimulatedBroker
 from app.bot.base_broker import BaseBroker
+from app.bot.kis_api import KISClient
+from app.bot.kis_broker import KISBroker
+from app.bot.simulated_broker import LocalSimulatedBroker
+from app.bot.toss_api import TossClient
+from app.bot.toss_broker import TossBroker
+from app.core.config import VALID_TRADE_MODES
 
-# 안전하게 연동을 허용할 증권사 클래스 레지스트리 (화이트리스트)
+
+# 실행 클래스, 인증 클라이언트, 사용자 노출 정보를 함께 관리하는 증권사 SSOT입니다.
 BROKER_REGISTRY = {
     "KIS": {
-        "SIMULATED": LocalSimulatedBroker,    # 가상 모의투자 시뮬레이터
-        "MOCK": KISBroker,                    # 한국투자증권 모의투자
-        "REAL": KISBroker,                    # 한국투자증권 실전투자
+        "label": "한국투자증권",
+        "tone": "amber",
+        "client_class": KISClient,
+        "broker_classes": {
+            "SIMULATED": LocalSimulatedBroker,
+            "MOCK": KISBroker,
+            "REAL": KISBroker,
+        },
     },
     "TOSS": {
-        "SIMULATED": LocalSimulatedBroker,
-        "MOCK": TossBroker,                   # 토스는 별도 모의투자가 없다면 내부적으로 처리되거나 실패할 수 있음
-        "REAL": TossBroker,                   # 토스증권 실전투자
-    }
+        "label": "토스증권",
+        "tone": "blue",
+        "client_class": TossClient,
+        "broker_classes": {
+            "SIMULATED": LocalSimulatedBroker,
+            "MOCK": TossBroker,
+            "REAL": TossBroker,
+        },
+    },
 }
+
+
+def get_broker_catalog() -> list[dict]:
+    return [
+        {
+            "id": provider,
+            "label": definition["label"],
+            "tone": definition["tone"],
+            "supported_modes": [
+                mode
+                for mode in VALID_TRADE_MODES
+                if mode in definition["broker_classes"]
+            ],
+        }
+        for provider, definition in BROKER_REGISTRY.items()
+    ]
+
+
+def normalize_broker_provider(provider: str | None) -> str:
+    normalized = (provider or "").upper().strip()
+    if normalized not in BROKER_REGISTRY:
+        raise ValueError(f"지원하지 않는 증권사입니다: {provider}")
+    return normalized
+
+
+def create_broker_verification_client(provider: str, credential, trade_mode: str):
+    normalized = normalize_broker_provider(provider)
+    client_class = BROKER_REGISTRY[normalized]["client_class"]
+    return client_class(db_credential=credential, trade_mode=trade_mode)
+
 
 def get_broker_client(db_settings=None) -> BaseBroker:
     if not db_settings:
@@ -28,18 +72,17 @@ def get_broker_client(db_settings=None) -> BaseBroker:
     provider = (db_settings.broker_provider or "").upper()
     if not provider:
         raise ValueError("MOCK 또는 REAL 모드에서는 증권사(broker_provider)가 반드시 지정되어야 합니다.")
+    provider = normalize_broker_provider(provider)
 
     cred = None
     if getattr(db_settings, "credentials", None):
-        for c in db_settings.credentials:
-            if c.broker_name.upper() == provider:
-                cred = c
+        for candidate in db_settings.credentials:
+            if candidate.broker_name.upper() == provider:
+                cred = candidate
                 break
 
-    provider_map = BROKER_REGISTRY.get(provider)
-    if not provider_map:
-        raise ValueError(f"지원하지 않는 증권사입니다: {provider}")
-
-    broker_class = provider_map.get(mode, LocalSimulatedBroker)
+    provider_map = BROKER_REGISTRY[provider]["broker_classes"]
+    broker_class = provider_map.get(mode)
+    if broker_class is None:
+        raise ValueError(f"{provider} 증권사는 {mode} 모드를 지원하지 않습니다.")
     return broker_class(db_settings, db_credential=cred)
-

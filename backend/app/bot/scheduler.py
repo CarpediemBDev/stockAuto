@@ -416,8 +416,14 @@ async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
 
 async def calculate_slot_allocations(ctx: TradingFlowContext) -> dict:
     balance_data = await safe_broker_call(ctx.broker.get_account_balance, exchange_rate=ctx.exchange_rate)
-    total_asset_krw = balance_data.get("total_asset", 10000000.0)
-    cash_balance_krw = balance_data.get("cash_balance", 10000000.0)
+    total_asset_krw = balance_data.get(
+        "total_asset",
+        settings.SIMULATED_INITIAL_CASH_KRW,
+    )
+    cash_balance_krw = balance_data.get(
+        "cash_balance",
+        settings.SIMULATED_INITIAL_CASH_KRW,
+    )
     total_asset_usd = total_asset_krw / ctx.exchange_rate
     cash_balance_usd = cash_balance_krw / ctx.exchange_rate
     return ctx.ms_manager.calculate_slots_allocation(total_asset_usd, cash_balance_usd, ctx.holdings, ctx.sentiment, ctx.session)

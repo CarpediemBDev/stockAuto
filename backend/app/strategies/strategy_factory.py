@@ -1,6 +1,8 @@
 from app.strategies.base_strategy import BaseStrategy
+from app.translations.translator import Translator
 
-def get_strategy(strategy_type: str) -> BaseStrategy:
+
+def _create_strategy(strategy_type: str) -> BaseStrategy:
     """
     설정된 문자열 식별자를 바탕으로 해당 전략의 격리 인스턴스를 반환합니다 (팩토리 패턴).
     순환 참조(Circular Imports)를 원천 방지하기 위해 지연 임포트(Lazy Import) 방식을 사용합니다.
@@ -318,3 +320,10 @@ def get_strategy(strategy_type: str) -> BaseStrategy:
         # 매칭 실패 시 기본값으로 '마스터 레짐스위칭' 반환
         from app.strategies.regime_switching import RegimeSwitching
         return RegimeSwitching()
+
+
+def get_strategy(strategy_type: str) -> BaseStrategy:
+    normalized = (strategy_type or "regime_switching").lower().strip()
+    strategy = _create_strategy(normalized)
+    strategy.name = Translator.translate_strategy(normalized, "ko")
+    return strategy

@@ -20,8 +20,31 @@ if os.path.exists(full_env_path):
 else:
     logger.warning(f"[⚠️ WARNING] Environment file not found: {full_env_path}")
 
-# 유효한 트레이딩 모드 목록
-VALID_TRADE_MODES = ("SIMULATED", "MOCK", "REAL")
+# 거래 모드 식별자와 사용자 노출 메타데이터의 단일 정의입니다.
+TRADE_MODE_CATALOG = (
+    {
+        "id": "SIMULATED",
+        "label": "SIMULATED",
+        "description": "실시간 가격 기반 가상 투자 모드",
+        "tone": "blue",
+        "requires_credentials": False,
+    },
+    {
+        "id": "MOCK",
+        "label": "MOCK",
+        "description": "증권사 모의투자 서버 연동 모드",
+        "tone": "amber",
+        "requires_credentials": True,
+    },
+    {
+        "id": "REAL",
+        "label": "REAL",
+        "description": "실전 계좌 기반 자동매매 모드",
+        "tone": "red",
+        "requires_credentials": True,
+    },
+)
+VALID_TRADE_MODES = tuple(item["id"] for item in TRADE_MODE_CATALOG)
 DEFAULT_ALLOWED_ORIGINS = (
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -140,6 +163,10 @@ class Settings:
     MIN_CASH_BALANCE_USD = 200.0
     MIN_SMART_EXIT_PROFIT_RATE = 2.5
     REENTRY_COOLDOWN_MINUTES = 60
+
+    # 로컬 시뮬레이션 계좌는 시작 시점에 원화를 USD로 환전한 것으로 간주합니다.
+    SIMULATED_INITIAL_CASH_KRW = 10_000_000.0
+    SIMULATED_INITIAL_FX_RATE = 1_350.0
 
     # [Phase 30] 거래 수수료 및 제비용 상수
     KIS_FEE_RATE = 0.0008         # 0.08% KIS 우대 수수료율

@@ -38,12 +38,14 @@ class LocalSimulatedBroker(BaseBroker):
         finally:
             db.close()
 
-        initial_cash = 10000000.0  # 가상 시작 예수금: 1,000만 원 (10,000,000 KRW)
+        initial_cash = settings.SIMULATED_INITIAL_CASH_KRW
         if exchange_rate is None:
             exchange_rate = FXRateCache.get_rate()
+        if exchange_rate <= 0:
+            raise ValueError("환율은 0보다 커야 합니다.")
 
-        # 💡 [환율 왜곡 보정] 원화 기준의 시작 예수금을 USD 기준으로 선형 환산
-        initial_cash_usd = initial_cash / exchange_rate
+        # 시작 시점의 환율을 고정해야 평가 시점 환율 변화가 환차손익으로 반영됩니다.
+        initial_cash_usd = initial_cash / settings.SIMULATED_INITIAL_FX_RATE
 
         # 누적 실현 손익 계산 (TradeLog 기준 매매 누적 성과 - USD 기준)
         total_realized_pnl_usd = sum(log.realized_pnl for log in trade_logs) if trade_logs else 0.0
@@ -129,6 +131,8 @@ class LocalSimulatedBroker(BaseBroker):
         }
 
     def get_holdings(self, exchange_rate: float | None = None) -> list:
+        from app.translations.translator import Translator
+
         db = SessionLocal()
         try:
             if self.user_id:
@@ -166,6 +170,8 @@ class LocalSimulatedBroker(BaseBroker):
                     "id": h.id,
                     "ticker": h.ticker,
                     "ticker_name": h.ticker_name,
+                    "strategy_type": h.strategy_type,
+                    "strategy_name": Translator.translate_strategy(h.strategy_type, "ko"),
                     "avg_price": h.avg_price,
                     "quantity": h.quantity,
                     "highest_price": h.highest_price,
@@ -205,6 +211,8 @@ class LocalSimulatedBroker(BaseBroker):
                         "id": h.id,
                         "ticker": h.ticker,
                         "ticker_name": h.ticker_name,
+                        "strategy_type": h.strategy_type,
+                        "strategy_name": Translator.translate_strategy(h.strategy_type, "ko"),
                         "avg_price": h.avg_price,
                         "quantity": h.quantity,
                         "highest_price": h.highest_price,
@@ -220,6 +228,8 @@ class LocalSimulatedBroker(BaseBroker):
                         "id": h.id,
                         "ticker": h.ticker,
                         "ticker_name": h.ticker_name,
+                        "strategy_type": h.strategy_type,
+                        "strategy_name": Translator.translate_strategy(h.strategy_type, "ko"),
                         "avg_price": h.avg_price,
                         "quantity": h.quantity,
                         "highest_price": h.highest_price,
