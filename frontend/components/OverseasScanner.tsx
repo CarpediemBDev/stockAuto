@@ -146,25 +146,23 @@ export function OverseasScanner({
     setIsSpinning(true);
     try {
       await scannerAPI.runOverseasScan();
-      toast.success("스캔이 백그라운드에서 시작되었습니다. 잠시 후 자동 갱신됩니다.");
-      // Note: We don't setResults here because the API now runs in the background
-      // and doesn't return the data immediately. usePolling will fetch it later.
+      toast.success("스캔이 백그라운드에서 시작되었습니다. 약 25초 뒤 자동으로 목록을 갱신합니다.");
+      
+      // 스캔이 완료될 때까지 충분한 시간(25초)을 기다린 후 데이터를 새로고침합니다.
+      setTimeout(async () => {
+        await fetchScan();
+        setIsManualScanning(false);
+        toast.success("스캔 갱신이 완료되었습니다.");
+      }, 25000);
+      
     } catch (error) {
       const msg = reportHandledError("Failed to run overseas scan", error);
       toast.error(`수동 스캔 실패: ${msg}`);
       setIsManualScanning(false);
       setIsLoading(false);
       setIsSpinning(false);
-    } finally {
-      // Keep spinning/loading state slightly longer so user knows it's doing something,
-      // but let the polling take over eventually.
-      setTimeout(() => {
-        setIsManualScanning(false);
-        setIsLoading(false);
-        setIsSpinning(false);
-      }, 3000);
     }
-  }, []);
+  }, [fetchScan]);
 
   usePolling(fetchScan, 30000);
 

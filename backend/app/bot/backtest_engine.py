@@ -45,16 +45,16 @@ class BacktestBroker:
     def buy_order(self, ticker: str, quantity: int, price: float, buy_stage: int, timestamp: datetime, ticker_name: str = "") -> dict:
         """가상 매수 주문 집행 및 KIS 매수 수수료가 적용된 평단가 가중평균 시뮬레이션"""
         cost = quantity * price
-        buy_fee = cost * settings.KIS_FEE_RATE
+        buy_fee = cost * settings.SIMULATED_FEE_RATE
         total_cost = cost + buy_fee
         
         if self.cash < total_cost:
             # 잔고 안전장치: 남은 예수금 내에서 수수료까지 감안하여 최대한 매매 시도
-            max_qty = int(self.cash / (price * (1 + settings.KIS_FEE_RATE)))
+            max_qty = int(self.cash / (price * (1 + settings.SIMULATED_FEE_RATE)))
             if max_qty >= 1:
                 quantity = max_qty
                 cost = quantity * price
-                buy_fee = cost * settings.KIS_FEE_RATE
+                buy_fee = cost * settings.SIMULATED_FEE_RATE
                 total_cost = cost + buy_fee
             else:
                 return {"success": False, "message": "Insufficient cash for backtest buy order."}
@@ -113,7 +113,7 @@ class BacktestBroker:
         revenue = sell_qty * price
         
         # 매도 시 제비용 차감
-        sell_fee = revenue * settings.KIS_FEE_RATE
+        sell_fee = revenue * settings.SIMULATED_FEE_RATE
         sec_fee = revenue * settings.SEC_FEE_RATE
         net_revenue = revenue - sell_fee - sec_fee
         
@@ -121,7 +121,7 @@ class BacktestBroker:
         
         # 총 매입 금액 및 매수 시 수수료 계산
         buy_gross = h["avg_price"] * sell_qty
-        buy_fee = buy_gross * settings.KIS_FEE_RATE
+        buy_fee = buy_gross * settings.SIMULATED_FEE_RATE
         
         # 최종 실수익 (Net realized PnL) = 매도 정산금 - (매수 금액 + 매수 시 수수료)
         realized_pnl = net_revenue - (buy_gross + buy_fee)

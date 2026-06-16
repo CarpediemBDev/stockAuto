@@ -126,9 +126,10 @@ def _apply_sell_delta(db, order: BrokerOrder, delta: int, filled_price: float) -
         )
 
     buy_gross = holding.avg_price * delta
-    buy_fee = buy_gross * settings.KIS_FEE_RATE
+    fee_rate = settings.SIMULATED_FEE_RATE if order.trade_mode == "SIMULATED" else settings.KIS_FEE_RATE
+    buy_fee = buy_gross * fee_rate
     sell_gross = filled_price * delta
-    sell_fee = sell_gross * settings.KIS_FEE_RATE
+    sell_fee = sell_gross * fee_rate
     sec_fee = sell_gross * settings.SEC_FEE_RATE
     realized_pnl = sell_gross - buy_gross - buy_fee - sell_fee - sec_fee
     return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
