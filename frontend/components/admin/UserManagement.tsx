@@ -74,7 +74,7 @@ export function UserManagement() {
 
   useEffect(() => {
     let active = true;
-    api.get("/admin/users")
+    api.get("/admin/users", { timeout: 60000 })
       .then((res) => {
         if (active) {
           const data = Array.isArray(res.data) ? res.data : (res.data?.data || []);
