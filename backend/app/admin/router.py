@@ -1,6 +1,8 @@
 from datetime import date
+import asyncio
 import math
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -470,6 +472,39 @@ def list_users(
     from app.bot.fx_cache import FXRateCache
     exchange_rate = FXRateCache.get_rate()
 
+    # 💡 [성능 최적화] ThreadPoolExecutor를 사용한 100% 병렬 증권사 API 통신
+    balances_cache = {}
+    from app.bot.broker_factory import get_broker_client
+    
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_user = {}
+        for user in users:
+            settings = user.settings
+            if settings:
+                is_simulated = settings.trade_mode == "SIMULATED"
+                has_verified_cred = False
+                if not is_simulated and settings.broker_provider:
+                    for cred in settings.credentials:
+                        if cred.broker_name == settings.broker_provider and cred.verification_status == "verified":
+                            has_verified_cred = True
+                            break
+                if is_simulated or has_verified_cred:
+                    broker = get_broker_client(settings)
+                    future = executor.submit(broker.get_account_balance)
+                    future_to_user[future] = user.id
+        
+        for future in as_completed(future_to_user):
+            user_id = future_to_user[future]
+            try:
+                balances_cache[user_id] = future.result()
+            except Exception as e:
+                logger.warning(
+                    "[Admin User List] Failed to fetch balance for user %s: %s",
+                    user_id,
+                    e,
+                )
+                balances_cache[user_id] = e
+
     for user in users:
         settings = user.settings
 
@@ -486,11 +521,11 @@ def list_users(
                             has_verified_cred = True
                             break
 
-                # 💡 [성능 최적화] 동일 유저에 대한 Broker 객체 생성 및 잔고 조회를 1회로 통합
                 if is_simulated or has_verified_cred:
-                    from app.bot.broker_factory import get_broker_client
-                    broker = get_broker_client(settings)
-                    balance = broker.get_account_balance()
+                    balance = balances_cache.get(user.id)
+                    if isinstance(balance, Exception):
+                        raise balance
+                    
                     if not isinstance(balance, dict):
                         raise ValueError("증권사 잔고 응답 형식이 올바르지 않습니다.")
 
@@ -545,7 +580,7 @@ def list_users(
                                 db.delete(expired_snapshot)
             except Exception as e:
                 logger.warning(
-                    "[Admin User List] Failed to fetch balance for user %s: %s",
+                    "[Admin User List] Failed to fetch/process balance for user %s: %s",
                     user.username,
                     e,
                 )
