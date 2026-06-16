@@ -18,6 +18,7 @@ logs
 
 # Node
 frontend/node_modules/
+backend/app/scanner/node_modules/
 frontend/.next/
 frontend/out/
 frontend/build/

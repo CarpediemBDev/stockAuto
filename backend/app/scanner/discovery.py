@@ -1,6 +1,8 @@
 import httpx
 import asyncio
 
+from app.scanner.toss_crawler import fetch_toss_market_scanners
+
 # 고정 미국 주요 종목군 (모든 외부 소스 실패 시 최후의 안전망)
 SAFETY_TECH_LIST = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "AMD", "NFLX", "TSM"]
 
@@ -50,14 +52,20 @@ async def get_seed_tickers() -> tuple[list, dict[str, list[str]]]:
 
     source_map: dict[str, set[str]] = {}
 
-    # 1. 병렬 수집 예약 (Yahoo Finance 단타 4대장)
-    yahoo_task = fetch_yahoo_market_scanners()
+    # 1. 1순위 시드 수집: 토스증권 WTS 크롤링
+    scanners_results = {}
+    try:
+        scanners_results = await fetch_toss_market_scanners()
+    except Exception as e:
+        print(f"[Discovery] Toss crawler failed: {e}. Falling back to Yahoo Finance.")
 
-    # 2. 모든 공용 시장 소스 결과 대기
-    yahoo_results = await yahoo_task
+    # 2. Fallback 로직: 토스 수집에 실패했거나 데이터가 없으면 Yahoo Finance API 호출
+    if not scanners_results or not any(scanners_results.values()):
+        print("[Discovery] Using Yahoo Finance as Fallback...")
+        scanners_results = await fetch_yahoo_market_scanners()
 
     # 3. 출처 꼬리표(Source Tag) 부착
-    for tag, tickers in yahoo_results.items():
+    for tag, tickers in scanners_results.items():
         for t in tickers:
             source_map.setdefault(t, set()).add(tag)
             source_map[t].add("MARKET")
@@ -77,7 +85,7 @@ async def get_seed_tickers() -> tuple[list, dict[str, list[str]]]:
     final_source_map = {t: sorted(s) for t, s in source_map.items()}
 
     print(f"[Discovery] Process complete. Final universe size: {len(final_universe)}")
-    total_yahoo = sum(len(v) for v in yahoo_results.values())
-    print(f" - Yahoo Total: {total_yahoo} | Safety: {len(SAFETY_TECH_LIST)}")
+    total_market = sum(len(v) for v in scanners_results.values())
+    print(f" - Market Scanner Total: {total_market} | Safety: {len(SAFETY_TECH_LIST)}")
 
     return final_universe, final_source_map
