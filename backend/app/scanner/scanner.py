@@ -376,7 +376,7 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                 # 채점에 필요한 실시간 필드들을 cand(dict)에 바인딩
                 cand['Close'] = last_close
                 cand['Volume'] = float(df_5m['Volume'].iloc[-1]) if not df_5m.empty else 0.0
-                cand['VWAP'] = vwap.iloc[-1] if not vwap.empty else float('nan')
+                cand['VWAP'] = float(vwap.iloc[-1]) if not vwap.empty and pd.notna(vwap.iloc[-1]) else None
                 cand['Wick'] = wick_ratio
                 cand['RVOL'] = cand.get('RVOL', cand.get('rvol', 1.0))
                 cand['EMA9'] = cand.get('EMA9', 0.0)
@@ -396,9 +396,9 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                 
                 if not df_daily.empty and len(df_daily) >= 120:
                     daily_ema120 = calculate_ema(df_daily['Close'], 120)
-                    cand['EMA120'] = daily_ema120.iloc[-1] if not daily_ema120.empty else float('nan')
+                    cand['EMA120'] = float(daily_ema120.iloc[-1]) if not daily_ema120.empty and pd.notna(daily_ema120.iloc[-1]) else None
                 else:
-                    cand['EMA120'] = float('nan')
+                    cand['EMA120'] = None
                 
                 # 전략 클래스를 통한 채점 가동
                 final_score = calculate_strategy_score(strategy_instance, cand, sentiment, is_entry=True, score_card=score_card)
@@ -453,11 +453,11 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                         "regime_mode": sentiment,
                         "Close": last_close,
                         "Volume": cand.get('Volume', 0.0),
-                        "VWAP": cand.get('VWAP', float('nan')),
+                        "VWAP": cand.get('VWAP', None),
                         "RVOL": cand.get('RVOL', 1.0),
                         "EMA9": cand.get('EMA9', 0.0),
                         "EMA20": cand.get('EMA20', 0.0),
-                        "EMA120": cand.get('EMA120', float('nan')),
+                        "EMA120": cand.get('EMA120', None),
                         "OBV_divergence": cand.get('OBV_divergence', -1.0),
                         "is_double_bb_buy": is_double_bb_buy,
                         "is_double_bb_sell": is_double_bb_sell
@@ -544,7 +544,7 @@ async def analyze_single_ticker(ticker: str, bypass_fundamental: bool = False) -
         cand = {
             'Close': last_close,
             'Volume': float(df_5m['Volume'].iloc[-1]) if not df_5m.empty else 0.0,
-            'VWAP': vwap.iloc[-1] if not vwap.empty else float('nan'),
+            'VWAP': float(vwap.iloc[-1]) if not vwap.empty and pd.notna(vwap.iloc[-1]) else None,
             'Wick': wick_ratio,
             'is_rsi_bb_extreme': is_rsi_bb_extreme,
             'OBV_divergence': 1.0 if is_obv_accumulation else -1.0,
@@ -572,9 +572,9 @@ async def analyze_single_ticker(ticker: str, bypass_fundamental: bool = False) -
 
         if not df_daily.empty and len(df_daily) >= 120:
             daily_ema120 = calculate_ema(df_daily['Close'], 120)
-            cand['EMA120'] = daily_ema120.iloc[-1] if not daily_ema120.empty else float('nan')
+            cand['EMA120'] = float(daily_ema120.iloc[-1]) if not daily_ema120.empty and pd.notna(daily_ema120.iloc[-1]) else None
         else:
-            cand['EMA120'] = float('nan')
+            cand['EMA120'] = None
 
         final_score = strategy_instance.calculate_score(cand, sentiment, is_entry=False)
         final_score -= fundamental_penalty
@@ -613,11 +613,11 @@ async def analyze_single_ticker(ticker: str, bypass_fundamental: bool = False) -
                 "regime_mode": sentiment,
                 "Close": last_close,
                 "Volume": cand.get('Volume', 0.0),
-                "VWAP": cand.get('VWAP', float('nan')),
+                "VWAP": cand.get('VWAP', None),
                 "RVOL": cand.get('RVOL', 1.0),
                 "EMA9": cand.get('EMA9', 0.0),
                 "EMA20": cand.get('EMA20', 0.0),
-                "EMA120": cand.get('EMA120', float('nan')),
+                "EMA120": cand.get('EMA120', None),
                 "OBV_divergence": cand.get('OBV_divergence', -1.0),
                 "is_double_bb_buy": is_double_bb_buy,
                 "is_double_bb_sell": is_double_bb_sell

@@ -160,15 +160,8 @@ async def refresh_swing_prediction_cache(
 
     try:
         from app.scanner.discovery import get_seed_tickers
-        from app.scanner.playwright_scraper import fetch_naver_us_rankings
         seed_tickers, _ = await get_seed_tickers()
-        
-        try:
-            logger.info("[SwingPrediction] Triggering heavy Playwright scraper for daily scan...")
-            heavy_tickers = await fetch_naver_us_rankings()
-            seed_tickers = list(set(seed_tickers + heavy_tickers))
-        except Exception as e:
-            logger.error(f"[SwingPrediction] Heavy scraper failed (fallback to fast scanner only): {e}")
+
         candidates = await scan_next_day_candidates(seed_tickers)
         snapshot = write_swing_prediction_snapshot(session, cache_key, seed_tickers, candidates, SWING_SYNC_FRESH)
         response = snapshot_to_swing_response(snapshot)

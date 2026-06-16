@@ -280,6 +280,39 @@ def test_swing_prediction_refresh_failure_persists_stale_status(monkeypatch):
         swing_cache_module.clear_swing_prediction_cache()
 
 
+def test_swing_prediction_refresh_uses_discovery_seed_tickers(monkeypatch):
+    expected = [{"ticker": "AAPL", "score": 81.0}]
+    scanned_tickers = []
+
+    async def fake_get_seed_tickers():
+        return ["AAPL", "NVDA"], {"AAPL": ["YAHOO_ACTIVE"], "NVDA": ["NAVER_US_RANKING"]}
+
+    async def fake_scan_next_day_candidates(tickers):
+        scanned_tickers.extend(tickers)
+        return expected
+
+    monkeypatch.setattr("app.scanner.discovery.get_seed_tickers", fake_get_seed_tickers)
+    monkeypatch.setattr(swing_cache_module, "scan_next_day_candidates", fake_scan_next_day_candidates)
+    swing_cache_module.clear_swing_prediction_cache()
+    app, db, engine = create_authenticated_scanner_app()
+    try:
+        cache_key = swing_cache_module.get_swing_cache_key()
+        response = asyncio.run(swing_cache_module.refresh_swing_prediction_cache(cache_key, db))
+        cached = swing_cache_module.read_swing_prediction_cache(cache_key, db)
+
+        assert scanned_tickers == ["AAPL", "NVDA"]
+        assert response["candidates"] == expected
+        assert response["sync_status"] == "fresh"
+        assert cached["candidates"] == expected
+        assert cached["sync_status"] == "fresh"
+        assert db.query(SwingPredictionSnapshot).count() == 1
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+        swing_cache_module.clear_swing_prediction_cache()
+
+
 def test_swing_prediction_refresh_failure_returns_stale_snapshot(monkeypatch):
     expected = [{"ticker": "AAPL", "score": 77.0}]
     refresh_done = threading.Event()
