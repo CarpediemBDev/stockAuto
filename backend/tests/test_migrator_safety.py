@@ -20,18 +20,6 @@ def make_alembic_config(db_url: str) -> Config:
     return config
 
 
-def test_competitive_seed_is_disabled_by_default(monkeypatch):
-    monkeypatch.delenv("SEED_COMPETITIVE_USERS", raising=False)
-
-    assert migrator.competitive_seed_enabled() is False
-
-
-def test_competitive_seed_requires_explicit_opt_in(monkeypatch):
-    monkeypatch.setenv("SEED_COMPETITIVE_USERS", "true")
-
-    assert migrator.competitive_seed_enabled() is True
-
-
 def test_unversioned_baseline_database_is_upgraded_to_head(tmp_path, monkeypatch):
     db_path = tmp_path / "legacy_stockauto.db"
     db_url = f"sqlite:///{db_path}"
@@ -43,7 +31,13 @@ def test_unversioned_baseline_database_is_upgraded_to_head(tmp_path, monkeypatch
         connection.exec_driver_sql("DROP TABLE alembic_version")
 
     monkeypatch.setattr(migrator, "engine", legacy_engine)
-    monkeypatch.setattr(migrator, "competitive_seed_enabled", lambda: False)
+    monkeypatch.setattr(
+        migrator,
+        "seed_competitive_users",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("migration startup must not seed competitive users")
+        ),
+    )
 
     try:
         migrator.run_migrations_programmatically()

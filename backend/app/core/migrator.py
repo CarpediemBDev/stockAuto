@@ -7,15 +7,6 @@ from app.core.database import engine
 from app.core.logging import logger
 
 
-def competitive_seed_enabled() -> bool:
-    return os.getenv("SEED_COMPETITIVE_USERS", "false").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
 def run_migrations_programmatically():
     """Alembic 마이그레이션을 애플리케이션 시작 시 프로그램적으로 자동 실행하는 부트스트래퍼"""
     # migrator.py의 위치를 기준으로 backend 루트 디렉터리에 있는 alembic.ini 경로 도출
@@ -75,11 +66,6 @@ def run_migrations_programmatically():
             # 이미 Alembic으로 관리되고 있는 경우 새로운 마이그레이션이 있으면 자동 업데이트 적용
             command.upgrade(alembic_cfg, "head")
             logger.info("[Migration] 데이터베이스 변경사항 체크 및 업그레이드 완료.")
-
-        if competitive_seed_enabled():
-            seed_competitive_users()
-        else:
-            logger.info("[Seeder] 경쟁용 사용자 자동 생성을 건너뜁니다.")
 
     except Exception as e:
         logger.error(f"[Migration] 마이그레이션 중 오류 발생: {e}", exc_info=True)
