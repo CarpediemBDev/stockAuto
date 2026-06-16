@@ -10,6 +10,13 @@ test.describe("Admin User Management Dashboard", () => {
       });
     });
 
+    await page.route("**/api/v1/auth/refresh", async (route) => {
+      await route.fulfill({
+        status: 200,
+        json: { code: "SUCCESS", data: { access_token: "test-token", username: "admin", role: "ADMIN" } },
+      });
+    });
+
     await page.route("**/api/v1/bot/status", async (route) => {
       await route.fulfill({ status: 200, json: { code: "SUCCESS", data: { is_running: false } } });
     });
@@ -52,14 +59,7 @@ test.describe("Admin User Management Dashboard", () => {
   });
 
   test("should render the total user management screen without crashing", async ({ page }) => {
-    // Perform mock login to initialize Zustand store properly
-    await page.goto("/login");
-    await page.fill('input[type="text"]', "admin");
-    await page.fill('input[type="password"]', "admin");
-    await page.click('button[type="submit"]');
-    await page.waitForURL("**/");
-
-    // Mock Next.js router injecting state
+    // Navigate directly to admin since /auth/refresh is now mocked
     await page.goto("/admin");
 
     // Click the users management menu tab

@@ -245,13 +245,13 @@ export function UserManagement() {
     const isPositive = numRate > 0;
     const isNegative = numRate < 0;
     return (
-      <span className={`px-2 py-1 rounded text-xs font-semibold font-mono flex items-center gap-1 w-fit border
+      <span className={`px-2 py-1 rounded text-[15px] font-semibold font-mono flex items-center gap-1 w-fit border
         ${isPositive
           ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
           : isNegative
             ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
             : 'bg-zinc-800 text-zinc-500 border-zinc-750'}`}>
-        {isPositive ? <TrendingUp size={12} /> : isNegative ? <TrendingDown size={12} /> : null}
+        {isPositive ? <TrendingUp size={15} /> : isNegative ? <TrendingDown size={15} /> : null}
         {numRate > 0 ? '+' : ''}{numRate.toFixed(2)}%
       </span>
     );
@@ -390,7 +390,7 @@ export function UserManagement() {
                   <th className="px-6 py-3.5 text-right">관리</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/40 text-sm">
+              <tbody className="divide-y divide-zinc-800/40 text-[15px]">
                 {sortedUsers.map((user, index) => {
                   const rank = index + 1;
                   return (
