@@ -77,11 +77,12 @@ export function UserManagement() {
     api.get("/admin/users")
       .then((res) => {
         if (active) {
-          setUsersList(res.data);
+          const data = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+          setUsersList(data);
           // Sync drawer data if open
           setSelectedUser((prev) => {
             if (!prev) return null;
-            const updated = res.data.find((u: ManagedUser) => u.id === prev.id);
+            const updated = data.find((u: ManagedUser) => u.id === prev.id);
             return updated || null;
           });
           setLoading(false);
@@ -90,6 +91,7 @@ export function UserManagement() {
       .catch((error) => {
         if (active) {
           toast.error(`사용자 목록을 불러오는 데 실패했습니다: ${getErrorMessage(error)}`);
+          setUsersList([]);
           setLoading(false);
         }
       });
@@ -141,7 +143,7 @@ export function UserManagement() {
 
   // Recharts를 위한 모든 경쟁 사용자의 자산 성장 곡선 병합 데이터 산출
   const getChartData = () => {
-    if (!usersList || usersList.length === 0) return [];
+    if (!Array.isArray(usersList) || usersList.length === 0) return [];
 
     // 타임스탬프 기준의 모든 지점들을 정렬하여 유니크 타임라인 확보
     const timelineSet = new Set<string>();
@@ -232,9 +234,16 @@ export function UserManagement() {
     }
   };
 
-  const getReturnBadge = (rate: number) => {
-    const isPositive = rate > 0;
-    const isNegative = rate < 0;
+  const getReturnBadge = (rate: number | string | null | undefined) => {
+    if (rate === null || rate === undefined) {
+      return <span className="text-zinc-600 text-xs">-</span>;
+    }
+    const numRate = Number(rate);
+    if (isNaN(numRate)) {
+      return <span className="text-zinc-600 text-xs">-</span>;
+    }
+    const isPositive = numRate > 0;
+    const isNegative = numRate < 0;
     return (
       <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono tracking-tight flex items-center gap-0.5 w-fit border
         ${isPositive
@@ -243,7 +252,7 @@ export function UserManagement() {
             ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
             : 'bg-zinc-800 text-zinc-500 border-zinc-750'}`}>
         {isPositive ? <TrendingUp size={10} /> : isNegative ? <TrendingDown size={10} /> : null}
-        {rate > 0 ? '+' : ''}{rate.toFixed(2)}%
+        {numRate > 0 ? '+' : ''}{numRate.toFixed(2)}%
       </span>
     );
   };
@@ -254,12 +263,14 @@ export function UserManagement() {
   };
 
   // 정렬 규칙 적용된 유저 목록
-  const sortedUsers = [...usersList].sort((a, b) => {
+  const sortedUsers = Array.isArray(usersList) ? [...usersList].sort((a, b) => {
     if (sortByProfit) {
-      return (b.profit_rate || 0) - (a.profit_rate || 0);
+      const aRate = Number(a.profit_rate) || 0;
+      const bRate = Number(b.profit_rate) || 0;
+      return bRate - aRate;
     }
     return a.id - b.id;
-  });
+  }) : [];
 
   const chartData = getChartData();
   const chartUsers = usersList.filter(
@@ -433,9 +444,7 @@ export function UserManagement() {
                         </div>
                       </td>
                       <td className="px-6 py-4 font-mono">
-                        {user.profit_rate !== undefined ? getReturnBadge(user.profit_rate) : (
-                          <span className="text-zinc-600 text-xs">-</span>
-                        )}
+                        {getReturnBadge(user.profit_rate)}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-end gap-2">
@@ -568,9 +577,7 @@ export function UserManagement() {
                     </div>
                     <div className="flex justify-between items-center font-sans">
                       <span className="text-zinc-500 text-xs font-semibold">실시간 봇 수익률</span>
-                      {selectedUser.profit_rate !== undefined ? getReturnBadge(selectedUser.profit_rate) : (
-                        <span className="text-zinc-500 text-xs font-semibold">-</span>
-                      )}
+                      {getReturnBadge(selectedUser.profit_rate)}
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-zinc-500 text-xs font-semibold">구동 알고리즘 전략</span>
