@@ -11,6 +11,8 @@ backend/.env*
 *.sqlite
 *.sqlite3
 stockauto.db
+*.db-shm
+*.db-wal
 backend/data/
 
 #logs
