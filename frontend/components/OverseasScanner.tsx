@@ -19,8 +19,9 @@ import {
   X
 } from "lucide-react";
 import { cn, reportHandledError } from "@/lib/utils";
-import { scannerAPI, isCancel } from "@/lib/api";
-import { usePolling } from "@/hooks/usePolling";
+import { scannerAPI } from "@/lib/api";
+import useSWR from "swr";
+import { fetcher } from "@/lib/api";
 import { toast } from "sonner";
 import { useTimezone } from "@/store/timezoneStore";
 
@@ -111,9 +112,15 @@ export function OverseasScanner({
   activeTab = "15m",
   setActiveTab
 }: OverseasScannerProps) {
-  const [results, setResults] = useState<ScanResult[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [isManualScanning, setIsManualScanning] = useState(false);
+  
+  const { data: swrData, isLoading: swrLoading, mutate: mutateScan } = useSWR('/scanner/latest', fetcher, { 
+    refreshInterval: 15000,
+    onSuccess: () => setLastUpdated(new Date())
+  });
+  const results: ScanResult[] = Array.isArray(swrData) ? swrData : (swrData?.data || []);
+  const isLoading = swrLoading || isManualScanning;
+
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isSpinning, setIsSpinning] = useState(false);
   const { selectedTimezone } = useTimezone();
@@ -123,35 +130,17 @@ export function OverseasScanner({
   // AI 뉴스 상세 보기 모달 상태 관리
   const [selectedNewsItem, setSelectedNewsItem] = useState<ScanResult | null>(null);
 
-  const fetchScan = useCallback(async (signal?: AbortSignal) => {
-    setIsLoading(true);
-    setIsSpinning(true);
-    try {
-      const res = await scannerAPI.getLatest({ signal });
-      setResults(res.data);
-      setLastUpdated(new Date());
-    } catch (error) {
-      if (isCancel(error)) return;
-      const msg = reportHandledError("Failed to fetch overseas scan results", error);
-      toast.error(`스캐너 데이터 갱신 실패: ${msg}`);
-    } finally {
-      setIsLoading(false);
-      setTimeout(() => setIsSpinning(false), 1000); // 최소 1초 동안 스핀 애니메이션 유지
-    }
-  }, []);
-
   const runManualScan = useCallback(async () => {
     setIsManualScanning(true);
-    setIsLoading(true);
     setIsSpinning(true);
     try {
       await scannerAPI.runOverseasScan();
       toast.success("스캔이 백그라운드에서 시작되었습니다. 약 25초 뒤 자동으로 목록을 갱신합니다.");
       
-      // 스캔이 완료될 때까지 충분한 시간(25초)을 기다린 후 데이터를 새로고침합니다.
       setTimeout(async () => {
-        await fetchScan();
+        await mutateScan();
         setIsManualScanning(false);
+        setIsSpinning(false);
         toast.success("스캔 갱신이 완료되었습니다.");
       }, 25000);
       
@@ -159,12 +148,9 @@ export function OverseasScanner({
       const msg = reportHandledError("Failed to run overseas scan", error);
       toast.error(`수동 스캔 실패: ${msg}`);
       setIsManualScanning(false);
-      setIsLoading(false);
       setIsSpinning(false);
     }
-  }, [fetchScan]);
-
-  usePolling(fetchScan, 30000);
+  }, [mutateScan]);
 
   return (
     <div className="bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-2xl shadow-xl flex flex-col h-full">

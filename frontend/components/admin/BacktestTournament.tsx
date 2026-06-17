@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { adminAPI, isCancel } from '@/lib/api';
+import React, { useState, useEffect } from 'react';
+import { adminAPI } from '@/lib/api';
 import { 
   Trophy, 
   Activity, 
@@ -24,7 +24,6 @@ import {
   Legend 
 } from 'recharts';
 import { toast } from "sonner";
-import { reportHandledError } from '@/lib/utils';
 
 interface TickerStat {
   buys: number;
@@ -59,86 +58,62 @@ interface StrategyResult {
   equity_curve: EquityPoint[];
 }
 
-
+import useSWR from 'swr';
 
 export function BacktestTournament() {
-  const [data, setData] = useState<StrategyResult[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isPolling, setIsPolling] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [selectedStrategy, setSelectedStrategy] = useState<StrategyResult | null>(null);
-  const requestControllerRef = useRef<AbortController | null>(null);
-  
-  // 날짜 피커 제어 상태 (작년 2025년 디폴트)
   const [startDate, setStartDate] = useState("2025-01-01");
   const [endDate, setEndDate] = useState("2025-12-31");
+  const [activeStartDate, setActiveStartDate] = useState("2025-01-01");
+  const [activeEndDate, setActiveEndDate] = useState("2025-12-31");
+  const [selectedStrategy, setSelectedStrategy] = useState<StrategyResult | null>(null);
 
-  const fetchResults = useCallback(async (start: string, end: string) => {
-    requestControllerRef.current?.abort();
-    const controller = new AbortController();
-    requestControllerRef.current = controller;
-    setLoading(true);
-    setIsPolling(false);
-    setElapsedSeconds(0);
-
-    const startTime = Date.now();
-    const timerId = setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
-    }, 1000);
-
-    try {
-      while (!controller.signal.aborted) {
-        const res = await adminAPI.getBacktestTournament({
-          params: { start_date: start, end_date: end },
-          signal: controller.signal,
-        });
-
-        if (res.status === 202 || res.data?.status === 'processing') {
-          setIsPolling(true);
-          // Wait 10 seconds before polling again
-          await new Promise(resolve => setTimeout(resolve, 10000));
-        } else {
-          const results = res.data?.data || res.data || [];
-          setData(results);
-          setSelectedStrategy(results[0] ?? null);
-          break;
-        }
-      }
-    } catch (error) {
-      if (isCancel(error)) return;
-      const msg = reportHandledError('Failed to fetch tournament results', error);
-      toast.error(`대항전 결과 데이터 로드 실패: ${msg}`);
-    } finally {
-      clearInterval(timerId);
-      if (requestControllerRef.current === controller) {
-        requestControllerRef.current = null;
-        setLoading(false);
-        setIsPolling(false);
-      }
+  const fetcher = async ([, start, end]: [string, string, string]) => {
+    const res = await adminAPI.getBacktestTournament({
+      params: { start_date: start, end_date: end }
+    });
+    if (res.status === 202 || res.data?.status === 'processing') {
+      const err = new Error('processing');
+      err.name = 'ProcessingError';
+      throw err;
     }
-  }, []);
+    return res.data?.data || res.data || [];
+  };
 
-  useEffect(() => {
-    // eslint-disable-next-line
-    void fetchResults("2025-01-01", "2025-12-31");
-    return () => {
-      requestControllerRef.current?.abort();
-    };
-  }, [fetchResults]);
+  const { data = [], error, isLoading } = useSWR<StrategyResult[]>(
+    ['backtest', activeStartDate, activeEndDate],
+    fetcher,
+    {
+      refreshInterval: () => {
+        // We throw an error in fetcher when processing.
+        // We rely on errorRetryInterval to retry when an error is thrown.
+        return 0;
+      },
+      errorRetryInterval: 15000,
+      revalidateOnFocus: false,
+      shouldRetryOnError: true,
+      errorRetryCount: 100, // Retry indefinitely until processing finishes
+    }
+  );
+
+  const isPolling = error && error.name === 'ProcessingError';
+  const loading = isLoading || isPolling;
+
+  // 파생 상태: 사용자가 명시적으로 선택한 전략이 없다면 데이터의 첫 번째 항목을 사용
+  const activeStrategy = selectedStrategy || (data && data.length > 0 ? data[0] : null);
 
   const handleRunSimulation = () => {
     if (!startDate || !endDate) {
       toast.error("시작일과 종료일을 입력해주세요.");
       return;
     }
-    // 날짜 논리성 선결 가드
     if (new Date(startDate) > new Date(endDate)) {
       toast.error("시작일은 종료일보다 이전이어야 합니다.");
       return;
     }
     toast.info(`${startDate} ~ ${endDate} 기간에 대한 HIL 시뮬레이션 배틀을 실행합니다.`);
-    setLoading(true);
-    void fetchResults(startDate, endDate);
+    setSelectedStrategy(null); // 새 시뮬레이션 시 선택 초기화
+    setActiveStartDate(startDate);
+    setActiveEndDate(endDate);
   };
 
   const getRankBadge = (rank: number) => {
@@ -283,7 +258,7 @@ export function BacktestTournament() {
                     <span className="text-xs text-emerald-400 font-bold tracking-wider">서버에서 백그라운드 시뮬레이션을 진행 중입니다...</span>
                   </div>
                   <span className="text-[11px] text-zinc-400 block font-mono bg-zinc-900/50 py-1 px-3 rounded-full border border-zinc-800 inline-block">
-                    경과 시간: {Math.floor(elapsedSeconds / 60).toString().padStart(2, '0')}:{(elapsedSeconds % 60).toString().padStart(2, '0')} (약 3~4분 소요)
+                    HIL 백테스트 연산 중... (전체 서버 리소스 가동, 약 3~4분 소요)
                   </span>
                   <span className="text-[10px] text-zinc-500 block">이 화면을 벗어나도 백테스트는 계속 진행됩니다.</span>
                 </>

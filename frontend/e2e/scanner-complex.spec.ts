@@ -157,6 +157,8 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
   await page.getByRole("button", { name: /스윙/i }).click();
   await page.waitForTimeout(1000);
 
+
+
   // 2-5. '수동 갱신' 버튼 클릭
   const refreshButton = page.getByRole("button", { name: "수동 갱신" });
   await expect(refreshButton).toBeVisible();
@@ -164,11 +166,11 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
 
   // 2-6. 토스트 알림 검증 (우측 하단에 뜨는지)
   await expect(page.getByText(/백그라운드에서 시작/)).toBeVisible({ timeout: 5000 });
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(4000); // 3초 setTimeout + 약간의 여유
 
   // 2-7. 스윙 예측 결과물 (마이크로소프트, 애플) 렌더링 확인
-  await expect(page.getByText("MSFT")).toBeVisible();
-  await expect(page.getByText("AAPL")).toBeVisible();
+  await expect(page.getByText("MSFT")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText("AAPL")).toBeVisible({ timeout: 10000 });
 
   // 여운을 위한 마지막 대기
   await page.waitForTimeout(2000);

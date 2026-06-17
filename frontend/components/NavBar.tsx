@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 
+import useSWR from "swr";
 import { cn } from "@/lib/utils";
-import { authAPI, botAPI } from "@/lib/api";
+import { authAPI, botAPI, fetcher } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { useTimezone } from "@/store/timezoneStore";
 import { toast } from "sonner";
@@ -20,53 +21,32 @@ const navItems = [
 export function NavBar() {
   const pathname = usePathname();
   const router = useRouter();
-  const [tradeMode, setTradeMode] = useState("VIRTUAL");
-  const [isBotRunning, setIsBotRunning] = useState(false);
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isTimezoneMenuOpen, setIsTimezoneMenuOpen] = useState(false);
   const { accessToken, username, role, clearAuth } = useAuthStore();
   const { selectedTimezone, timezoneOptions, setTimezone } = useTimezone();
 
+  const { data: statusData, mutate } = useSWR(
+    accessToken ? '/bot/status' : null,
+    fetcher,
+    { refreshInterval: 15000 }
+  );
 
-  const fetchStatus = useCallback(async () => {
-    // 토큰이 있을 때만 API 호출
-    if (!accessToken) {
-      return;
-    }
-    try {
-      const res = await botAPI.getStatus();
-      setTradeMode(res.data.trade_mode);
-      setIsBotRunning(res.data.is_running);
-    } catch {
-      // Silently fail in navbar background fetches
-    }
-
-  }, [accessToken]);
-
-  useEffect(() => {
-    const initFetch = async () => {
-      await fetchStatus();
-    };
-    initFetch();
-
-    const interval = setInterval(fetchStatus, 8000); // 8초 주기로 전역 상태 동기화
-    return () => clearInterval(interval);
-  }, [fetchStatus]);
+  const tradeMode = statusData?.trade_mode || "VIRTUAL";
+  const isBotRunning = statusData?.is_running || false;
 
   const handleToggleBot = async () => {
     setIsTogglingBot(true);
     try {
       if (isBotRunning) {
         await botAPI.stop();
-        setIsBotRunning(false);
         toast.success("자율 트레이딩 자동매매 루프를 정지했습니다.");
       } else {
         await botAPI.start();
-        setIsBotRunning(true);
         toast.success("자율 트레이딩 자동매매 루프를 가동했습니다.");
       }
-      await fetchStatus();
+      mutate();
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : "봇 제어에 실패했습니다.";
       toast.error(errMsg);

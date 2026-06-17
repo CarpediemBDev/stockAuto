@@ -1,6 +1,7 @@
 import os
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import QueuePool
 
 # app/core/database.py의 위치를 기준으로 backend 루트 디렉터리에 있는 stockauto.db 경로를 절대 경로로 도출합니다.
 core_dir = os.path.dirname(os.path.abspath(__file__))
@@ -15,12 +16,18 @@ def set_sqlite_pragma(dbapi_connection, _connection_record):
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA journal_mode=WAL") # WAL 모드 추가 (동시성 향상)
     finally:
         cursor.close()
 
 
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    SQLALCHEMY_DATABASE_URL, 
+    connect_args={"check_same_thread": False, "timeout": 15},
+    poolclass=QueuePool,
+    pool_size=50,
+    max_overflow=100,
+    pool_timeout=60
 )
 event.listen(engine, "connect", set_sqlite_pragma)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

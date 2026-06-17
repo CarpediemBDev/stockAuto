@@ -3,8 +3,9 @@
 import React, { useState, useCallback } from 'react';
 import { Compass, ShieldCheck, Flame, Layers, TrendingUp, TrendingDown, HelpCircle, Activity, RefreshCw } from 'lucide-react';
 
-import { scannerAPI, isCancel } from '@/lib/api';
-import { usePolling } from '@/hooks/usePolling';
+import { scannerAPI } from '@/lib/api';
+import useSWR from 'swr';
+import { fetcher } from '@/lib/api';
 import { useTimezone } from '@/store/timezoneStore';
 import { toast } from 'sonner';
 import { cn, reportHandledError } from '@/lib/utils';
@@ -33,57 +34,33 @@ interface SwingPredictionResponse {
 }
 
 export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingPredictorCardProps) {
-  const [candidates, setCandidates] = useState<SwingCandidate[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: swrData, isLoading: swrLoading, mutate: mutateSwing } = useSWR('/scanner/swing-predict', fetcher, { refreshInterval: 15000 });
+  const payload: SwingPredictionResponse = swrData || { candidates: [], sync_status: "empty", updated_at: null };
+  const candidates = payload.candidates;
+  const syncStatus = payload.sync_status;
+  const updatedAt = payload.updated_at;
+
   const [refreshing, setRefreshing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<SwingPredictionResponse["sync_status"]>("empty");
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const { selectedTimezone } = useTimezone();
+  const loading = swrLoading;
 
-  const applySwingPrediction = useCallback((payload: SwingPredictionResponse) => {
-    setCandidates(payload.candidates);
-    setSyncStatus(payload.sync_status);
-    setUpdatedAt(payload.updated_at);
-  }, []);
-
-  const refreshSwingCandidates = useCallback(async (signal?: AbortSignal) => {
+  const refreshSwingCandidates = useCallback(async () => {
     setRefreshing(true);
     try {
-      const res = await scannerAPI.refreshSwingPredict({ signal });
-      applySwingPrediction(res.data);
+      await scannerAPI.refreshSwingPredict();
       toast.success("스윙 갱신이 백그라운드에서 시작되었습니다. 잠시 후 자동 갱신됩니다.");
+      // API가 백그라운드 태스크 시작을 알리고 너무 빨리 종료되므로,
+      // 유저가 클릭 피드백을 눈으로 볼 수 있도록 3초 후 데이터 리프레시
+      setTimeout(async () => {
+        await mutateSwing();
+        setRefreshing(false);
+      }, 3000);
     } catch (error) {
-      if (isCancel(error)) return;
       const msg = reportHandledError('Failed to refresh swing predictions', error);
-      setSyncStatus('failed');
       toast.error(`스윙 예측 수동 갱신 실패: ${msg}`);
       setRefreshing(false);
-      setLoading(false);
-    } finally {
-      // API가 백그라운드 태스크 시작을 알리고 너무 빨리 종료되므로,
-      // 유저가 클릭 피드백을 눈으로 볼 수 있도록 최소 3초간 스피너 유지
-      setTimeout(() => {
-        setRefreshing(false);
-        setLoading(false);
-      }, 3000);
     }
-  }, [applySwingPrediction]);
-
-  const fetchSwingCandidates = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await scannerAPI.getSwingPredict({ signal });
-      applySwingPrediction(res.data);
-    } catch (error) {
-      if (isCancel(error)) return;
-      const msg = reportHandledError('Failed to fetch swing predictions', error);
-      toast.error(`스윙 예측 데이터 수집 실패: ${msg}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [applySwingPrediction]);
-
-  // 일봉 스윙 분석은 캐시 조회 중심으로 60초 주기 폴링 수행
-  usePolling(fetchSwingCandidates, 60000);
+  }, [mutateSwing]);
 
   if (loading) {
     return (

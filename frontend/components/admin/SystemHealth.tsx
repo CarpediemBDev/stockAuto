@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { Terminal, Clock, Loader2, Server } from 'lucide-react';
-import { adminAPI, reportAPI, isCancel } from '@/lib/api';
-import { usePolling } from '@/hooks/usePolling';
+import { reportAPI } from '@/lib/api';
+import useSWR from 'swr';
+import { fetcher } from '@/lib/api';
 import { toast } from "sonner";
 import { cn, reportHandledError } from '@/lib/utils';
 import { useTimezone } from '@/store/timezoneStore';
@@ -16,8 +17,10 @@ interface ActionLog {
 }
 
 export function SystemHealth() {
-  const [logs, setLogs] = useState<ActionLog[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: swrData, isLoading } = useSWR('/admin/system-logs', fetcher, { refreshInterval: 15000 });
+  const logs: ActionLog[] = Array.isArray(swrData) ? swrData : (swrData?.data || []);
+  const loading = isLoading;
+
   const [isReportSending, setIsReportSending] = useState(false);
   const [isGlobalReportSending, setIsGlobalReportSending] = useState(false);
   const { selectedTimezone } = useTimezone();
@@ -47,21 +50,6 @@ export function SystemHealth() {
       setIsGlobalReportSending(false);
     }
   };
-
-  const fetchLogs = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await adminAPI.getSystemLogs({ signal });
-      setLogs(res.data);
-    } catch (error) {
-      if (isCancel(error)) return;
-      const msg = reportHandledError('Failed to fetch system logs', error);
-      toast.error(`시스템 로그 갱신 실패: ${msg}`);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  usePolling(fetchLogs, 5000);
 
   const getLevelColor = (level: string) => {
     switch (level) {

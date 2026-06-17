@@ -1,11 +1,10 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useCallback } from "react";
 import { Wallet, TrendingUp, DollarSign, PieChart, ShieldAlert, Zap, Crown, Activity } from "lucide-react";
-import { cn, reportHandledError } from "@/lib/utils";
-import { accountAPI, isCancel } from "@/lib/api";
-import { usePolling } from "@/hooks/usePolling";
-import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import useSWR from "swr";
+import { fetcher } from "@/lib/api";
 
 interface WalletSlot {
   cash: number;
@@ -35,23 +34,9 @@ export function AccountBalance({
   displayCurrency?: "KRW" | "USD";
   onTotalAssetClick?: () => void;
 }) {
-  const [balance, setBalance] = useState<BalanceData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchBalance = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await accountAPI.getBalance({ signal });
-      setBalance(res.data);
-      setError(null);
-    } catch (err) {
-      if (isCancel(err)) return;
-      const msg = reportHandledError("Failed to fetch account balance", err);
-      setError(msg);
-      toast.error(`계좌 정보 갱신 실패: ${msg}`);
-    }
-  }, []);
-
-  usePolling(fetchBalance, 10000);
+  const { data: balanceData, error: swrError } = useSWR('/account/balance', fetcher, { refreshInterval: 15000 });
+  const balance: BalanceData | null = balanceData || null;
+  const error = swrError ? (swrError.message || "Failed to fetch account balance") : null;
 
   const formatMoney = useCallback((amount: number) => {
     if (!balance) return "";

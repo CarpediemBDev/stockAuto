@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React from 'react';
 import { TrendingUp, TrendingDown, DollarSign, Activity } from 'lucide-react';
-import { marketAPI, isCancel } from '@/lib/api';
-import { reportHandledError } from '@/lib/utils';
-import { toast } from "sonner";
+import useSWR from 'swr';
+import { fetcher } from '@/lib/api';
 
 interface MarketData {
   symbol: string;
@@ -21,35 +20,11 @@ interface MarketOverview {
 }
 
 const MarketHeader = () => {
-  const [data, setData] = useState<MarketOverview | null>(null);
+  const { data: marketData, isLoading } = useSWR('/market/overview', fetcher, { refreshInterval: 15000 });
+  const data: MarketOverview | null = marketData || null;
 
-  const fetchMarketData = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await marketAPI.getOverview({ signal });
-      setData(res.data);
-    } catch (error) {
-      if (isCancel(error)) return;
-      const msg = reportHandledError('Failed to fetch market overview', error);
-      toast.error(`시장 지표 갱신 실패: ${msg}`);
-    }
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    
-    const loadInitialData = async () => {
-      await fetchMarketData(controller.signal);
-    };
-    loadInitialData();
-
-    const interval = setInterval(() => fetchMarketData(controller.signal), 60000); 
-    return () => {
-      clearInterval(interval);
-      controller.abort();
-    };
-  }, [fetchMarketData]);
-
-  if (!data) return <div className="h-14 bg-[#0f172a] border-b border-slate-800 animate-pulse"></div>;
+  if (isLoading && !data) return <div className="h-14 bg-[#0f172a] border-b border-slate-800 animate-pulse"></div>;
+  if (!data) return <div className="h-14 bg-[#0f172a] border-b border-slate-800"></div>;
   const marketCondition = data.market_condition ?? data.sentiment;
 
   const renderValue = (item: MarketData | null, label: string, icon: React.ReactNode) => {

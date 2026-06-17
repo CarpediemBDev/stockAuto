@@ -27,8 +27,8 @@ def test_local_launcher_scopes_reload_and_keeps_current_python(monkeypatch):
     )
     assert captured["executable"] == sys.executable
     assert captured["app"] == "app.main:app"
-    assert captured["options"]["reload"] is True
-    assert captured["options"]["reload_dirs"] == [expected_app_dir]
+    assert captured["options"]["reload"] is False
+    assert captured["options"]["reload_dirs"] is None
     assert captured["options"]["env_file"] == ".env.local"
 
 

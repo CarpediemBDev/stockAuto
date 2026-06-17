@@ -469,124 +469,12 @@ def list_users(
     users = db.query(User).all()
     result = []
 
-    from app.bot.fx_cache import FXRateCache
-    exchange_rate = FXRateCache.get_rate()
-
-    # 💡 [성능 최적화] ThreadPoolExecutor를 사용한 100% 병렬 증권사 API 통신
-    balances_cache = {}
-    from app.bot.broker_factory import get_broker_client
-    
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_user = {}
-        for user in users:
-            settings = user.settings
-            if settings:
-                is_simulated = settings.trade_mode == "SIMULATED"
-                has_verified_cred = False
-                if not is_simulated and settings.broker_provider:
-                    for cred in settings.credentials:
-                        if cred.broker_name == settings.broker_provider and cred.verification_status == "verified":
-                            has_verified_cred = True
-                            break
-                if is_simulated or has_verified_cred:
-                    broker = get_broker_client(settings)
-                    future = executor.submit(broker.get_account_balance)
-                    future_to_user[future] = user.id
-        
-        for future in as_completed(future_to_user):
-            user_id = future_to_user[future]
-            try:
-                balances_cache[user_id] = future.result()
-            except Exception as e:
-                logger.warning(
-                    "[Admin User List] Failed to fetch balance for user %s: %s",
-                    user_id,
-                    e,
-                )
-                balances_cache[user_id] = e
+    from app.translations.translator import Translator
 
     for user in users:
         settings = user.settings
 
         profit_rate = 0.0
-        balance_loaded = False
-        if settings:
-            try:
-                is_simulated = settings.trade_mode == "SIMULATED"
-                has_verified_cred = False
-
-                if not is_simulated and settings.broker_provider:
-                    for cred in settings.credentials:
-                        if cred.broker_name == settings.broker_provider and cred.verification_status == "verified":
-                            has_verified_cred = True
-                            break
-
-                if is_simulated or has_verified_cred:
-                    balance = balances_cache.get(user.id)
-                    if isinstance(balance, Exception):
-                        raise balance
-                    
-                    if not isinstance(balance, dict):
-                        raise ValueError("증권사 잔고 응답 형식이 올바르지 않습니다.")
-
-                    total_asset = balance.get("total_asset")
-                    if total_asset is None or not math.isfinite(float(total_asset)):
-                        raise ValueError("증권사 잔고 응답에 유효한 총자산이 없습니다.")
-
-                    profit_rate = float(balance.get("profit_rate", 0.0))
-                    if not math.isfinite(profit_rate):
-                        raise ValueError("증권사 잔고 응답에 유효한 수익률이 없습니다.")
-                    balance_loaded = True
-                    if total_asset is not None:
-                        captured_at = utc_now_aware()
-                        latest_snapshot = (
-                            db.query(AccountEquitySnapshot)
-                            .filter(
-                                AccountEquitySnapshot.user_id == user.id,
-                                AccountEquitySnapshot.trade_mode == settings.trade_mode,
-                            )
-                            .order_by(AccountEquitySnapshot.captured_at.desc())
-                            .first()
-                        )
-                        should_record = (
-                            latest_snapshot is None
-                            or (
-                                captured_at - latest_snapshot.captured_at
-                            ).total_seconds() >= EQUITY_SNAPSHOT_INTERVAL_SECONDS
-                        )
-                        if should_record:
-                            db.add(AccountEquitySnapshot(
-                                user_id=user.id,
-                                total_asset=float(total_asset),
-                                cash_balance=balance.get("cash_balance"),
-                                stock_balance=balance.get("stock_balance"),
-                                profit_rate=profit_rate,
-                                fx_rate=balance.get("fx_rate", exchange_rate),
-                                trade_mode=settings.trade_mode,
-                                captured_at=captured_at,
-                            ))
-                            db.flush()
-                            expired_snapshots = (
-                                db.query(AccountEquitySnapshot)
-                                .filter(
-                                    AccountEquitySnapshot.user_id == user.id,
-                                    AccountEquitySnapshot.trade_mode == settings.trade_mode,
-                                )
-                                .order_by(AccountEquitySnapshot.captured_at.desc())
-                                .offset(EQUITY_SNAPSHOT_RETENTION_LIMIT)
-                                .all()
-                            )
-                            for expired_snapshot in expired_snapshots:
-                                db.delete(expired_snapshot)
-            except Exception as e:
-                logger.warning(
-                    "[Admin User List] Failed to fetch/process balance for user %s: %s",
-                    user.username,
-                    e,
-                )
-                profit_rate = 0.0
-
-        from app.translations.translator import Translator
         strategy_type = settings.strategy_type if settings else "regime_switching"
         strategy_name = Translator.translate_strategy(strategy_type, "ko")
 
@@ -597,8 +485,10 @@ def list_users(
             ),
         ).order_by(AccountEquitySnapshot.captured_at.desc()).limit(500).all()
         snapshots.reverse()
-        if not balance_loaded and snapshots and snapshots[-1].profit_rate is not None:
+        
+        if snapshots and snapshots[-1].profit_rate is not None:
             profit_rate = snapshots[-1].profit_rate
+            
         equity_curve = [
             {
                 "timestamp": snapshot.captured_at.isoformat(),
@@ -625,11 +515,6 @@ def list_users(
                 "equity_curve": equity_curve,
             }
         )
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        logger.exception("[Admin User List] Failed to persist account equity snapshots")
     return result
 
 @router.post("/users/{user_id}/toggle-bot")

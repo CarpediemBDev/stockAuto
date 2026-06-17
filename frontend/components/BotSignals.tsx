@@ -1,12 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Zap } from 'lucide-react';
-import { scannerAPI, accountAPI, isCancel } from '@/lib/api';
 
-import { usePolling } from '@/hooks/usePolling';
-import { toast } from "sonner";
-import { reportHandledError } from '@/lib/utils';
+import useSWR from 'swr';
+import { fetcher } from '@/lib/api';
 
 interface Signal {
   ticker: string;
@@ -24,32 +22,16 @@ interface BotSignalsProps {
 }
 
 const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
-  const [signals, setSignals] = useState<Signal[]>([]);
-  const [radarTickers, setRadarTickers] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: signalsData, isLoading: isLoadingSignals } = useSWR('/scanner/latest', fetcher, { refreshInterval: 15000 });
+  const { data: balanceData, isLoading: isLoadingBalance } = useSWR('/account/balance', fetcher, { refreshInterval: 15000 });
 
-  const fetchSignals = React.useCallback(async (signal?: AbortSignal) => {
-    try {
-      // 1. 최신 감지 시그널 조회
-      const res = await scannerAPI.getLatest({ signal });
-      const marketSignals = res.data.filter((s: Signal) => !s.source || s.source.includes("MARKET"));
-      setSignals(marketSignals);
+  const signals = React.useMemo(() => {
+    if (!signalsData || !Array.isArray(signalsData)) return [];
+    return signalsData.filter((s: Signal) => !s.source || s.source.includes("MARKET"));
+  }, [signalsData]);
 
-      // 2. 실시간 돌파 레이더 종목 조회
-      const resBalance = await accountAPI.getBalance({ signal });
-      if (resBalance.data?.focused_radar_tickers) {
-        setRadarTickers(resBalance.data.focused_radar_tickers);
-      }
-    } catch (error) {
-      if (isCancel(error)) return;
-      const msg = reportHandledError('Failed to fetch bot signals', error);
-      toast.error(`시그널 갱신 실패: ${msg}`);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  usePolling(fetchSignals, 30000);
+  const radarTickers: string[] = balanceData?.focused_radar_tickers || [];
+  const loading = isLoadingSignals || isLoadingBalance;
 
   if (loading) return <div className="h-64 bg-slate-900/50 rounded-2xl animate-pulse"></div>;
 

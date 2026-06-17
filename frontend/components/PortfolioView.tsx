@@ -1,14 +1,13 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import {
-  Target, ArrowUpRight, ArrowDownRight, ShieldAlert, Info,
-  TrendingUp, TrendingDown, Newspaper, MessageSquare, ExternalLink, X
+  Target, MessageSquare, ExternalLink, X,
+  TrendingUp, TrendingDown, Newspaper, ArrowUpRight, ArrowDownRight, Info, ShieldAlert
 } from 'lucide-react';
-import { accountAPI, scannerAPI, isCancel } from '@/lib/api';
-import { usePolling } from '@/hooks/usePolling';
-import { toast } from "sonner";
-import { cn, reportHandledError } from '@/lib/utils';
+import useSWR from 'swr';
+import { fetcher } from '@/lib/api';
+import { cn } from '@/lib/utils';
 
 interface Holding {
   id: number;
@@ -157,32 +156,17 @@ function NewsModal({
 }
 
 const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | "USD" }) => {
-  const [holdings, setHoldings] = useState<Holding[]>([]);
-  const [loading, setLoading] = useState(true);
-  // 티커 → 뉴스 정보 맵 (스캐너 결과에서 매칭)
-  const [newsMap, setNewsMap] = useState<Record<string, NewsInfo>>({});
-  // 뉴스 모달 대상
   const [activeNewsItem, setActiveNewsItem] = useState<{ ticker: string; name: string; news: NewsInfo } | null>(null);
 
-  const fetchHoldings = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await accountAPI.getHoldings({ signal });
-      setHoldings(res.data);
-    } catch (error) {
-      if (isCancel(error)) return;
-      const msg = reportHandledError('Failed to fetch holdings', error);
-      toast.error(`포트폴리오 갱신 실패: ${msg}`);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data: holdingsData, isLoading } = useSWR('/account/holdings', fetcher, { refreshInterval: 15000 });
+  const holdings: Holding[] = holdingsData || [];
 
-  // 스캐너 최신 결과에서 뉴스 데이터를 티커 기준으로 수집
-  const fetchNewsFromScanner = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await scannerAPI.getLatest({ signal });
-      const map: Record<string, NewsInfo> = {};
-      for (const item of res.data) {
+  const { data: scannerData } = useSWR('/scanner/latest', fetcher, { refreshInterval: 60000 });
+
+  const newsMap = React.useMemo(() => {
+    const map: Record<string, NewsInfo> = {};
+    if (scannerData && Array.isArray(scannerData)) {
+      for (const item of scannerData) {
         if (item.news_summary && item.news_sentiment) {
           map[item.ticker] = {
             sentiment: item.news_sentiment,
@@ -192,17 +176,11 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
           };
         }
       }
-      setNewsMap(map);
-    } catch (error) {
-      if (isCancel(error)) return;
-      // 뉴스 매핑 실패는 무시 (포트폴리오 핵심 기능이 아님)
     }
-  }, []);
+    return map;
+  }, [scannerData]);
 
-  usePolling(fetchHoldings, 30000);
-  usePolling(fetchNewsFromScanner, 60000); // 뉴스는 1분 주기
-
-  if (loading) return <div className="text-slate-500 text-sm p-8 text-center animate-pulse">Loading portfolio...</div>;
+  if (isLoading) return <div className="text-slate-500 text-sm p-8 text-center animate-pulse">Loading portfolio...</div>;
 
   if (holdings.length === 0) {
     return (

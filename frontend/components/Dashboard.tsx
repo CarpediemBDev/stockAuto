@@ -1,52 +1,25 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { TradeLogs, TradeLog } from "./TradeLogs";
+import { useState } from "react";
+import { TradeLogs } from "./TradeLogs";
 import { AccountBalance } from "./AccountBalance";
 import PortfolioView from "./PortfolioView";
 import { AssetTrendChart } from "./AssetTrendChart";
 import { LiveTradeTicker } from "./LiveTradeTicker";
 
-import { botAPI, tradeAPI, isCancel } from "@/lib/api";
-import { usePolling } from "@/hooks/usePolling";
-import { reportHandledError } from "@/lib/utils";
-import { toast } from "sonner";
+import useSWR from "swr";
+import { fetcher } from "@/lib/api";
 
 export function Dashboard() {
-  const [isBotRunning, setIsBotRunning] = useState(false);
-  const [isReal, setIsReal] = useState(false);
-  const [logs, setLogs] = useState<TradeLog[]>([]);
+  const { data: statusData } = useSWR('/bot/status', fetcher, { refreshInterval: 15000 });
+  const { data: logsData } = useSWR('/trades/logs', fetcher, { refreshInterval: 15000 });
+
+  const isBotRunning = statusData?.is_running || false;
+  const isReal = statusData?.is_real || false;
+  const logs = logsData || [];
+
   const [isChartOpen, setIsChartOpen] = useState(false);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
-
-  const fetchStatus = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await botAPI.getStatus({ signal });
-      setIsBotRunning(res.data.is_running);
-      setIsReal(res.data.is_real);
-    } catch (error) {
-      if (isCancel(error)) return;
-      const msg = reportHandledError("Failed to fetch bot status", error);
-      toast.error(`봇 상태 조회 실패: ${msg}`);
-    }
-  }, []);
-
-  const fetchLogs = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const res = await tradeAPI.getLogs({ signal });
-      setLogs(res.data);
-    } catch (error) {
-      if (isCancel(error)) return;
-      const msg = reportHandledError("Failed to fetch logs", error);
-      toast.error(`로그 조회 실패: ${msg}`);
-    }
-  }, []);
-
-  const fetchData = useCallback(async (signal: AbortSignal) => {
-    await Promise.all([fetchStatus(signal), fetchLogs(signal)]);
-  }, [fetchStatus, fetchLogs]);
-
-  usePolling(fetchData, 5000);
 
   const [displayCurrency, setDisplayCurrency] = useState<"KRW" | "USD">("KRW");
 

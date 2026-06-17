@@ -1,7 +1,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.bot.broker_factory import get_broker_client
 from app.core.database import SessionLocal
-from app.core.models import TradeLog, Holding, ActionLog, UserSettings, WatchList
+from app.core.models import TradeLog, Holding, ActionLog, UserSettings, WatchList, User, AccountEquitySnapshot
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
@@ -34,7 +34,8 @@ from app.bot.order_reconciler import (
 )
 from app.bot.order_discovery import discover_orphan_orders_once
 import time
-
+import math
+from app.core.models import utc_now_aware
 # 💡 네트워크 일시 장애에 따른 텔레그램 경고 도배 방지용 시간 기록 저장소
 _user_network_alert_sent = {}
 
@@ -1281,6 +1282,96 @@ def reconcile_open_orders_wrapper():
 def discover_orphan_orders_wrapper():
     discover_orphan_orders_once()
 
+async def admin_balance_cache_sync():
+    """
+    1분 단위로 모든 관리대상 유저의 잔고를 백그라운드에서 조회하여 
+    AccountEquitySnapshot을 갱신합니다. 
+    """
+    db = SessionLocal()
+    try:
+        users = db.query(User).all()
+        exchange_rate = FXRateCache.get_rate()
+        
+        for user in users:
+            settings = user.settings
+            if not settings:
+                continue
+            is_simulated = settings.trade_mode == "SIMULATED"
+            has_verified_cred = False
+            if not is_simulated and settings.broker_provider:
+                for cred in settings.credentials:
+                    if cred.broker_name == settings.broker_provider and cred.verification_status == "verified":
+                        has_verified_cred = True
+                        break
+            
+            if is_simulated or has_verified_cred:
+                broker = get_broker_client(settings)
+                try:
+                    balance = await safe_broker_call(broker.get_account_balance)
+                    if not isinstance(balance, dict):
+                        continue
+                    total_asset = balance.get("total_asset")
+                    if total_asset is None or not math.isfinite(float(total_asset)):
+                        continue
+                    profit_rate = float(balance.get("profit_rate", 0.0))
+                    
+                    captured_at = utc_now_aware()
+                    latest_snapshot = (
+                        db.query(AccountEquitySnapshot)
+                        .filter(
+                            AccountEquitySnapshot.user_id == user.id,
+                            AccountEquitySnapshot.trade_mode == settings.trade_mode,
+                        )
+                        .order_by(AccountEquitySnapshot.captured_at.desc())
+                        .first()
+                    )
+                    should_record = (
+                        latest_snapshot is None
+                        or (captured_at - latest_snapshot.captured_at).total_seconds() >= 60
+                    )
+                    if should_record:
+                        db.add(AccountEquitySnapshot(
+                            user_id=user.id,
+                            total_asset=float(total_asset),
+                            cash_balance=balance.get("cash_balance"),
+                            stock_balance=balance.get("stock_balance"),
+                            profit_rate=profit_rate,
+                            fx_rate=balance.get("fx_rate", exchange_rate),
+                            trade_mode=settings.trade_mode,
+                            captured_at=captured_at,
+                        ))
+                        db.flush()
+                        
+                        expired_snapshots = (
+                            db.query(AccountEquitySnapshot)
+                            .filter(
+                                AccountEquitySnapshot.user_id == user.id,
+                                AccountEquitySnapshot.trade_mode == settings.trade_mode,
+                            )
+                            .order_by(AccountEquitySnapshot.captured_at.desc())
+                            .offset(500)
+                            .all()
+                        )
+                        for expired_snapshot in expired_snapshots:
+                            db.delete(expired_snapshot)
+                        db.commit()
+                except Exception as e:
+                    logger.warning(f"[Admin Cache Sync] Error for user {user.username}: {e}")
+                    db.rollback()
+    except Exception as e:
+        logger.exception("[Admin Cache Sync] CRITICAL ERROR")
+    finally:
+        db.close()
+
+def admin_balance_cache_wrapper():
+    try:
+        asyncio.run(admin_balance_cache_sync())
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(admin_balance_cache_sync())
+        else:
+            loop.run_until_complete(admin_balance_cache_sync())
 
 def start_scheduler():
     if not scheduler.running:
@@ -1315,6 +1406,8 @@ def start_scheduler():
         )
         # ⑦ 텔레그램 일일 리포트 발송: 매일 한국시간 17:10 (미국장 마감 직후)
         scheduler.add_job(send_daily_report_to_all_users_sync, 'cron', hour=17, minute=10, id='daily_telegram_report_job')
+        # ⑧ 관리자용 1분 단위 모든 유저 잔고 스냅샷 캐싱: 1분 주기
+        scheduler.add_job(admin_balance_cache_wrapper, 'interval', minutes=1, id='admin_balance_cache_job', next_run_time=datetime.now() + timedelta(seconds=10))
         scheduler.start()
         print("[Scheduler] APScheduler Background Trading Engine Started.")
         logger.info("Background scheduler started (Multi-tenant 3-Mode Unified Engine).")

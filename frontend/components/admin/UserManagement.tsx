@@ -14,7 +14,9 @@ import {
   Shield,
   Trophy,
   TrendingUp,
-  TrendingDown
+  TrendingDown,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -28,10 +30,12 @@ import {
   Legend,
   type TooltipValueType,
 } from 'recharts';
-import api from '@/lib/api';
+import useSWR from 'swr';
+import api, { fetcher } from '@/lib/api';
 import { toast } from "sonner";
 import { getErrorMessage } from '@/lib/utils';
 
+// ... (기존 인터페이스들 유지)
 interface BrokerCredentialMeta {
   broker_name: string;
   has_credentials: boolean;
@@ -65,46 +69,22 @@ interface ManagedUser {
 }
 
 export function UserManagement() {
-  const [usersList, setUsersList] = useState<ManagedUser[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [actionUserId, setActionUserId] = useState<number | null>(null);
-  const [selectedUser, setSelectedUser] = useState<ManagedUser | null>(null);
-  const [sortByProfit, setSortByProfit] = useState<boolean>(true); // 기본적으로 수익률 기준 정렬 활성화
-  const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
+  const { data: swrData, isLoading, mutate } = useSWR('/admin/users', fetcher, { refreshInterval: 15000 });
+  const usersList: ManagedUser[] = Array.isArray(swrData) ? swrData : (swrData?.data || []);
+  const loading = isLoading;
 
-  useEffect(() => {
-    let active = true;
-    api.get("/admin/users", { timeout: 60000 })
-      .then((res) => {
-        if (active) {
-          const data = Array.isArray(res.data) ? res.data : (res.data?.data || []);
-          setUsersList(data);
-          // Sync drawer data if open
-          setSelectedUser((prev) => {
-            if (!prev) return null;
-            const updated = data.find((u: ManagedUser) => u.id === prev.id);
-            return updated || null;
-          });
-          setLoading(false);
-        }
-      })
-      .catch((error) => {
-        if (active) {
-          toast.error(`사용자 목록을 불러오는 데 실패했습니다: ${getErrorMessage(error)}`);
-          setUsersList([]);
-          setLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [refreshTrigger]);
+  const [actionUserId, setActionUserId] = useState<number | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const selectedUser = usersList.find(u => u.id === selectedUserId) || null;
+  const [sortByProfit, setSortByProfit] = useState<boolean>(true); // 기본적으로 수익률 기준 정렬 활성화
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const itemsPerPage = 10;
 
   // Esc key to close drawer
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setSelectedUser(null);
+        setSelectedUserId(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -116,7 +96,7 @@ export function UserManagement() {
     try {
       const res = await api.post(`/admin/users/${userId}/toggle-bot`);
       toast.success(res.data.is_running ? "봇이 성공적으로 가동되었습니다." : "봇이 일시정지 되었습니다.");
-      setRefreshTrigger(prev => prev + 1);
+      mutate();
     } catch (error) {
       toast.error(`봇 상태 변경에 실패했습니다: ${getErrorMessage(error)}`);
     } finally {
@@ -132,8 +112,8 @@ export function UserManagement() {
     try {
       await api.post(`/admin/users/${userId}/delete`);
       toast.success(`[${username}] 계정이 안전하게 영구 삭제되었습니다.`);
-      setSelectedUser(null); // Close drawer on success
-      setRefreshTrigger(prev => prev + 1);
+      setSelectedUserId(null); // Close drawer on success
+      mutate();
     } catch (error) {
       toast.error(`사용자 삭제에 실패했습니다: ${getErrorMessage(error)}`);
     } finally {
@@ -272,6 +252,9 @@ export function UserManagement() {
     return a.id - b.id;
   }) : [];
 
+  const totalPages = Math.ceil(sortedUsers.length / itemsPerPage);
+  const paginatedUsers = sortedUsers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   const chartData = getChartData();
   const chartUsers = usersList.filter(
     user => user.equity_curve && user.equity_curve.length > 0
@@ -349,7 +332,10 @@ export function UserManagement() {
           <div className="flex items-center gap-3">
             {/* 랭킹 정렬 토글 스위치 */}
             <button
-              onClick={() => setSortByProfit(!sortByProfit)}
+              onClick={() => {
+                setSortByProfit(!sortByProfit);
+                setCurrentPage(1);
+              }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all duration-200 cursor-pointer ${
                 sortByProfit
                   ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
@@ -391,12 +377,12 @@ export function UserManagement() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/40 text-[15px]">
-                {sortedUsers.map((user, index) => {
-                  const rank = index + 1;
+                {paginatedUsers.map((user, index) => {
+                  const rank = (currentPage - 1) * itemsPerPage + index + 1;
                   return (
                     <tr
                       key={user.id}
-                      onClick={() => setSelectedUser(user)}
+                      onClick={() => setSelectedUserId(user.id)}
                       className={`transition-colors duration-150 cursor-pointer hover:bg-zinc-800/20 ${selectedUser?.id === user.id ? 'bg-zinc-800/35' : ''}`}
                     >
                       <td className="px-6 py-4 text-center">
@@ -477,6 +463,47 @@ export function UserManagement() {
             </table>
           )}
         </div>
+
+        {/* Pagination Controls */}
+        {!loading && sortedUsers.length > 0 && totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-zinc-800/60 pt-4 px-2">
+            <span className="text-xs text-zinc-500 font-semibold">
+              총 {sortedUsers.length}명 중 {(currentPage - 1) * itemsPerPage + 1}-
+              {Math.min(currentPage * itemsPerPage, sortedUsers.length)}명 표시
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="p-1.5 rounded-lg border border-zinc-700/50 text-zinc-400 hover:bg-zinc-800 hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`w-7 h-7 flex items-center justify-center rounded-lg text-xs font-bold transition-colors ${
+                      currentPage === page
+                        ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                        : 'text-zinc-500 hover:bg-zinc-800 hover:text-slate-300'
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="p-1.5 rounded-lg border border-zinc-700/50 text-zinc-400 hover:bg-zinc-800 hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <AnimatePresence>
@@ -487,8 +514,8 @@ export function UserManagement() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setSelectedUser(null)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40"
+              onClick={() => setSelectedUserId(null)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm z-40"
             />
 
             {/* Slide-over Drawer Panel */}
@@ -507,12 +534,12 @@ export function UserManagement() {
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-slate-100 font-sans">사용자 상세 프로필</h3>
-                    <p className="text-[10px] text-zinc-500 font-mono">ID: {selectedUser.id}</p>
+                    <p className="text-[10px] text-zinc-500 font-mono">ID: {selectedUser?.id}</p>
                   </div>
                 </div>
                 <button
-                  onClick={() => setSelectedUser(null)}
-                  className="p-1.5 rounded-lg text-zinc-400 hover:text-slate-100 hover:bg-zinc-800/50 transition-all duration-200"
+                  onClick={() => setSelectedUserId(null)}
+                  className="w-8 h-8 rounded-full bg-zinc-800/50 hover:bg-zinc-700/80 flex items-center justify-center text-zinc-400 hover:text-white transition-all active:scale-90"
                 >
                   <X size={18} />
                 </button>

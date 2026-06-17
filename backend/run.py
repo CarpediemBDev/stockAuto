@@ -65,6 +65,7 @@ def main():
             print(f"[Launcher] [WARNING] unknown profile '{arg}' was inputted. Proceeding with 'local'.")
             print(f"            (Profiles: {', '.join(valid_profiles)})")
             
+
     # 2. 💡 프레임워크 로드 전 OS 환경변수 최우선 주입 (스프링부트 active.profile 역할)
     os.environ["APP_ENV"] = profile
     backend_dir = os.path.dirname(os.path.abspath(__file__))
@@ -78,8 +79,8 @@ def main():
     is_local = (profile == "local")
     is_dev = (profile == "dev")
     
-    # 로컬/개발 환경인 경우에만 자동 릴로드(Auto Reload) 활성화
-    reload_enabled = is_local or is_dev
+    # 윈도우 환경 프로세스 고아 문제 방지를 위해 강제로 끕니다.
+    reload_enabled = False
     
     # SQLite DB 락 방지 및 운영 서버 안정성을 위해 prod 모드에서는 단일 워커 프로세스로 고정합니다.
     workers_count = 1

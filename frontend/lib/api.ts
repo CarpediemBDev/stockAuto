@@ -234,4 +234,6 @@ export const adminAPI = {
 
 export const isCancel = axios.isCancel;
 
+export const fetcher = (url: string) => api.get(url).then(res => res.data);
+
 export default api;

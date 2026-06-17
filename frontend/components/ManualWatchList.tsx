@@ -3,8 +3,9 @@
 import React, { useState, useCallback } from 'react';
 import { Eye, Plus, Trash2, Bot } from 'lucide-react';
 import BotSignals from '@/components/BotSignals';
-import { watchlistAPI, translationAPI, scannerAPI } from '@/lib/api';
-import { usePolling } from '@/hooks/usePolling';
+import { watchlistAPI, translationAPI } from '@/lib/api';
+import useSWR from 'swr';
+import { fetcher } from '@/lib/api';
 import { reportHandledError } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -26,30 +27,18 @@ interface ScannerSignal {
 }
 
 const ManualWatchList = () => {
-  const [items, setItems] = useState<WatchItem[]>([]);
-  const [signals, setSignals] = useState<ScannerSignal[]>([]); // 실시간 스캐너 시그널 저장
-  const [loading, setLoading] = useState(true);
+  const { data: watchData, isLoading: watchLoading, mutate: mutateWatchList } = useSWR('/watchlist', fetcher, { refreshInterval: 15000 });
+  const { data: scannerData, isLoading: scannerLoading } = useSWR('/scanner/latest', fetcher, { refreshInterval: 15000 });
+
+  const items: WatchItem[] = Array.isArray(watchData) ? watchData : (watchData?.data || []);
+  const signals: ScannerSignal[] = Array.isArray(scannerData) ? scannerData : (scannerData?.data || []);
+  const loading = watchLoading || scannerLoading;
+
   const [showAddForm, setShowAddForm] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allTranslations, setAllTranslations] = useState<TranslationItem[]>([]);
   const [activeTab, setActiveTab] = useState<'user' | 'bot'>('user');
-
-  const fetchWatchList = React.useCallback(async () => {
-    try {
-      // 관심종목과 실시간 스캔 데이터를 병렬로 로드
-      const [watchRes, scannerRes] = await Promise.all([
-        watchlistAPI.getAll(),
-        scannerAPI.getLatest()
-      ]);
-      setItems(watchRes.data);
-      setSignals(scannerRes.data || []);
-    } catch (error) {
-      reportHandledError('Failed to fetch watchlist or scanner signals', error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   const fetchTranslations = useCallback(async () => {
     try {
@@ -85,14 +74,14 @@ const ManualWatchList = () => {
       await watchlistAPI.add(tickerClean, nameClean);
       setInputValue('');
       setShowAddForm(false);
-      await fetchWatchList();
+      await mutateWatchList();
       toast.success(`${tickerClean} (${nameClean})이(가) 관심종목에 추가되었습니다.`);
     } catch (error) {
       toast.error(reportHandledError('Failed to add ticker', error));
     } finally {
       setIsSubmitting(false);
     }
-  }, [inputValue, fetchWatchList]);
+  }, [inputValue, mutateWatchList]);
 
   const handleSelectSuggestion = useCallback(async (ticker: string, nameKo: string) => {
     setIsSubmitting(true);
@@ -100,27 +89,25 @@ const ManualWatchList = () => {
       await watchlistAPI.add(ticker, nameKo);
       setInputValue('');
       setShowAddForm(false);
-      await fetchWatchList();
+      await mutateWatchList();
       toast.success(`${ticker} (${nameKo})이(가) 관심종목에 추가되었습니다.`);
     } catch (error) {
       toast.error(reportHandledError('Failed to add suggestion', error));
     } finally {
       setIsSubmitting(false);
     }
-  }, [fetchWatchList]);
+  }, [mutateWatchList]);
 
   const handleDelete = useCallback(async (id: number) => {
     try {
       await watchlistAPI.delete(id);
-      await fetchWatchList();
+      await mutateWatchList();
       toast.success("관심종목에서 성공적으로 제거되었습니다.");
     } catch (error) {
       const msg = reportHandledError('Failed to delete ticker', error);
       toast.error(`삭제 실패: ${msg}`);
     }
-  }, [fetchWatchList]);
-
-  usePolling(fetchWatchList, 30000);
+  }, [mutateWatchList]);
 
   // 실시간 필터링 Suggestions 계산
   const query = inputValue.trim().toLowerCase();

@@ -38,8 +38,6 @@ export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
     };
 
     updateTime();
-    const interval = setInterval(updateTime, 30000); // 30초마다 갱신
-    return () => clearInterval(interval);
   }, [latestLog]);
 
   if (!latestLog) {
