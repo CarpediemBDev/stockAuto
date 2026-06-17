@@ -33,7 +33,10 @@ def bootstrap_venv():
                 try:
                     p.wait()
                 except KeyboardInterrupt:
-                    p.terminate()
+                    # Windows에서는 subprocess의 terminate()가 자식 프로세스 트리를 전부 죽이지 못해 
+                    # Uvicorn 워커나 Node.js 크롤러가 좀비로 남는 문제가 발생합니다.
+                    # taskkill명령어로 프로세스 트리(/T) 전체를 강제(/F) 종료합니다.
+                    subprocess.call(['taskkill', '/F', '/T', '/PID', str(p.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     p.wait()
                 sys.exit(p.returncode)
             else:
