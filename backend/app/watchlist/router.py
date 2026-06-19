@@ -7,7 +7,6 @@ from app.scanner.data_provider import fetch_ohlcv
 import re
 
 from app.translations.translator import Translator
-from app.core.response import success_response
 from app.core.exceptions import StockAutoException
 from app.core.dependencies import get_current_user
 
@@ -31,7 +30,7 @@ def get_watchlist(
     db: Session = Depends(get_db)
 ):
     items = db.query(models.WatchList).filter(models.WatchList.user_id == current_user.id).all()
-    return success_response(data=items)
+    return items
 
 @router.post("")
 async def add_to_watchlist(
@@ -91,7 +90,7 @@ async def add_to_watchlist(
     db.add(new_item)
     db.commit()
     db.refresh(new_item)
-    return success_response(data=new_item)
+    return new_item
 
 @router.delete("/{item_id_or_ticker}")
 def delete_from_watchlist(

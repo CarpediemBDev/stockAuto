@@ -58,6 +58,12 @@ def integration_app(test_session_factory):
     return app
 
 
+def unwrap_success(response):
+    payload = response.json()
+    assert payload["code"] == "SUCCESS"
+    return payload["data"]
+
+
 def make_alembic_config(db_url: str) -> Config:
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
@@ -265,14 +271,15 @@ def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, int
         )
         assert signup_response.status_code == 201
         assert signup_response.cookies.get("refresh_token")
-        assert "refresh_token" not in signup_response.json()
-        assert signup_response.json()["role"] == "USER"
-        token = signup_response.json()["access_token"]
+        signup_payload = unwrap_success(signup_response)
+        assert "refresh_token" not in signup_payload
+        assert signup_payload["role"] == "USER"
+        token = signup_payload["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
 
         me_response = client.get("/api/v1/auth/me", headers=headers)
         assert me_response.status_code == 200
-        assert me_response.json() == {
+        assert unwrap_success(me_response) == {
             "id": 1,
             "username": "tester",
             "role": "USER",
@@ -304,8 +311,9 @@ def test_auth_and_watchlist_routes_share_isolated_test_database(monkeypatch, int
 
         refresh_response = client.post("/api/v1/auth/refresh")
         assert refresh_response.status_code == 200
-        assert refresh_response.json()["username"] == "tester"
-        assert "refresh_token" not in refresh_response.json()
+        refresh_payload = unwrap_success(refresh_response)
+        assert refresh_payload["username"] == "tester"
+        assert "refresh_token" not in refresh_payload
 
         refresh_token = signup_response.cookies.get("refresh_token")
         refresh_as_access = client.get(
@@ -383,7 +391,7 @@ def test_refresh_uses_valid_cookie_when_legacy_root_cookie_has_same_name(integra
         refresh_response = client.post("/api/v1/auth/refresh")
 
         assert refresh_response.status_code == 200
-        assert refresh_response.json()["username"] == "edge_cookie_tester"
+        assert unwrap_success(refresh_response)["username"] == "edge_cookie_tester"
         set_cookie_headers = refresh_response.headers.get_list("set-cookie")
         assert any(
             "refresh_token=" in header
@@ -400,7 +408,7 @@ def test_change_password_revokes_refresh_and_access_tokens(integration_app):
             json={"username": "password_tester", "password": "initialpassword123"},
         )
         assert signup_response.status_code == 201
-        access_token = signup_response.json()["access_token"]
+        access_token = unwrap_success(signup_response)["access_token"]
         headers = {"Authorization": f"Bearer {access_token}"}
 
         change_response = client.post(
@@ -447,7 +455,7 @@ def test_change_password_rejects_password_over_bcrypt_byte_limit(integration_app
             json={"username": "password_limit", "password": "initialpassword123"},
         )
         headers = {
-            "Authorization": f"Bearer {signup_response.json()['access_token']}",
+            "Authorization": f"Bearer {unwrap_success(signup_response)['access_token']}",
         }
 
         response = client.post(

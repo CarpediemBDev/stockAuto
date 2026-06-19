@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, BackgroundTasks
 import app.bot.scheduler as scheduler_mod
 from app.core.exceptions import StockAutoException
-from app.core.response import success_response
 from app.core.logging import logger
 from app.scanner.scanner import scan_overseas_market
 from app.core import models
@@ -31,11 +30,11 @@ async def get_latest_signals():
     signals = scheduler_mod.latest_scanned_signals
     is_scanning = getattr(scheduler_mod, "is_manual_scanning", False)
     if not signals:
-        return success_response(data={"is_scanning": is_scanning, "signals": []})
+        return {"is_scanning": is_scanning, "signals": []}
     
     # 점수 높은 순 정렬 (데이터가 있을 때만)
     result = sorted(signals, key=lambda x: x.get('signal_score', 0), reverse=True)[:10]
-    return success_response(data={"is_scanning": is_scanning, "signals": result})
+    return {"is_scanning": is_scanning, "signals": result}
 
 async def background_scan_overseas():
     """백그라운드에서 스캔을 수행하고 전역 캐시를 업데이트합니다."""
@@ -64,7 +63,7 @@ async def trigger_overseas_scan(
 ):
     """수동으로 해외 마켓 스캔을 트리거합니다. (비동기 처리)"""
     background_tasks.add_task(background_scan_overseas)
-    return success_response(message="해외 마켓 스캔이 백그라운드에서 시작되었습니다.")
+    return {"message": "해외 마켓 스캔이 백그라운드에서 시작되었습니다."}
 
 @router.get("/swing-predict")
 async def get_swing_prediction(
@@ -72,7 +71,7 @@ async def get_swing_prediction(
     db: Session = Depends(get_db)
 ):
     """캐시된 스윙 예측 후보를 즉시 반환합니다."""
-    return success_response(data=read_swing_prediction_cache(get_swing_cache_key(), db))
+    return read_swing_prediction_cache(get_swing_cache_key(), db)
 
 
 @router.post("/swing-predict/refresh")
@@ -89,7 +88,7 @@ async def refresh_swing_prediction(
             args=(cache_key,),
             daemon=True,
         ).start()
-    return success_response(
-        data=refreshing_swing_response(cache_key, db),
-        message="스윙 예측 갱신이 백그라운드에서 시작되었습니다.",
-    )
+    return {
+        "data": refreshing_swing_response(cache_key, db),
+        "message": "스윙 예측 갱신이 백그라운드에서 시작되었습니다.",
+    }

@@ -571,8 +571,7 @@ def get_discovery_stats(
     current_user: User = Depends(get_current_admin_user),
 ):
     from app.scanner.discovery import LATEST_DISCOVERY_STATS
-    from app.core.response import success_response
-    return success_response(data=LATEST_DISCOVERY_STATS)
+    return LATEST_DISCOVERY_STATS
 
 from fastapi import BackgroundTasks
 from fastapi.responses import JSONResponse

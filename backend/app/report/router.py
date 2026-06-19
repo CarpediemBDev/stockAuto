@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import User, TradeLog
 from app.core.dependencies import get_current_user, get_current_admin_user
-from app.core.response import success_response
 from sqlalchemy import asc
 
 from app.core.response import SuccessResponseRoute
@@ -22,7 +21,7 @@ def get_report_stats(current_user: User = Depends(get_current_user), db: Session
 
     total_trades = len(sell_logs)
     if total_trades == 0:
-        return success_response(data={
+        return {
             "kpi": {
                 "total_trades": 0,
                 "total_realized_pnl": 0.0,
@@ -30,7 +29,7 @@ def get_report_stats(current_user: User = Depends(get_current_user), db: Session
                 "profit_factor": 0.0
             },
             "chart_data": []
-        })
+        }
 
     total_realized_pnl = 0.0
     win_trades = 0
@@ -64,7 +63,7 @@ def get_report_stats(current_user: User = Depends(get_current_user), db: Session
     win_rate = (win_trades / total_trades) * 100.0
     profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0.0)
 
-    return success_response(data={
+    return {
         "kpi": {
             "total_trades": total_trades,
             "total_realized_pnl": round(total_realized_pnl, 2),
@@ -72,7 +71,7 @@ def get_report_stats(current_user: User = Depends(get_current_user), db: Session
             "profit_factor": round(profit_factor, 2)
         },
         "chart_data": chart_data
-    })
+    }
 
 @router.post("/trigger-manual-report")
 def trigger_manual_report(current_user: User = Depends(get_current_admin_user), db: Session = Depends(get_db)):
@@ -89,7 +88,7 @@ def trigger_manual_report(current_user: User = Depends(get_current_admin_user), 
     from app.core.telegram import send_daily_report_to_user_sync
     try:
         send_daily_report_to_user_sync(current_user.id)
-        return success_response(message="관리자 본인 계정의 텔레그램 리포트 발송 요청이 정상적으로 처리되었습니다.")
+        return {"message": "관리자 본인 계정의 텔레그램 리포트 발송 요청이 정상적으로 처리되었습니다."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"수동 결산 리포트 테스트 발송 중 장애 발생: {str(e)}")
 
@@ -105,7 +104,7 @@ def trigger_global_report(current_user: User = Depends(get_current_admin_user)):
         total = result.get("total_enabled_users", 0)
         sent = result.get("sent_count", 0)
         
-        return success_response(message=f"텔레그램 알림 활성 사용자 총 {total}명 중 {sent}명에게 리포트 발송이 완료되었습니다.")
+        return {"message": f"텔레그램 알림 활성 사용자 총 {total}명 중 {sent}명에게 리포트 발송이 완료되었습니다."}
     except Exception as e:
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"수동 전체 리포트 발송 중 장애 발생: {str(e)}")
@@ -125,6 +124,6 @@ def trigger_personal_report(current_user: User = Depends(get_current_user), db: 
     from app.core.telegram import send_daily_report_to_user_sync
     try:
         send_daily_report_to_user_sync(current_user.id)
-        return success_response(message="본인 성적표 텔레그램 리포트 발송 요청이 처리되었습니다.")
+        return {"message": "본인 성적표 텔레그램 리포트 발송 요청이 처리되었습니다."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"수동 결산 개인 리포트 발송 중 장애 발생: {str(e)}")

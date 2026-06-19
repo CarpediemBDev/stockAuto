@@ -6,7 +6,6 @@ from app.core.dependencies import get_current_user, get_current_admin_user
 from app.core.models import User
 from pydantic import BaseModel
 from app.translations.translator import Translator
-from app.core.response import success_response
 
 from app.core.response import SuccessResponseRoute
 router = APIRouter(route_class=SuccessResponseRoute)
@@ -29,7 +28,7 @@ class TranslationUpdate(BaseModel):
 def get_all_translations(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """현재 DB에 저장된 모든 한글 번역 사전 목록을 조회합니다 (ID 오름차순)."""
     items = db.query(models.StockTranslation).order_by(models.StockTranslation.id.asc()).all()
-    return success_response(data=items)
+    return items
 
 @router.post("")
 def create_or_update_translation(item: TranslationCreate, db: Session = Depends(get_db), current_admin: User = Depends(get_current_admin_user)):
@@ -49,7 +48,7 @@ def create_or_update_translation(item: TranslationCreate, db: Session = Depends(
 
     # 실시간 메모리 캐시 즉각 동기화
     Translator.update_cache_item(ticker_upper, item.name_ko.strip())
-    return success_response(message=f"Successfully saved {ticker_upper} translation.")
+    return {"message": f"Successfully saved {ticker_upper} translation."}
 
 @router.put("/{trans_id}")
 def update_translation(trans_id: int, item: TranslationUpdate, db: Session = Depends(get_db), current_admin: User = Depends(get_current_admin_user)):
@@ -67,7 +66,7 @@ def update_translation(trans_id: int, item: TranslationUpdate, db: Session = Dep
 
     # 실시간 메모리 캐시 동기화
     Translator.update_cache_item(db_item.ticker, new_name)
-    return success_response(message=f"Successfully updated {db_item.ticker} to {new_name}.")
+    return {"message": f"Successfully updated {db_item.ticker} to {new_name}."}
 
 @router.delete("/{trans_id}")
 def delete_translation(trans_id: int, db: Session = Depends(get_db), current_admin: User = Depends(get_current_admin_user)):
@@ -84,10 +83,10 @@ def delete_translation(trans_id: int, db: Session = Depends(get_db), current_adm
 
     db.delete(db_item)
     db.commit()
-    return success_response(message=f"Successfully deleted {ticker_upper} translation.")
+    return {"message": f"Successfully deleted {ticker_upper} translation."}
 
 
 @router.get("/strategies")
 def get_strategy_translations(current_user: User = Depends(get_current_user)):
     """현재 로드된 모든 전략 다국어 번역 맵을 조회합니다."""
-    return success_response(data=Translator._strategy_cache)
+    return Translator._strategy_cache

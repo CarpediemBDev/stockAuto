@@ -10,7 +10,6 @@ from app.bot.order_reconciler import (
     finalize_order_submission,
     has_unresolved_orders,
 )
-from app.core.response import success_response
 from fastapi.concurrency import run_in_threadpool
 from app.core.dependencies import get_current_user
 from app.core.models import User, Holding, TradeLog, ActionLog
@@ -125,7 +124,7 @@ async def get_balance(
             }
         balance["focused_radar_tickers"] = []
 
-    return success_response(data=balance)
+    return balance
 
 @router.get("/holdings")
 def get_holdings(
@@ -155,7 +154,7 @@ def get_holdings(
                 strategy_type,
                 "ko",
             )
-    return success_response(data=holdings)
+    return holdings
 
 @router.post("/reset-balance")
 def reset_balance(
@@ -179,7 +178,7 @@ def reset_balance(
         db.query(TradeLog).filter(TradeLog.user_id == current_user.id).delete()
         db.query(ActionLog).filter(ActionLog.user_id == current_user.id).delete()
         db.commit()
-        return success_response(message="가상 모의투자 계좌 자산 및 로그가 성공적으로 초기화되었습니다.")
+        return {"message": "가상 모의투자 계좌 자산 및 로그가 성공적으로 초기화되었습니다."}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"계좌 초기화 중 오류가 발생했습니다: {str(e)}")
@@ -195,7 +194,7 @@ async def force_liquidate(
     """
     holdings = db.query(Holding).filter(Holding.user_id == current_user.id).all()
     if not holdings:
-        return success_response(message="현재 보유 주식이 없어 청산할 주식이 없습니다.")
+        return {"message": "현재 보유 주식이 없어 청산할 주식이 없습니다."}
     if has_unresolved_orders(db, current_user.id):
         raise HTTPException(
             status_code=409,
@@ -295,19 +294,17 @@ async def force_liquidate(
                 if application.applied_qty > 0:
                     liquidated_tickers.append(h.ticker)
                 if application.is_unresolved:
-                    return success_response(
-                        message=(
+                    return {
+                        "message": (
                             f"{h.ticker} 청산 주문이 {order_intent.status} 상태입니다. "
                             "자동매매를 정지하고 주문 재조정을 계속합니다."
                         )
-                    )
+                    }
                 if not res.get("success"):
                     if was_running:
                         current_user.settings.is_running = True
                         db.commit()
-                    return success_response(
-                        message=f"{h.ticker} 청산 주문이 거부되었습니다: {res.get('message', 'Unknown error')}"
-                    )
+                    return {"message": f"{h.ticker} 청산 주문이 거부되었습니다: {res.get('message', 'Unknown error')}"}
                 continue
 
             # SIMULATED 모드는 즉시 체결 결과를 기존 방식으로 반영합니다.
@@ -354,9 +351,12 @@ async def force_liquidate(
             current_user.settings.is_running = True
         db.commit()
 
-        return success_response(
-            message=f"보유 중인 {len(liquidated_tickers)}개 종목({', '.join(liquidated_tickers)})이 모두 시장가 일괄 청산되었습니다."
-        )
+        return {
+            "message": (
+                f"보유 중인 {len(liquidated_tickers)}개 종목"
+                f"({', '.join(liquidated_tickers)})이 모두 시장가 일괄 청산되었습니다."
+            )
+        }
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"일괄 청산 과정 중 오류가 발생했습니다: {str(e)}")

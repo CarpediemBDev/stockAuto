@@ -70,7 +70,7 @@ def test_kis_force_liquidation_keeps_holdings_and_bot_paused_when_ack_is_unknown
     settings = db.query(UserSettings).filter_by(user_id=user.id).one()
     holding = db.query(Holding).filter_by(user_id=user.id).one()
 
-    assert response["code"] == "SUCCESS"
+    assert "청산 주문이 ACK_UNKNOWN 상태입니다" in response["message"]
     assert order.status == "ACK_UNKNOWN"
     assert order.source == "MANUAL_LIQUIDATION"
     assert order.resume_after_resolution is False
