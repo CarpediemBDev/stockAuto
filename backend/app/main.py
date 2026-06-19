@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    print("\n" + "="*50)
+    logger.info("=" * 50)
     logger.info("[Shutdown Step 1/3] 텔레그램 봇 폴링 통신 채널 안전 종료 중...")
     stop_telegram_bot()
 
@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
     stop_scheduler()
 
     logger.info("[Shutdown Step 3/3] FastAPI 서버 자원(DB 커넥션 등) 해제 완료 대기...")
-    print("="*50 + "\n")
+    logger.info("=" * 50)
     logger.info("✅ 안전 종료 프로세스가 완료되었습니다. (모든 자원 반환 완료)")
 
 app = FastAPI(title="StockAuto API", description="주식 자동매매 API 서버", lifespan=lifespan)

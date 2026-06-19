@@ -1410,11 +1410,10 @@ def start_scheduler():
         # ⑧ 관리자용 1분 단위 모든 유저 잔고 스냅샷 캐싱: 1분 주기
         scheduler.add_job(admin_balance_cache_wrapper, 'interval', minutes=1, id='admin_balance_cache_job', next_run_time=datetime.now() + timedelta(seconds=10))
         scheduler.start()
-        print("[Scheduler] APScheduler Background Trading Engine Started.")
         logger.info("Background scheduler started (Multi-tenant 3-Mode Unified Engine).")
 
 def stop_scheduler():
     """앱 종료 시 백그라운드 스레드를 깔끔하게 종료하여 좀비 폴링 방지"""
     if scheduler.running:
         scheduler.shutdown(wait=False)
-        print("[Scheduler] APScheduler Background Trading Engine Stopped.")
+        logger.info("Background scheduler stopped.")
