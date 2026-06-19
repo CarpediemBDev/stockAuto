@@ -2,7 +2,8 @@ from fastapi import APIRouter
 from app.core.response import success_response
 from app.trades.market_overview_cache import get_cached_market_overview
 
-router = APIRouter(tags=["Market"])
+from app.core.response import SuccessResponseRoute
+router = APIRouter(route_class=SuccessResponseRoute, tags=["Market"])
 
 @router.get("/overview")
 async def get_market_overview():

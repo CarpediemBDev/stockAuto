@@ -6,7 +6,8 @@ from app.core.dependencies import get_current_user, get_current_admin_user
 from app.core.response import success_response
 from sqlalchemy import asc
 
-router = APIRouter(tags=["Report"])
+from app.core.response import SuccessResponseRoute
+router = APIRouter(route_class=SuccessResponseRoute, tags=["Report"])
 
 @router.get("/stats")
 def get_report_stats(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

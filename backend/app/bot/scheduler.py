@@ -68,6 +68,7 @@ scheduler = BackgroundScheduler()
 
 
 is_processing = False # 중복 실행 방지용 플래그
+is_manual_scanning = False # 💡 수동 스캔 실행 상태 추적용 전역 플래그
 _processing_lock = threading.Lock()  # 💡 is_processing 레이스 컨디션 방지용 스레드 락
 latest_scanned_signals = [] # 글로벌 실시간 마켓 스캔 시그널 캐시용
 latest_watchlist_signals = {} # 사용자별 라우팅 전에만 사용하는 관심종목 분석 캐시

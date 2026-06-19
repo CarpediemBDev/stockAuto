@@ -31,7 +31,7 @@ const ManualWatchList = () => {
   const { data: scannerData, isLoading: scannerLoading } = useSWR('/scanner/latest', fetcher, { refreshInterval: 15000 });
 
   const items: WatchItem[] = Array.isArray(watchData) ? watchData : (watchData?.data || []);
-  const signals: ScannerSignal[] = Array.isArray(scannerData) ? scannerData : (scannerData?.data || []);
+  const signals: ScannerSignal[] = Array.isArray(scannerData) ? scannerData : (scannerData?.signals || []);
   const loading = watchLoading || scannerLoading;
 
   const [showAddForm, setShowAddForm] = useState(false);

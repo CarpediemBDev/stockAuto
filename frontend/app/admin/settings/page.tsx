@@ -18,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react";
 import api, { authAPI } from "@/lib/api";
+import useSWR from "swr";
 
 type SubTab = "environment" | "telegram" | "danger";
 type TradeMode = string;
@@ -83,6 +84,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   simulated_initial_cash_krw: 0,
 };
 
+const SETTINGS_ENDPOINT = "/admin/";
+
 function normalizeTradeMode(value: unknown, modes: TradeModeOption[]): TradeMode {
   const normalized = typeof value === "string" ? value : "";
   return modes.some((mode) => mode.id === normalized)
@@ -101,7 +104,6 @@ export default function PersonalSettingsPage() {
 
   const [username, setUsername] = useState<string>("");
   const [subTab, setSubTab] = useState<SubTab>("environment");
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isCredentialSaving, setIsCredentialSaving] = useState(false);
   const [isCredentialDeleting, setIsCredentialDeleting] = useState(false);
@@ -151,23 +153,25 @@ export default function PersonalSettingsPage() {
     ));
   }, []);
 
-  const fetchSettings = useCallback(async () => {
-    try {
-      const res = await api.get("/admin/");
-      applySettings(res.data);
-    } catch (err) {
-      const error = err as Error;
-      toast.error(error.message || "설정을 불러오지 못했습니다.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [applySettings]);
+  const { isLoading: isSettingsLoading, mutate: mutateSettings } = useSWR<Partial<UserSettings>>(
+    isInitialized && isAuthenticated ? SETTINGS_ENDPOINT : null,
+    async () => {
+      const res = await api.get(SETTINGS_ENDPOINT);
+      return res.data;
+    },
+    {
+      onSuccess: applySettings,
+      onError: (err) => {
+        const error = err as Error;
+        toast.error(error.message || "설정을 불러오지 못했습니다.");
+      },
+      revalidateOnFocus: false,
+    },
+  );
 
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchSettings();
-  }, [isAuthenticated, fetchSettings]);
+  const fetchSettings = useCallback(async () => {
+    await mutateSettings();
+  }, [mutateSettings]);
 
   const activeBroker = dbSettings.broker_provider || dbSettings.available_brokers[0]?.id || "";
   const activeCred = useMemo(() => {
@@ -367,7 +371,7 @@ export default function PersonalSettingsPage() {
     icon: modeIcons[mode.id] || Server,
   }));
 
-  if (isLoading || !isInitialized || !isAuthenticated) {
+  if (isSettingsLoading || !isInitialized || !isAuthenticated) {
     return (
       <div className="min-h-[calc(100vh-4rem)] bg-zinc-950 text-white flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { adminAPI } from '@/lib/api';
 import { 
   Trophy, 
@@ -97,9 +97,6 @@ export function BacktestTournament() {
 
   const isPolling = error && error.name === 'ProcessingError';
   const loading = isLoading || isPolling;
-
-  // 파생 상태: 사용자가 명시적으로 선택한 전략이 없다면 데이터의 첫 번째 항목을 사용
-  const activeStrategy = selectedStrategy || (data && data.length > 0 ? data[0] : null);
 
   const handleRunSimulation = () => {
     if (!startDate || !endDate) {

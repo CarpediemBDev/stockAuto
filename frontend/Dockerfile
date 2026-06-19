@@ -1,10 +1,10 @@
 # 1단계: 빌드 환경 구성
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 WORKDIR /app
 
 # 패키지 정보 복사 및 의존성 설치
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 # 소스코드 전체 복사
 COPY . .
@@ -19,7 +19,7 @@ ENV BACKEND_API_ORIGIN=$BACKEND_API_ORIGIN
 RUN npm run build
 
 # 2단계: 가동 환경 구성
-FROM node:18-alpine AS runner
+FROM node:20-alpine AS runner
 WORKDIR /app
 
 # 빌드 산출물 중 구동에 필요한 파일들만 최소한으로 복사 (용량 경량화)

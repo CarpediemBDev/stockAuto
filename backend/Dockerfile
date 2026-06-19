@@ -1,5 +1,5 @@
 # 1단계: Python Base Image 사용
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 # 작업 디렉터리 설정
 WORKDIR /app

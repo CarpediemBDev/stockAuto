@@ -4,7 +4,8 @@ from app.core.database import get_db
 from app.core.models import TradeLog, ActionLog, User
 from app.core.dependencies import get_current_user
 
-router = APIRouter()
+from app.core.response import SuccessResponseRoute
+router = APIRouter(route_class=SuccessResponseRoute)
 
 @router.get("")
 def get_trade_logs(

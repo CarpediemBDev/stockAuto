@@ -80,6 +80,9 @@
 *   **SSOT 코어 모듈 집중:** 
     *   데이터베이스 모델(`models.py`), 연결 세션(`database.py`), 전역 예외(`exceptions.py`), 환경 설정(`config.py`)은 무조건 **`app/core/` 하위 폴더**로 단일화합니다.
     *   순환 참조(Circular Imports)를 차단하기 위해 임포트 시 절대 경로 (`from app.core...`)로 통일하고 필요시 지연 임포트(Lazy Import)를 사용합니다.
+*   **전역 응답 자동 포장 준수 (Global Response Wrapper):**
+    *   FastAPI의 모든 API는 `app.core.response`에 정의된 `SuccessResponseRoute`에 의해 자동 가로채기 되어 `success_response` 규격(`{ code, message, data }`)으로 자동 포장됩니다.
+    *   따라서 백엔드 코딩 시 라우터(`router.py`)에서 `success_response`를 직접 호출하지 말고, 순수 데이터 객체(dict, Pydantic 모델 등)만 반환해야 합니다. (택배 포장을 쌩으로 뜯거나 함부로 수동 포장하지 마세요).
 *   **Alembic 마이그레이션 필수 준수:**
     *   DB 스키마 컬럼 변경 시, 소스코드 내에 임시 ALTER TABLE SQL을 주입하는 꼼수를 엄격히 금지합니다. 무조건 `models.py` 수정 후 `alembic`을 통해 마이그레이션 스크립트를 작성하며, 앱 구동 시 `migrator.py`가 자동으로 이를 감지하여 안전하게 실행(기존 DB는 Stamp, 신규 DB는 Upgrade)하도록 관리합니다.
 

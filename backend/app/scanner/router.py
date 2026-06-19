@@ -19,7 +19,8 @@ from app.scanner.swing_prediction_cache import (
 import asyncio
 import threading
 
-router = APIRouter()
+from app.core.response import SuccessResponseRoute
+router = APIRouter(route_class=SuccessResponseRoute)
 
 @router.get("/latest")
 async def get_latest_signals():
@@ -28,17 +29,24 @@ async def get_latest_signals():
         raise StockAutoException(code="SCHEDULER_NOT_READY", message="스캐너 엔진이 아직 준비되지 않았습니다.", status_code=503)
     
     signals = scheduler_mod.latest_scanned_signals
+    is_scanning = getattr(scheduler_mod, "is_manual_scanning", False)
     if not signals:
-        return success_response(data=[])
+        return success_response(data={"is_scanning": is_scanning, "signals": []})
     
     # 점수 높은 순 정렬 (데이터가 있을 때만)
     result = sorted(signals, key=lambda x: x.get('signal_score', 0), reverse=True)[:10]
-    return success_response(data=result)
+    return success_response(data={"is_scanning": is_scanning, "signals": result})
 
 async def background_scan_overseas():
     """백그라운드에서 스캔을 수행하고 전역 캐시를 업데이트합니다."""
-    signals = await scan_overseas_market()
-    scheduler_mod.latest_scanned_signals = signals
+    scheduler_mod.is_manual_scanning = True
+    try:
+        signals = await scan_overseas_market()
+        scheduler_mod.latest_scanned_signals = signals
+    except Exception as e:
+        logger.error(f"[ManualScan] 백그라운드 스캔 중 오류 발생: {e}", exc_info=True)
+    finally:
+        scheduler_mod.is_manual_scanning = False
 
 
 def background_refresh_swing_prediction(cache_key: tuple[str, ...]) -> None:

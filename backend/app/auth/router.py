@@ -19,7 +19,8 @@ from app.core.security import (
 from app.core.dependencies import get_current_user
 from datetime import timedelta
 
-router = APIRouter()
+from app.core.response import SuccessResponseRoute
+router = APIRouter(route_class=SuccessResponseRoute)
 REFRESH_COOKIE_NAME = "refresh_token"
 REFRESH_COOKIE_PATH = "/api/v1/auth"
 LEGACY_REFRESH_COOKIE_PATHS = ("/",)

@@ -25,9 +25,10 @@ const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
   const { data: signalsData, isLoading: isLoadingSignals } = useSWR('/scanner/latest', fetcher, { refreshInterval: 15000 });
   const { data: balanceData, isLoading: isLoadingBalance } = useSWR('/account/balance', fetcher, { refreshInterval: 15000 });
 
-  const signals = React.useMemo(() => {
-    if (!signalsData || !Array.isArray(signalsData)) return [];
-    return signalsData.filter((s: Signal) => !s.source || s.source.includes("MARKET"));
+  const signals: Signal[] = React.useMemo(() => {
+    if (!signalsData) return [];
+    const actualSignals = Array.isArray(signalsData) ? signalsData : (signalsData.signals || []);
+    return actualSignals.filter((s: Signal) => !s.source || s.source.includes("MARKET"));
   }, [signalsData]);
 
   const radarTickers: string[] = balanceData?.focused_radar_tickers || [];

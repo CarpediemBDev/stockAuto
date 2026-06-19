@@ -18,7 +18,15 @@ async def fetch_toss_market_scanners() -> dict[str, list[str]]:
             stderr=asyncio.subprocess.PIPE,
             cwd=os.path.dirname(__file__),
         )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=45.0)
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=45.0)
+        finally:
+            if process.returncode is None:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+        
         stderr_text = stderr.decode("utf-8", errors="replace").strip()
 
         if process.returncode != 0:

@@ -19,17 +19,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  type TooltipValueType,
-} from 'recharts';
+
 import useSWR from 'swr';
 import api, { fetcher } from '@/lib/api';
 import { toast } from "sonner";
@@ -121,69 +111,7 @@ export function UserManagement() {
     }
   };
 
-  // Recharts를 위한 모든 경쟁 사용자의 자산 성장 곡선 병합 데이터 산출
-  const getChartData = () => {
-    if (!Array.isArray(usersList) || usersList.length === 0) return [];
 
-    // 타임스탬프 기준의 모든 지점들을 정렬하여 유니크 타임라인 확보
-    const timelineSet = new Set<string>();
-    usersList.forEach(u => {
-      if (u.equity_curve) {
-        u.equity_curve.forEach((point: EquityPoint) => {
-          timelineSet.add(point.timestamp);
-        });
-      }
-    });
-
-    const sortedTimeline = Array.from(timelineSet).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-
-    return sortedTimeline.map(ts => {
-      // 차트 가독성을 위해 'HH:MM:SS' 또는 'MM-DD HH:MM' 형태로 시간 포맷팅
-      let formattedTime = ts;
-      try {
-        const d = new Date(ts);
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const date = String(d.getDate()).padStart(2, '0');
-        const hours = String(d.getHours()).padStart(2, '0');
-        const minutes = String(d.getMinutes()).padStart(2, '0');
-        formattedTime = `${month}-${date} ${hours}:${minutes}`;
-      } catch {
-        formattedTime = ts.split(' ')[1] || ts;
-      }
-
-      const chartItem: Record<string, string | number> = { timestamp: formattedTime };
-
-      usersList.forEach(u => {
-        if (!u.equity_curve || u.equity_curve.length === 0) return;
-        // 해당 타임스탬프 이하의 가장 최근 평가액을 매핑
-        let lastVal: number | undefined;
-        for (let i = 0; i < u.equity_curve.length; i++) {
-          if (new Date(u.equity_curve[i].timestamp).getTime() <= new Date(ts).getTime()) {
-            lastVal = u.equity_curve[i].total;
-          } else {
-            break;
-          }
-        }
-        if (lastVal !== undefined) {
-          chartItem[`user_${u.id}`] = Math.round(lastVal);
-        }
-      });
-      return chartItem;
-    });
-  };
-
-  const getLineColor = (index: number) => {
-    const colors = [
-      '#3b82f6', // 1: Blue
-      '#f59e0b', // 2: Gold
-      '#10b981', // 3: Emerald
-      '#ec4899', // 4: Pink
-      '#8b5cf6', // 5: Purple
-      '#06b6d4', // 6: Cyan
-      '#f43f5e', // 7: Rose
-    ];
-    return colors[index % colors.length];
-  };
 
   const getRankBadge = (rank: number) => {
     switch (rank) {
@@ -237,10 +165,7 @@ export function UserManagement() {
     );
   };
 
-  const formatTooltipValue = (value: TooltipValueType | undefined) => {
-    const numericValue = Array.isArray(value) ? value[0] : value;
-    return [`${Number(numericValue ?? 0).toLocaleString()}원`, ''];
-  };
+
 
   // 정렬 규칙 적용된 유저 목록
   const sortedUsers = Array.isArray(usersList) ? [...usersList].sort((a, b) => {
@@ -255,72 +180,11 @@ export function UserManagement() {
   const totalPages = Math.ceil(sortedUsers.length / itemsPerPage);
   const paginatedUsers = sortedUsers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-  const chartData = getChartData();
-  const chartUsers = usersList.filter(
-    user => user.equity_curve && user.equity_curve.length > 0
-  );
+
 
   return (
     <div className="space-y-6">
-      {/* 상단 랭킹 종합 차트 보드 */}
-      {!loading && usersList.length > 0 && chartData.length > 0 && (
-        <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-5 shadow-xl space-y-4">
-          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <Trophy size={16} className="text-amber-400" />
-              실시간 아레나 리그 자산 성장 추이
-            </h3>
-            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
-              REAL-TIME EQUITY CURVE COMPARISON
-            </span>
-          </div>
 
-          <div className="h-[240px] min-h-[240px] w-full min-w-0 overflow-hidden text-slate-400">
-            <ResponsiveContainer width="100%" height={240} minWidth={0} minHeight={180}>
-              <LineChart data={chartData} margin={{ top: 10, right: 30, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b/20" vertical={false} />
-                <XAxis
-                  dataKey="timestamp"
-                  stroke="#475569"
-                  fontSize={9}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  stroke="#475569"
-                  fontSize={9}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v) => `${(v / 10000).toLocaleString()}만`}
-                />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#090d16', border: '1px solid #334155', borderRadius: '12px', fontSize: '10px', color: '#cbd5e1' }}
-                  formatter={formatTooltipValue}
-                />
-                <Legend
-                  verticalAlign="top"
-                  height={28}
-                  iconType="circle"
-                  iconSize={6}
-                  wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }}
-                />
-                {chartUsers.map((user, idx) => (
-                  <Line
-                    key={user.username}
-                    type="monotone"
-                    dataKey={`user_${user.id}`}
-                    name={user.username}
-                    stroke={getLineColor(idx)}
-                    strokeWidth={user.username === 'admin' ? 2 : 1.5}
-                    dot={false}
-                    activeDot={{ r: 3 }}
-                  />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
 
       {/* 사용자 관리 테이블 보드 */}
       <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl space-y-4">

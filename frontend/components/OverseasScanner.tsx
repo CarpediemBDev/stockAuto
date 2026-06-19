@@ -113,16 +113,19 @@ export function OverseasScanner({
   setActiveTab
 }: OverseasScannerProps) {
   const [isManualScanning, setIsManualScanning] = useState(false);
+  const wasScanningRef = React.useRef(false);
   
   const { data: swrData, isLoading: swrLoading, mutate: mutateScan } = useSWR('/scanner/latest', fetcher, { 
     refreshInterval: 15000,
     onSuccess: () => setLastUpdated(new Date())
   });
-  const results: ScanResult[] = Array.isArray(swrData) ? swrData : (swrData?.data || []);
-  const isLoading = swrLoading || isManualScanning;
+  
+  const results: ScanResult[] = Array.isArray(swrData) ? swrData : (swrData?.signals || []);
+  const isBackendScanning = swrData && !Array.isArray(swrData) ? swrData.is_scanning : false;
+  const isLoading = swrLoading || isManualScanning || isBackendScanning;
 
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [isSpinning, setIsSpinning] = useState(false);
+  const isSpinning = isManualScanning || isBackendScanning;
   const { selectedTimezone } = useTimezone();
   
   // 퀀트 스코어 팝업 모달 상태 관리
@@ -130,25 +133,29 @@ export function OverseasScanner({
   // AI 뉴스 상세 보기 모달 상태 관리
   const [selectedNewsItem, setSelectedNewsItem] = useState<ScanResult | null>(null);
 
+  // 백그라운드 스캔 상태 변화 감지하여 완료 시 토스트 알림
+  React.useEffect(() => {
+    if (isBackendScanning) {
+      wasScanningRef.current = true;
+    } else if (wasScanningRef.current && !isBackendScanning) {
+      wasScanningRef.current = false;
+      toast.success("스캔 갱신이 완료되었습니다.");
+    }
+  }, [isBackendScanning]);
+
   const runManualScan = useCallback(async () => {
     setIsManualScanning(true);
-    setIsSpinning(true);
     try {
       await scannerAPI.runOverseasScan();
-      toast.success("스캔이 백그라운드에서 시작되었습니다. 약 25초 뒤 자동으로 목록을 갱신합니다.");
+      toast.info("스캔이 백그라운드에서 시작되었습니다. 스캔 완료 시 자동으로 목록이 갱신됩니다.");
       
-      setTimeout(async () => {
-        await mutateScan();
-        setIsManualScanning(false);
-        setIsSpinning(false);
-        toast.success("스캔 갱신이 완료되었습니다.");
-      }, 25000);
+      await mutateScan();
+      setIsManualScanning(false);
       
     } catch (error) {
       const msg = reportHandledError("Failed to run overseas scan", error);
       toast.error(`수동 스캔 실패: ${msg}`);
       setIsManualScanning(false);
-      setIsSpinning(false);
     }
   }, [mutateScan]);
 

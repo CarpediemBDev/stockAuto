@@ -165,16 +165,15 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
 
   const newsMap = React.useMemo(() => {
     const map: Record<string, NewsInfo> = {};
-    if (scannerData && Array.isArray(scannerData)) {
-      for (const item of scannerData) {
-        if (item.news_summary && item.news_sentiment) {
-          map[item.ticker] = {
-            sentiment: item.news_sentiment,
-            sentiment_score: item.news_sentiment_score ?? 50,
-            summary: item.news_summary,
-            url: item.news_url,
-          };
-        }
+    const signals = scannerData ? (Array.isArray(scannerData) ? scannerData : (scannerData.signals || [])) : [];
+    for (const item of signals) {
+      if (item.news_summary && item.news_sentiment) {
+        map[item.ticker] = {
+          sentiment: item.news_sentiment,
+          sentiment_score: item.news_sentiment_score ?? 50,
+          summary: item.news_summary,
+          url: item.news_url,
+        };
       }
     }
     return map;

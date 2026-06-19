@@ -6,7 +6,8 @@ from app.core.dependencies import get_current_user
 from app.core.models import User
 from app.bot.backtest_engine import BacktestSimulator
 
-router = APIRouter()
+from app.core.response import SuccessResponseRoute
+router = APIRouter(route_class=SuccessResponseRoute)
 
 class BacktestRequest(BaseModel):
     tickers: List[str] = Field(..., description="백테스트 대상 티커 리스트", example=["TSLA", "NVDA", "AAPL"])

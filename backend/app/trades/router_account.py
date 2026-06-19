@@ -16,7 +16,8 @@ from app.core.dependencies import get_current_user
 from app.core.models import User, Holding, TradeLog, ActionLog
 from app.core.config import settings as app_settings
 
-router = APIRouter(tags=["Account"])
+from app.core.response import SuccessResponseRoute
+router = APIRouter(route_class=SuccessResponseRoute, tags=["Account"])
 
 @router.get("/balance")
 async def get_balance(

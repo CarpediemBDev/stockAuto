@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Terminal, Clock, Loader2, Server } from 'lucide-react';
+import { Terminal, Clock, Loader2, Server, Activity, Smartphone, Search, Globe, Database } from 'lucide-react';
 import { reportAPI } from '@/lib/api';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/api';
@@ -20,6 +20,16 @@ export function SystemHealth() {
   const { data: swrData, isLoading } = useSWR('/admin/system-logs', fetcher, { refreshInterval: 15000 });
   const logs: ActionLog[] = Array.isArray(swrData) ? swrData : (swrData?.data || []);
   const loading = isLoading;
+
+  const { data: statsData } = useSWR('/admin/discovery-stats', fetcher, { refreshInterval: 15000 });
+  const stats = statsData || {
+    last_run: null,
+    status: 'IDLE',
+    toss: { count: 0, status: 'PENDING' },
+    yahoo: { count: 0, status: 'PENDING' },
+    naver: { count: 0, status: 'PENDING' },
+    total_universe: 0
+  };
 
   const [isReportSending, setIsReportSending] = useState(false);
   const [isGlobalReportSending, setIsGlobalReportSending] = useState(false);
@@ -153,6 +163,109 @@ export function SystemHealth() {
             </div>
           </div>
         </div>
+
+        {/* 크롤링 모니터링 대시보드 */}
+        <div className="bg-slate-950/80 border border-zinc-800/80 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+              <Activity size={16} className="text-pink-400" />
+              크롤링 엔진 모니터링 (Discovery Stats)
+            </h3>
+            <span className={cn(
+              "text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1.5",
+              stats.status === 'RUNNING' ? 'bg-amber-500/20 text-amber-400' :
+              stats.status === 'ERROR' ? 'bg-rose-500/20 text-rose-400' :
+              'bg-emerald-500/20 text-emerald-400'
+            )}>
+              <span className={cn(
+                "w-1.5 h-1.5 rounded-full",
+                stats.status === 'RUNNING' ? 'bg-amber-400 animate-pulse' :
+                stats.status === 'ERROR' ? 'bg-rose-500' :
+                'bg-emerald-500'
+              )}></span>
+              {stats.status}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* 토스증권 카드 */}
+            <div className="bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/40 flex items-center space-x-3">
+              <div className={cn("p-2 rounded-lg", stats.toss.status === 'ERROR' ? 'bg-rose-500/10 text-rose-400' : 'bg-blue-500/10 text-blue-400')}>
+                <Smartphone size={18} />
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-500 block font-semibold uppercase tracking-wider">Toss Securities</span>
+                <div className="flex items-center gap-2">
+                  <span className={cn("text-lg font-bold", stats.toss.status === 'ERROR' ? 'text-rose-400' : 'text-slate-200')}>
+                    {stats.toss.status === 'ERROR' ? 'FAIL' : stats.toss.count}
+                  </span>
+                  {stats.toss.status === 'SUCCESS' && <span className="text-[9px] text-zinc-500">종목</span>}
+                </div>
+              </div>
+            </div>
+
+            {/* 네이버증권 카드 */}
+            <div className="bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/40 flex items-center space-x-3">
+              <div className={cn("p-2 rounded-lg", stats.naver.status === 'ERROR' ? 'bg-rose-500/10 text-rose-400' : 'bg-green-500/10 text-green-400')}>
+                <Search size={18} />
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-500 block font-semibold uppercase tracking-wider">Naver Finance</span>
+                <div className="flex items-center gap-2">
+                  <span className={cn("text-lg font-bold", stats.naver.status === 'ERROR' ? 'text-rose-400' : 'text-slate-200')}>
+                    {stats.naver.status === 'ERROR' ? 'FAIL' : stats.naver.count}
+                  </span>
+                  {stats.naver.status === 'SUCCESS' && <span className="text-[9px] text-zinc-500">종목</span>}
+                </div>
+              </div>
+            </div>
+
+            {/* 야후파이낸스 카드 */}
+            <div className="bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/40 flex items-center space-x-3">
+              <div className={cn("p-2 rounded-lg", stats.yahoo.status === 'ERROR' ? 'bg-rose-500/10 text-rose-400' : 'bg-purple-500/10 text-purple-400')}>
+                <Globe size={18} />
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-500 block font-semibold uppercase tracking-wider">Yahoo Finance</span>
+                <div className="flex items-center gap-2">
+                  <span className={cn("text-lg font-bold", stats.yahoo.status === 'ERROR' ? 'text-rose-400' : 'text-slate-200')}>
+                    {stats.yahoo.status === 'ERROR' ? 'FAIL' : stats.yahoo.count}
+                  </span>
+                  {stats.yahoo.status === 'SUCCESS' && <span className="text-[9px] text-zinc-500">종목</span>}
+                </div>
+              </div>
+            </div>
+
+            {/* 통합 유니버스 카드 */}
+            <div className="bg-zinc-900/60 p-3 rounded-xl border border-indigo-500/20 flex items-center space-x-3">
+              <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
+                <Database size={18} />
+              </div>
+              <div>
+                <span className="text-[10px] text-indigo-400/80 block font-semibold uppercase tracking-wider">Merged Universe</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-bold text-indigo-300">
+                    {stats.total_universe}
+                  </span>
+                  <span className="text-[9px] text-indigo-500/60">최종 분석 풀</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {stats.last_run && (
+            <div className="text-[10px] text-zinc-500 flex items-center justify-end">
+              최근 업데이트: {new Date(stats.last_run).toLocaleTimeString('ko-KR', {
+                timeZone: selectedTimezone.timeZone,
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+              })}
+            </div>
+          )}
+        </div>
+        
         
         <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[500px]">
           <div className="bg-slate-900/80 px-4 py-2.5 border-b border-slate-800 flex items-center justify-between">

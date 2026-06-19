@@ -11,7 +11,8 @@ from app.core.response import success_response
 from app.core.exceptions import StockAutoException
 from app.core.dependencies import get_current_user
 
-router = APIRouter()
+from app.core.response import SuccessResponseRoute
+router = APIRouter(route_class=SuccessResponseRoute)
 
 class WatchListCreate(BaseModel):
     ticker: str

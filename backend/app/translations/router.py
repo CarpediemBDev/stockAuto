@@ -8,7 +8,8 @@ from pydantic import BaseModel
 from app.translations.translator import Translator
 from app.core.response import success_response
 
-router = APIRouter()
+from app.core.response import SuccessResponseRoute
+router = APIRouter(route_class=SuccessResponseRoute)
 
 def get_db():
     db = SessionLocal()

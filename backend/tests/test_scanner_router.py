@@ -79,7 +79,10 @@ def test_manual_overseas_scan_updates_latest_signal_cache(monkeypatch):
         assert scan_response.status_code == 200
         assert scan_response.json()["message"] == "해외 마켓 스캔이 백그라운드에서 시작되었습니다."
         assert latest_response.status_code == 200
-        assert latest_response.json()["data"] == signals
+        assert latest_response.json()["data"] == {
+            "is_scanning": False,
+            "signals": signals,
+        }
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
