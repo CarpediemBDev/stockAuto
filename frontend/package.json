@@ -2,6 +2,10 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9.0",
+    "npm": ">=10"
+  },
   "scripts": {
     "local": "env-cmd -f .env.local next dev",
     "build-dev": "env-cmd -f .env.dev next build",

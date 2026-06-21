@@ -90,7 +90,7 @@
 
 ## 💻 6. 프론트엔드 및 고성능 UI 표준 (Frontend & UI)
 
-*   **기술 스택:** Next.js 15 (App Router), Vanilla CSS, Lucide React, Premium HSL 다크 모드 테마.
+*   **기술 스택:** Next.js 16 (App Router), React 19, Vanilla CSS, Lucide React, Premium HSL 다크 모드 테마.
 *   **프레임워크 표준 엄격 준수 (No Hacks):**
     *   린트 에러를 임시방편으로 모면하기 위한 우회 기술(예: `any` 캐스팅, `setTimeout` 난사, 무작정 eslint-disable 적용)을 절대 금지합니다. React 18+의 렌더링 최적화, 비동기 데이터 패칭 가이드라인 등 프레임워크가 권장하는 **'정석(Standard)' 패턴**으로 정밀 구현합니다.
 *   **Vue 마스터용 React 트러블슈팅 문서화:**

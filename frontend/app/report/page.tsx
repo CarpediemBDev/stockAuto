@@ -27,7 +27,11 @@ interface TradeItem {
 interface StatsData {
   kpi: {
     total_trades: number;
+    win_trades: number;
+    loss_trades: number;
     total_realized_pnl: number;
+    gross_profit: number;
+    gross_loss: number;
     win_rate: number;
     profit_factor: number;
   };
@@ -94,48 +98,65 @@ export default function ReportPage() {
   const isProfitable = kpi.total_realized_pnl >= 0;
 
   return (
-    <div className="space-y-6 animate-in fade-in zoom-in duration-500">
-
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400 tracking-tight">
-          종합 매매 성적표 (Trading Performance)
-        </h1>
-        <div className="flex items-center space-x-2 text-sm text-slate-400">
-          <Activity className="w-4 h-4 text-emerald-500 animate-pulse" />
-          <span>실시간 라이브 데이터 동기화</span>
-        </div>
-      </div>
+    <div className="min-h-screen bg-black">
+      <div className="max-w-[1600px] mx-auto px-6 py-8 md:py-12 space-y-8 animate-in fade-in duration-500">
+        
+        {/* Header */}
+        <header className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-zinc-800 pb-5">
+          <div>
+            <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-zinc-200 to-zinc-400 tracking-tight mb-2">
+              종합 매매 성적표
+            </h1>
+            <p className="text-zinc-400 font-medium tracking-wide">
+              계좌의 전체 누적 수익금과 승률 등 핵심 투자 성과를 분석합니다.
+            </p>
+          </div>
+          <div className="flex items-center space-x-2 text-xs font-bold text-zinc-300 bg-zinc-900/50 px-4 py-2 rounded-lg border border-zinc-800">
+            <div className="relative flex h-2 w-2 mr-1">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </div>
+            <span>실시간 라이브 데이터 동기화</span>
+          </div>
+        </header>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
 
         {/* Total PnL */}
-        <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-2xl relative overflow-hidden group">
-          <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-br ${isProfitable ? 'from-emerald-500/10 to-teal-500/0' : 'from-rose-500/10 to-pink-500/0'} rounded-full blur-2xl -mr-10 -mt-10 transition-transform group-hover:scale-150 duration-700`}></div>
-          <div className="relative z-10 flex flex-col justify-between h-full">
-            <div className="flex items-center space-x-2 text-slate-400 mb-4">
-              <DollarSign className="w-5 h-5" />
-              <span className="font-semibold text-sm tracking-wide uppercase">총 실수익금 (세전/비용후)</span>
+        <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl hover:border-zinc-600 transition-colors duration-300">
+          <div className="flex flex-col justify-between h-full space-y-4">
+            <div className="flex items-center justify-between text-zinc-400">
+              <span className="font-bold text-xs tracking-wider uppercase">총 실수익금</span>
+              <DollarSign className="w-5 h-5 text-zinc-500" />
             </div>
-            <div className="flex items-baseline space-x-2">
-              <span className={`text-4xl font-black tracking-tighter ${isProfitable ? 'text-emerald-400' : 'text-rose-400'}`}>
-                ${kpi.total_realized_pnl.toLocaleString()}
-              </span>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-baseline space-x-1">
+                <span className={`text-4xl font-extrabold tracking-tight ${isProfitable ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  ${kpi.total_realized_pnl.toLocaleString()}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-bold tracking-tight mt-1.5">
+                <span className="text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded-md border border-emerald-500/30">
+                  총수익: <span className="font-mono">${(kpi.gross_profit || 0).toLocaleString()}</span>
+                </span>
+                <span className="text-rose-300 bg-rose-500/15 px-2 py-0.5 rounded-md border border-rose-500/30">
+                  총손실: <span className="font-mono">${(kpi.gross_loss || 0).toLocaleString()}</span>
+                </span>
+              </div>
             </div>
           </div>
         </div>
 
         {/* Win Rate */}
-        <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-2xl relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-indigo-500/10 to-blue-500/0 rounded-full blur-2xl -mr-10 -mt-10 transition-transform group-hover:scale-150 duration-700"></div>
-          <div className="relative z-10 flex flex-col justify-between h-full">
-            <div className="flex items-center space-x-2 text-slate-400 mb-4">
-              <Target className="w-5 h-5 text-indigo-400" />
-              <span className="font-semibold text-sm tracking-wide uppercase">승률 (Win Rate)</span>
+        <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl hover:border-zinc-600 transition-colors duration-300">
+          <div className="flex flex-col justify-between h-full space-y-4">
+            <div className="flex items-center justify-between text-zinc-400">
+              <span className="font-bold text-xs tracking-wider uppercase">승률 (Win Rate)</span>
+              <Target className="w-5 h-5 text-zinc-500" />
             </div>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-4xl font-black tracking-tighter text-white">
+            <div className="flex items-baseline space-x-1">
+              <span className="text-4xl font-extrabold tracking-tight text-white">
                 {kpi.win_rate}%
               </span>
             </div>
@@ -143,15 +164,14 @@ export default function ReportPage() {
         </div>
 
         {/* Profit Factor */}
-        <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-2xl relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-amber-500/10 to-orange-500/0 rounded-full blur-2xl -mr-10 -mt-10 transition-transform group-hover:scale-150 duration-700"></div>
-          <div className="relative z-10 flex flex-col justify-between h-full">
-            <div className="flex items-center space-x-2 text-slate-400 mb-4">
-              <TrendingUp className="w-5 h-5 text-amber-400" />
-              <span className="font-semibold text-sm tracking-wide uppercase">프로핏 팩터 (손익비)</span>
+        <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl hover:border-zinc-600 transition-colors duration-300">
+          <div className="flex flex-col justify-between h-full space-y-4">
+            <div className="flex items-center justify-between text-zinc-400">
+              <span className="font-bold text-xs tracking-wider uppercase">프로핏 팩터</span>
+              <TrendingUp className="w-5 h-5 text-zinc-500" />
             </div>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-4xl font-black tracking-tighter text-white">
+            <div className="flex items-baseline space-x-1">
+              <span className="text-4xl font-extrabold tracking-tight text-white">
                 {kpi.profit_factor}
               </span>
             </div>
@@ -159,27 +179,36 @@ export default function ReportPage() {
         </div>
 
         {/* Total Trades */}
-        <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-2xl relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-cyan-500/10 to-blue-500/0 rounded-full blur-2xl -mr-10 -mt-10 transition-transform group-hover:scale-150 duration-700"></div>
-          <div className="relative z-10 flex flex-col justify-between h-full">
-            <div className="flex items-center space-x-2 text-slate-400 mb-4">
-              <Activity className="w-5 h-5 text-cyan-400" />
-              <span className="font-semibold text-sm tracking-wide uppercase">총 매매 거래 횟수</span>
+        <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl hover:border-zinc-600 transition-colors duration-300">
+          <div className="flex flex-col justify-between h-full space-y-4">
+            <div className="flex items-center justify-between text-zinc-400">
+              <span className="font-bold text-xs tracking-wider uppercase">총 거래 횟수</span>
+              <Activity className="w-5 h-5 text-zinc-500" />
             </div>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-4xl font-black tracking-tighter text-white">
-                {kpi.total_trades}
-              </span>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-baseline space-x-1">
+                <span className="text-4xl font-extrabold tracking-tight text-white">
+                  {kpi.total_trades}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-bold tracking-tight mt-1.5">
+                <span className="text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded-md border border-emerald-500/30">
+                  익절: <span className="font-mono">{kpi.win_trades || 0}</span>회
+                </span>
+                <span className="text-rose-300 bg-rose-500/15 px-2 py-0.5 rounded-md border border-rose-500/30">
+                  손절: <span className="font-mono">{kpi.loss_trades || 0}</span>회
+                </span>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       {/* Main Chart Area */}
-      <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 p-6 rounded-3xl shadow-2xl">
+      <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 md:p-8 shadow-xl">
         <h2 className="text-xl font-bold text-white mb-6 flex items-center space-x-2">
-          <TrendingUp className="w-5 h-5 text-emerald-400" />
-          <span>누적 수익 곡선 (Cumulative Profit)</span>
+          <TrendingUp className="w-5 h-5 text-zinc-400" />
+          <span>누적 수익 곡선 <span className="text-zinc-500 font-normal ml-1 text-sm">Cumulative Profit</span></span>
         </h2>
         <div className="h-96 min-h-96 w-full min-w-0 overflow-hidden">
           {chart_data.length > 0 ? (
@@ -234,43 +263,44 @@ export default function ReportPage() {
         </div>
       </div>
 
-      {/* 실시간 체결 로그 팝업 메뉴 버튼 (그래프 바로 밑에 배치) */}
-      <div className="flex justify-center pt-2">
+      {/* 실시간 체결 로그 팝업 메뉴 버튼 */}
+      <div className="flex justify-center pt-4 pb-8">
         <button
           onClick={() => setIsLogsModalOpen(true)}
-          className="bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white px-6 py-3 rounded-2xl border border-slate-700/60 text-xs font-bold transition-all duration-300 flex items-center gap-2 active:scale-95 shadow-lg group hover:border-emerald-500/40"
+          className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-6 py-3 rounded-xl border border-zinc-700 font-semibold transition-all duration-300 flex items-center gap-2 active:scale-95 shadow-lg"
         >
-          <Activity className="w-4 h-4 text-emerald-400 animate-pulse group-hover:scale-110 transition-transform" />
-          실시간 체결 로그 (Execution Logs) 팝업 조회
+          <Activity className="w-4 h-4 text-zinc-400" />
+          <span>실시간 체결 로그 전체보기</span>
         </button>
       </div>
 
-      {/* 프리미엄 다크 글래스모피즘 모달 (전체 거래 내역 상세 조회) */}
+      {/* 미니멀 다크 모달 */}
       {isLogsModalOpen && (
         <div
           onClick={(e) => {
             if (e.target === e.currentTarget) setIsLogsModalOpen(false);
           }}
-          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300"
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-300"
         >
-          <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-5xl w-full p-6 relative shadow-2xl animate-in zoom-in-95 duration-300 overflow-hidden max-h-[85vh] flex flex-col">
+          <div className="bg-[#090d16] border border-zinc-800 rounded-2xl max-w-5xl w-full p-6 relative shadow-2xl animate-in zoom-in-95 duration-300 overflow-hidden max-h-[85vh] flex flex-col">
             {/* 닫기 버튼 */}
             <button
               onClick={() => setIsLogsModalOpen(false)}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-white p-2 rounded-full hover:bg-zinc-900 active:scale-95 transition-all z-10 font-bold"
+              className="absolute top-4 right-4 text-zinc-500 hover:text-white p-2 rounded-lg hover:bg-zinc-800 active:scale-95 transition-all z-10 font-bold"
               aria-label="닫기"
             >
               ✕
             </button>
 
-            {/* 거래 내역 테이블 로드 (단일 팝업 디자인으로 통합) */}
-            <div className="flex-1 mt-2">
+            {/* 거래 내역 테이블 로드 */}
+            <div className="flex-1 mt-2 overflow-y-auto custom-scrollbar">
               <TradeLogs logs={logs} isModalMode={true} />
             </div>
           </div>
         </div>
       )}
 
+      </div>
     </div>
   );
 }

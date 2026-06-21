@@ -1,0 +1,8 @@
+backend/venv/
+frontend/node_modules/
+backend/app/scanner/node_modules/
+frontend/.next/
+frontend/.next-e2e/
+frontend/playwright-report/
+frontend/test-results/
+

@@ -71,8 +71,8 @@ export default function ScannerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black p-6 pt-12">
-      <div className="max-w-[1600px] mx-auto">
+    <div className="min-h-screen bg-black">
+      <div className="max-w-[1600px] mx-auto px-6 py-8 md:py-12">
         <header className="mb-8">
           <div>
             <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-zinc-200 to-zinc-400 tracking-tight mb-2">

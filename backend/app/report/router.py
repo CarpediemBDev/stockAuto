@@ -24,7 +24,11 @@ def get_report_stats(current_user: User = Depends(get_current_user), db: Session
         return {
             "kpi": {
                 "total_trades": 0,
+                "win_trades": 0,
+                "loss_trades": 0,
                 "total_realized_pnl": 0.0,
+                "gross_profit": 0.0,
+                "gross_loss": 0.0,
                 "win_rate": 0.0,
                 "profit_factor": 0.0
             },
@@ -66,7 +70,11 @@ def get_report_stats(current_user: User = Depends(get_current_user), db: Session
     return {
         "kpi": {
             "total_trades": total_trades,
+            "win_trades": win_trades,
+            "loss_trades": total_trades - win_trades,
             "total_realized_pnl": round(total_realized_pnl, 2),
+            "gross_profit": round(gross_profit, 2),
+            "gross_loss": round(gross_loss, 2),
             "win_rate": round(win_rate, 2),
             "profit_factor": round(profit_factor, 2)
         },

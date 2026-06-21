@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Noto_Sans_KR, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import { NavBar } from "@/components/NavBar";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+
+
+const notoSansKR = Noto_Sans_KR({
+  variable: "--font-noto-sans-kr",
   subsets: ["latin"],
 });
 
@@ -30,9 +32,9 @@ export default function RootLayout({
   return (
     <html
       lang="ko"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${notoSansKR.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-black text-white relative">
+      <body className="min-h-full flex flex-col bg-black text-white relative text-[14px] leading-relaxed">
         <AuthProvider>
           {/* 글로벌 상단 네비게이션 바 */}
           <NavBar />
