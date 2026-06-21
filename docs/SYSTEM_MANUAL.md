@@ -254,7 +254,7 @@ graph TD
 
 - **`watchlist/`**: 관심종목 도메인. 종목 추가/삭제 및 신규 주식 등록 시 한글 번역 자동 연동 자가학습 API(`router.py`).
 
-- **`scanner/`**: 스캐너 도메인. 최신 봇 시그널 제공 API(`router.py`), QQQ 나스닥 지수 기반의 단타 돌파 전용 2-Stage expert 필터 모듈(`scanner.py`), 그리고 120일 일봉 기반으로 내일의 급등주를 예측하는 마크 미너비니 VCP 패턴 기반의 스윙 예측 모듈(`swing_predictor.py`)을 포함하는 **투트랙(Two-track) 스캐닝 엔진**입니다.
+- **`scanner/`**: 스캐너 도메인. 공용 시장 신호와 현재 사용자의 관심종목 신호를 안전하게 재결합하는 API(`router.py`), QQQ 나스닥 지수 기반의 단타 돌파 전용 2-Stage expert 필터 모듈(`scanner.py`), 그리고 120일 일봉 기반 스윙 예측 모듈(`swing_predictor.py`)을 포함하는 **투트랙(Two-track) 스캐닝 엔진**입니다. 공용·사용자 데이터 경계는 `docs/SCANNER_DATA_FLOW.md`를 단일 기준으로 사용합니다.
 
 - **`bot/`**: 자동매매 제어 도메인. 봇 구동 제어 API(`router.py`), 하이브리드 트레이딩 메인 루프 스케줄러(`scheduler.py`), 한국투자증권 API 클라이언트(`kis_api.py`), 공통 추상 브로커 인터페이스(`base_broker.py`), 한투 래퍼 브로커(`kis_broker.py`), 가상 예수금 및 실시간 가격 연동 시뮬레이터 브로커(`simulated_broker.py`), 이들을 설정에 따라 동적으로 생산 및 반환하는 팩토리(`broker_factory.py`).
 
@@ -446,39 +446,41 @@ graph TD
 
 
 
-    KIS_Rank["KIS API - 실시간 인기/급등 종목 순위"] -->|1. 가벼운 종목코드 목록 확보| Seed["Seed Tickers - 사냥감 후보 리스트"]
+    Toss["Toss 미국주식 랭킹"] -->|1. 공용 후보 수집| PublicSeed["공용 시장 Seed"]
 
-    DB_Watch["DB 관심종목 - WatchList"] -->|2. 관심종목 리스트 확보| Seed
+    YF_Active["Yahoo Finance Screener"] -->|1. 공용 후보 수집| PublicSeed
 
-    YF_Active["Yahoo Finance Screener"] -->|3. 글로벌 활성종목 리스트 확보| Seed
+    Naver["Naver 미국주식 랭킹"] -->|1. 공용 후보 수집| PublicSeed
 
+    PublicSeed -->|2. 공용 시세 분석| Scanner["scanner.py - 시장 및 개별종목 기술 분석"]
 
+    Scanner -->|3. 공용 신호 저장| MarketCache["latest_scanned_signals"]
 
-    Seed -->|4. 사냥감 코드 전달| DataProvider["data_provider.py - 시세 중개 엔진"]
+    DB_Watch["DB 관심종목 - user_id + ticker"] -->|4. 티커 합집합만 별도 분석| WatchCache["latest_watchlist_signals - ticker cache"]
 
-    DataProvider -->|5. 현미경 초고속 벌크 정찰 - 1m/15m/1d 차트 300회분 다운로드| YF_Server["Yahoo Finance Web Server"]
+    DB_Watch -->|5. 현재 user_id 소유권 조회| UserContext["build_user_signal_context"]
 
-    
+    MarketCache -->|5. 공용 신호 전달| UserContext
 
-    YF_Server -->|6. 평탄화된 깔끔한 차트 데이터 반환| Scanner["scanner.py - 시장 및 개별종목 기술 분석"]
+    WatchCache -->|5. 소유권 확인 후 관심 신호 결합| UserContext
 
-    Scanner -->|7. 기술 분석 점수 산출 - 80~90점 이상 매수 확정| Scheduler["scheduler.py - 자동매매 엔진"]
+    UserContext -->|6. 사용자별 매매 후보| Scheduler["scheduler.py - 자동매매 엔진"]
 
-    
+    UserContext -->|6. 사용자별 응답| ScannerAPI["GET /scanner/latest"]
 
-    Scheduler -->|8. 최종 매수/매도 주문 집행 요청| KIS_Broker["kis_broker.py - BaseBroker 인터페이스"]
+    Scheduler -->|7. 최종 매수/매도 주문 집행 요청| KIS_Broker["kis_broker.py - BaseBroker 인터페이스"]
 
-    KIS_Broker -->|9. 실전/모의 거래소 전송| KIS_Server["한국투자증권 실전/모의 서버"]
+    KIS_Broker -->|8. 실전/모의 거래소 전송| KIS_Server["한국투자증권 실전/모의 서버"]
 
 
 
     %% Class Assigns
 
-    class KIS_Rank,KIS_Broker,KIS_Server kis;
+    class KIS_Broker,KIS_Server kis;
 
-    class YF_Active,DataProvider,YF_Server yf;
+    class Toss,YF_Active,Naver yf;
 
-    class Seed,Scanner,Scheduler scan;
+    class PublicSeed,Scanner,MarketCache,WatchCache,UserContext,ScannerAPI,Scheduler scan;
 
 ```
 
@@ -504,13 +506,15 @@ graph TD
 
 
 
-3. **🤝 KIS(브로커)와 data_provider(시세 엔진)의 유기적인 데이터 매핑**
+3. **🤝 공용 종목 발굴·시세 분석·KIS 주문 채널의 역할 분리**
 
-   - **사냥감 목록 발굴:** 한투 KIS API를 통해 "오늘 거래대금이 가장 많이 몰린 핫한 해외주식 100개 목록"을 안전하게 받아옵니다. (1차 그물망)
+   - **사냥감 목록 발굴:** Toss, Yahoo Finance, Naver 랭킹을 병합하고 모든 외부 소스 실패 시 Safety Tech List를 사용합니다. 사용자 관심종목은 이 공용 목록에 소유권 정보와 함께 섞지 않습니다.
 
-   - **정밀 저격 정찰:** KIS가 포착해 준 100개 종목 코드를 `data_provider(yfinance)`에 대입하여 대용량 차트 정보를 긁어와 기술 지표(EMA, VWAP, OBV, RSI)를 현미경 정찰하듯 분석하여 최종 타점 점수를 도출합니다.
+   - **정밀 저격 정찰:** 공용 후보와 관심종목 추가 티커의 시세를 `data_provider`를 통해 분석하되, 공용 신호 캐시와 관심종목 분석 캐시를 분리합니다.
 
-   - **주문 체결:** 최종 선정된 우량주 사냥감에 대해서만 한투(`KISBroker`) API를 쏘아 체결 및 포트폴리오를 동기화합니다. 이보다 더 효율적이고 이상적일 수 없는 하이브리드 트레이딩 루프입니다.
+   - **사용자별 재결합:** `build_user_signal_context()`가 현재 사용자의 관심종목만 공용 신호와 결합합니다. API와 자동매매는 이 컨텍스트를 소비해야 합니다.
+
+   - **주문 체결:** 사용자별 최종 후보에 대해서만 한투(`KISBroker`) API로 주문하고 체결 및 포트폴리오를 동기화합니다.
 
 
 

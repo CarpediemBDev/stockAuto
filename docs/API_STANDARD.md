@@ -47,3 +47,13 @@ HTTP 상태 코드: `4xx` 또는 `5xx`
 ## 3. 프런트엔드 처리 가이드
 - **Axios Interceptor**: `frontend/lib/api.ts`에 정의된 인터셉터가 성공 시 자동으로 `data`를 추출하므로, 컴포넌트에서는 `res.data`를 통해 실제 데이터에 즉시 접근할 수 있습니다.
 - **에러 핸들링**: 에러 발생 시 인터셉터가 `error.message`에 백엔드의 `message` 값을 주입하므로, `error.message`를 그대로 UI에 출력하면 됩니다.
+
+---
+
+## 4. 사용자별 스캐너 응답 계약
+
+- `GET /api/v1/scanner/latest`는 인증이 필요하며 공용 시장 상위 신호와 현재 로그인 사용자의 관심종목 신호만 반환합니다.
+- `WATCHLIST` 태그는 전역 캐시에 영구 저장하지 않고 현재 사용자의 `WatchList.user_id`를 확인한 응답·실행 컨텍스트에서 부여합니다.
+- 다른 사용자의 관심종목 티커나 `WATCHLIST` 태그가 응답에 포함되면 멀티테넌시 회귀로 처리합니다.
+- 스윙 예측은 현재 `GLOBAL_SWING_POOL`을 사용하는 공용 캐시이며, 사용자 관심종목 포함 여부는 GitHub #8에서 계약 확정 전입니다.
+- 상세 생산자·캐시·소비자 관계는 `docs/SCANNER_DATA_FLOW.md`를 따릅니다.
