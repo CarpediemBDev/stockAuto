@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, BackgroundTasks
 import app.bot.scheduler as scheduler_mod
 from app.core.exceptions import StockAutoException
 from app.core.logging import logger
-from app.scanner.scanner import scan_overseas_market
 from app.core import models
 from app.core.dependencies import get_current_user
 from app.core.database import get_db
@@ -22,26 +21,55 @@ from app.core.response import SuccessResponseRoute
 router = APIRouter(route_class=SuccessResponseRoute)
 
 @router.get("/latest")
-async def get_latest_signals():
-    """봇이 마지막으로 스캔한 상위 시그널 리스트를 반환합니다."""
+async def get_latest_signals(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """공용 상위 신호와 로그인 사용자의 관심종목 신호를 반환합니다."""
     if not hasattr(scheduler_mod, 'latest_scanned_signals'):
         raise StockAutoException(code="SCHEDULER_NOT_READY", message="스캐너 엔진이 아직 준비되지 않았습니다.", status_code=503)
-    
-    signals = scheduler_mod.latest_scanned_signals
-    is_scanning = getattr(scheduler_mod, "is_manual_scanning", False)
-    if not signals:
-        return {"is_scanning": is_scanning, "signals": []}
-    
-    # 점수 높은 순 정렬 (데이터가 있을 때만)
-    result = sorted(signals, key=lambda x: x.get('signal_score', 0), reverse=True)[:10]
+
+    market_signals = scheduler_mod.latest_scanned_signals
+    watchlists_by_user = scheduler_mod.load_watchlist_tickers_by_user(
+        db,
+        [current_user.id],
+    )
+    _, user_signals = scheduler_mod.build_user_signal_context(
+        current_user.id,
+        market_signals,
+        watchlists_by_user,
+        scheduler_mod.latest_watchlist_signals,
+    )
+
+    top_market_tickers = {
+        signal.get("ticker")
+        for signal in sorted(
+            market_signals,
+            key=lambda item: item.get("signal_score", 0),
+            reverse=True,
+        )[:10]
+    }
+    result = [
+        signal
+        for signal in sorted(
+            user_signals,
+            key=lambda item: item.get("signal_score", 0),
+            reverse=True,
+        )
+        if signal.get("ticker") in top_market_tickers
+        or "WATCHLIST" in signal.get("source", [])
+    ]
+    is_scanning = (
+        getattr(scheduler_mod, "is_manual_scanning", False)
+        or scheduler_mod.is_scanner_refresh_in_progress()
+    )
     return {"is_scanning": is_scanning, "signals": result}
 
 async def background_scan_overseas():
-    """백그라운드에서 스캔을 수행하고 전역 캐시를 업데이트합니다."""
+    """예약 스캔과 동일한 단일 실행 가드로 수동 스캔을 수행합니다."""
     scheduler_mod.is_manual_scanning = True
     try:
-        signals = await scan_overseas_market()
-        scheduler_mod.latest_scanned_signals = signals
+        await scheduler_mod.refresh_scanner_cache(force=True)
     except Exception as e:
         logger.error(f"[ManualScan] 백그라운드 스캔 중 오류 발생: {e}", exc_info=True)
     finally:

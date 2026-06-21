@@ -242,6 +242,16 @@ def load_watchlist_tickers_by_user(db, user_ids: list[int]) -> dict[int, set[str
     return watchlists
 
 
+def load_all_watchlist_tickers_by_user(db) -> dict[int, set[str]]:
+    watchlists: dict[int, set[str]] = {}
+    rows = db.query(WatchList.user_id, WatchList.ticker).all()
+    for user_id, raw_ticker in rows:
+        ticker = (raw_ticker or "").strip().upper()
+        if ticker:
+            watchlists.setdefault(user_id, set()).add(ticker)
+    return watchlists
+
+
 def build_user_signal_context(
     user_id: int,
     market_signals: list,
@@ -1122,7 +1132,12 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         db.close()
 
 
-async def refresh_scanner_cache():
+def is_scanner_refresh_in_progress() -> bool:
+    with _scanner_refresh_lock:
+        return _scanner_refresh_in_progress
+
+
+async def refresh_scanner_cache(force: bool = False) -> bool:
     """
     마켓 스캐너 캐시를 독립적으로 갱신하는 전용 비동기 함수 (10분 주기).
     자동매매 루프와 완전히 분리되어 Rate Limit 위험 없이 안전하게 동작합니다.
@@ -1132,15 +1147,15 @@ async def refresh_scanner_cache():
     with _scanner_refresh_lock:
         if _scanner_refresh_in_progress:
             logger.info("[Scanner Cache] Previous refresh still running. Skipping duplicate refresh.")
-            return
+            return False
         _scanner_refresh_in_progress = True
 
     try:
         # 장 외 시간 API 비용/호출 낭비 방지 가드
         session = get_market_session()
-        if session == MarketSession.CLOSED:
+        if session == MarketSession.CLOSED and not force:
             logger.info("[Scanner Cache] Market is closed. Skipping scan to save API quotas.")
-            return
+            return False
 
         logger.info("[Scanner Cache] Starting 10-min market scan refresh cycle...")
         signals = await scan_overseas_market()
@@ -1149,13 +1164,7 @@ async def refresh_scanner_cache():
 
         db = SessionLocal()
         try:
-            active_user_ids = [
-                row[0]
-                for row in db.query(UserSettings.user_id)
-                .filter(UserSettings.is_running == True)
-                .all()
-            ]
-            watchlists_by_user = load_watchlist_tickers_by_user(db, active_user_ids)
+            watchlists_by_user = load_all_watchlist_tickers_by_user(db)
         finally:
             db.close()
 
@@ -1178,8 +1187,10 @@ async def refresh_scanner_cache():
             len(signals),
             len(latest_watchlist_signals),
         )
+        return True
     except Exception as e:
         logger.exception("[Scanner Cache] ERROR during market scan")
+        return False
     finally:
         with _scanner_refresh_lock:
             _scanner_refresh_in_progress = False

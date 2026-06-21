@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -152,3 +153,36 @@ def test_start_scheduler_registers_swing_prediction_jobs(monkeypatch):
     assert job_by_id["orphan_order_discovery_job"]["minutes"] == 1
     assert job_by_id["orphan_order_discovery_job"]["max_instances"] == 1
     assert job_by_id["orphan_order_discovery_job"]["func"] is scheduler.discover_orphan_orders_wrapper
+
+
+@pytest.mark.asyncio
+async def test_scanner_refresh_skips_overlapping_manual_and_scheduled_runs(monkeypatch):
+    fake_db = FakeSession(
+        active_users=[],
+        holding_user_ids=[],
+        watchlist_rows=[],
+    )
+    active_scans = 0
+    max_active_scans = 0
+
+    async def fake_scan_overseas_market():
+        nonlocal active_scans, max_active_scans
+        active_scans += 1
+        max_active_scans = max(max_active_scans, active_scans)
+        await asyncio.sleep(0.05)
+        active_scans -= 1
+        return []
+
+    scheduler._scanner_refresh_in_progress = False
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(scheduler, "get_market_session", lambda: "REGULAR_MARKET")
+    monkeypatch.setattr(scheduler, "scan_overseas_market", fake_scan_overseas_market)
+
+    results = await asyncio.gather(
+        scheduler.refresh_scanner_cache(force=True),
+        scheduler.refresh_scanner_cache(force=False),
+    )
+
+    assert sorted(results) == [False, True]
+    assert max_active_scans == 1
+    assert scheduler.is_scanner_refresh_in_progress() is False

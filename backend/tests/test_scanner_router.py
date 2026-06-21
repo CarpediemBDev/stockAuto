@@ -60,6 +60,7 @@ def test_manual_overseas_scan_updates_latest_signal_cache(monkeypatch):
             "price": 100.0,
             "signal_score": 88,
             "signal_type": "STRONG_BUY",
+            "source": ["MARKET"],
             "details": {},
         }
     ]
@@ -67,9 +68,30 @@ def test_manual_overseas_scan_updates_latest_signal_cache(monkeypatch):
     async def fake_scan_overseas_market():
         return signals
 
-    monkeypatch.setattr(scanner_router_module, "scan_overseas_market", fake_scan_overseas_market)
+    async def fake_analyze_single_ticker(ticker, bypass_fundamental=False):
+        assert ticker == "AAPL"
+        assert bypass_fundamental is True
+        return {
+            "ticker": "AAPL",
+            "name": "Apple",
+            "price": 200.0,
+            "signal_score": 77,
+            "source": ["WATCHLIST"],
+            "details": {},
+        }
+
     scanner_router_module.scheduler_mod.latest_scanned_signals = []
+    scanner_router_module.scheduler_mod.latest_watchlist_signals = {}
     app, db, engine = create_authenticated_scanner_app()
+    scan_session_factory = sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=engine,
+    )
+    monkeypatch.setattr(scanner_router_module.scheduler_mod, "scan_overseas_market", fake_scan_overseas_market)
+    monkeypatch.setattr(scanner_router_module.scheduler_mod, "analyze_single_ticker", fake_analyze_single_ticker)
+    monkeypatch.setattr(scanner_router_module.scheduler_mod, "SessionLocal", scan_session_factory)
+    monkeypatch.setattr(scanner_router_module.scheduler_mod, "get_market_session", lambda: "CLOSED")
 
     try:
         with TestClient(app) as client:
@@ -81,12 +103,35 @@ def test_manual_overseas_scan_updates_latest_signal_cache(monkeypatch):
         assert latest_response.status_code == 200
         assert latest_response.json()["data"] == {
             "is_scanning": False,
-            "signals": signals,
+            "signals": [
+                signals[0],
+                {
+                    "ticker": "AAPL",
+                    "name": "Apple",
+                    "price": 200.0,
+                    "signal_score": 77,
+                    "source": ["WATCHLIST"],
+                    "details": {},
+                },
+            ],
         }
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+def test_latest_signals_requires_authentication():
+    app = create_scanner_app()
+
+    def override_get_db():
+        yield None
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as client:
+        response = client.get("/api/v1/scanner/latest")
+
+    assert response.status_code == 401
 
 
 def test_swing_prediction_cache_read_does_not_run_heavy_scan(monkeypatch):

@@ -230,3 +230,47 @@ def test_unresolved_order_guard_detects_pending_order(session_factory):
     assert reconciler.has_unresolved_orders(db, db_settings.user_id) is True
     assert db_settings.is_running is False
     db.close()
+
+
+def test_multiple_order_intents_inherit_auto_resume_until_all_are_terminal(session_factory):
+    db, db_settings = create_user_settings(session_factory)
+    orders = []
+
+    for ticker in ("AAPL", "MSFT"):
+        order = reconciler.create_order_intent(
+            db,
+            db_settings,
+            side="BUY",
+            ticker=ticker,
+            prefixed_ticker=ticker,
+            ticker_name=ticker,
+            requested_qty=1,
+            submitted_price=100.0,
+            exchange_code="NASD",
+            order_division="00",
+        )
+        reconciler.begin_order_submission(db, order, db_settings)
+        orders.append(order)
+
+    assert [order.resume_after_resolution for order in orders] == [True, True]
+
+    for index, order in enumerate(orders, start=1):
+        reconciler.finalize_order_submission(
+            db,
+            order,
+            db_settings,
+            {
+                "success": True,
+                "order_submitted": True,
+                "fill_confirmed": True,
+                "status": "FILLED",
+                "order_no": f"BUY-{index}",
+                "filled_qty": 1,
+                "filled_price": 100.0,
+            },
+        )
+
+    db.refresh(db_settings)
+    assert [order.status for order in orders] == ["FILLED", "FILLED"]
+    assert db_settings.is_running is True
+    db.close()

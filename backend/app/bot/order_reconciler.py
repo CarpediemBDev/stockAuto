@@ -283,6 +283,14 @@ def create_order_intent(
     source: str = "STRATEGY",
     resume_after_resolution: bool | None = None,
 ) -> BrokerOrder:
+    if resume_after_resolution is None:
+        inherited_resume_request = db.query(BrokerOrder.id).filter(
+            BrokerOrder.user_id == db_settings.user_id,
+            BrokerOrder.status.in_(UNRESOLVED_ORDER_STATUSES),
+            BrokerOrder.resume_after_resolution.is_(True),
+        ).first() is not None
+        resume_after_resolution = bool(db_settings.is_running) or inherited_resume_request
+
     order = BrokerOrder(
         user_id=db_settings.user_id,
         intent_id=str(uuid4()),
@@ -304,11 +312,7 @@ def create_order_intent(
         regime_mode=regime_mode,
         signal_score=signal_score,
         sell_reason=sell_reason,
-        resume_after_resolution=(
-            bool(db_settings.is_running)
-            if resume_after_resolution is None
-            else resume_after_resolution
-        ),
+        resume_after_resolution=resume_after_resolution,
         submitted_at=utc_now_aware(),
     )
     db.add(order)
