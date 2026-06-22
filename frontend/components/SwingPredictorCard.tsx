@@ -29,13 +29,14 @@ interface SwingCandidate {
 
 interface SwingPredictionResponse {
   candidates: SwingCandidate[];
+  scope: "global";
   sync_status: "empty" | "failed" | "fresh" | "refreshing" | "stale";
   updated_at: string | null;
 }
 
 export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingPredictorCardProps) {
   const { data: swrData, isLoading: swrLoading, mutate: mutateSwing } = useSWR('/scanner/swing-predict', fetcher, { refreshInterval: 15000 });
-  const payload: SwingPredictionResponse = swrData || { candidates: [], sync_status: "empty", updated_at: null };
+  const payload: SwingPredictionResponse = swrData || { candidates: [], scope: "global", sync_status: "empty", updated_at: null };
   const candidates = payload.candidates;
   const syncStatus = payload.sync_status;
   const updatedAt = payload.updated_at;
@@ -126,7 +127,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
                 Daily Swing
               </span>
             </h3>
-            <p className="text-xs text-zinc-400 font-medium">120일 누적 일봉 데이터를 분석하여 변동성 및 수급 수축 한계점에 도달한 종목을 포착합니다.</p>
+            <p className="text-xs text-zinc-400 font-medium">공용 시장 주도주 풀의 120일 일봉을 분석하여 변동성 및 수급 수축 한계점에 도달한 종목을 포착합니다.</p>
           </div>
         </div>
         <div className="flex items-center gap-2 self-end md:self-auto">
@@ -138,7 +139,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
               syncStatus === "failed" ? "bg-rose-500" :
               "bg-indigo-500"
             )}></span>
-            {syncStatus.toUpperCase()} SWING SIGNALS
+            GLOBAL MARKET · {syncStatus.toUpperCase()} SWING SIGNALS
           </span>
           {updatedAt && (
             <span className="text-[10px] text-zinc-400 font-mono flex items-center gap-1.5">
@@ -152,7 +153,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
             onClick={() => refreshSwingCandidates()}
             disabled={refreshing}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50 border border-zinc-800"
-            title="관심종목과 기본 주도주 풀을 기준으로 스윙 예측을 새로 계산합니다"
+            title="모든 사용자가 공유하는 공용 시장 주도주 풀의 스윙 예측을 새로 계산합니다"
           >
             <RefreshCw size={13} className={cn(refreshing && "animate-spin text-indigo-400")} />
             {refreshing ? "갱신 중..." : "수동 갱신"}
@@ -198,7 +199,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
               ? "현재 스윙 후보를 분석하는 중입니다."
               : syncStatus === "failed"
                 ? "최근 스윙 예측 갱신에 실패했습니다. 잠시 후 수동 갱신을 다시 실행해 주세요."
-                : "수동 갱신을 실행하면 관심종목과 기본 주도주 풀을 새로 분석합니다."}
+                : "수동 갱신을 실행하면 공용 시장 주도주 풀을 새로 분석합니다."}
           </p>
         </div>
       ) : (

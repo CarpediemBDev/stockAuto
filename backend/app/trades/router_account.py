@@ -76,9 +76,19 @@ async def get_balance(
             for slot_key, alloc_info in slot_allocations.items()
         }
 
-        # 💡 실시간 최정예 돌파 레이더 종목 (RVOL >= 2.0 이상 및 거래량 응축 종목)
-        latest_signals = getattr(scheduler_mod, 'latest_scanned_signals', [])
-        focused_set = ms_manager.get_focused_tickers(latest_signals)
+        # 현재 사용자의 관심종목 소유권을 공용 분석값과 결합한 뒤 레이더를 계산합니다.
+        market_signals = getattr(scheduler_mod, "latest_scanned_signals", [])
+        watchlists_by_user = scheduler_mod.load_watchlist_tickers_by_user(
+            db,
+            [current_user.id],
+        )
+        _, user_signals = scheduler_mod.build_user_signal_context(
+            current_user.id,
+            market_signals,
+            watchlists_by_user,
+            getattr(scheduler_mod, "latest_watchlist_signals", {}),
+        )
+        focused_set = ms_manager.get_focused_tickers(user_signals)
         focused_radar_tickers = sorted(list(focused_set))
 
         # 💡 기존 balance 데이터에 정밀 메타데이터 주입

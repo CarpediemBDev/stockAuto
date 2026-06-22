@@ -148,6 +148,7 @@ def test_swing_prediction_cache_read_does_not_run_heavy_scan(monkeypatch):
         assert response.status_code == 200
         assert response.json()["data"] == {
             "candidates": [],
+            "scope": "global",
             "sync_status": "empty",
             "updated_at": None,
         }
@@ -283,6 +284,7 @@ def test_swing_prediction_refresh_failure_persists_failed_status(monkeypatch):
         assert response["sync_status"] == "failed"
         assert cached == {
             "candidates": [],
+            "scope": "global",
             "sync_status": "failed",
             "updated_at": None,
         }

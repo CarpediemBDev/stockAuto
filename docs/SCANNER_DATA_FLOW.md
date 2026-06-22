@@ -39,21 +39,21 @@ flowchart LR
 
     UserContext --> LatestAPI["GET /scanner/latest"]
     UserContext --> TradingLoop["사용자 자동매매 흐름"]
-    UserContext -. "GitHub #8 후속" .-> AccountRadar["GET /account/balance 레이더"]
+    UserContext --> AccountRadar["GET /account/balance 레이더"]
 
     PublicSources --> SwingPool["GLOBAL_SWING_POOL"]
-    SwingPool -. "개인화 계약 결정 필요: #8" .-> SwingAPI["/scanner/swing-predict"]
+    SwingPool -->|"인증 사용자 공용 응답(scope=global)"| SwingAPI["/scanner/swing-predict"]
 ```
 
 ## 4. 경로별 계약
 
 | 경로 | 인증 | 공용 신호 | 현재 사용자 관심종목 | 상태 |
 | :--- | :---: | :---: | :---: | :--- |
-| `GET /scanner/latest` | 필수 | 상위 10개 | 모두 결합 | 로컬 수정 `30479be`, GitHub #8 승인 대기 |
+| `GET /scanner/latest` | 필수 | 상위 10개 | 모두 결합 | 2사용자 API 격리 검증 완료 |
 | `POST /scanner/overseas` | 필수 | 전체 캐시 갱신 | 전체 티커 분석 캐시 갱신 | 수동·예약 단일 실행 가드 사용 |
 | 자동매매 사이클 | 내부 | 전체 | 활성 사용자별 결합 | `build_user_signal_context()` 사용 |
-| `GET /account/balance` 레이더 | 필수 | 사용 | 결합 필요 | 현재 누락, GitHub #8 |
-| `GET/POST /scanner/swing-predict` | 필수 | 글로벌 풀 | 현재 미결합 | 공용/개인화 계약 결정 필요, GitHub #8 |
+| `GET /account/balance` 레이더 | 필수 | 사용 | 모두 결합 | `build_user_signal_context()` 재사용, 2사용자 API 격리 검증 완료 |
+| `GET/POST /scanner/swing-predict` | 필수 | 글로벌 풀 | 결합하지 않음 | 인증된 모든 사용자에게 동일한 `scope=global` 공용 시장 후보 제공 |
 
 ## 5. 금지되는 구현
 
@@ -86,5 +86,6 @@ flowchart LR
 ## 8. 추적 상태
 
 - GitHub [#8 멀티테넌시 분리 후 사용자 관심종목 재결합 누락](https://github.com/CarpediemBDev/stockAuto/issues/8)
-- `/scanner/latest`는 수정됐지만 사용자 최종 승인 전이므로 이슈를 닫지 않습니다.
-- 스윙 예측과 계좌 레이더 계약은 후속 구현 대상입니다.
+- `/scanner/latest`와 `/account/balance`는 동일한 사용자 신호 컨텍스트를 사용하고 2사용자 격리·삭제 후 제거 시나리오를 통과했습니다.
+- 스윙 예측은 관심종목을 결합하지 않는 인증된 공용 시장 기능으로 확정했으며 응답의 `scope` 값은 `global`입니다.
+- 회귀 테스트 원장은 `backend/tests/test_scanner_multitenancy.py`이며 GitHub #8 완료 근거로 사용합니다.

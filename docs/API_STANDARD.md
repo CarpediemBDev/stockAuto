@@ -55,5 +55,7 @@ HTTP 상태 코드: `4xx` 또는 `5xx`
 - `GET /api/v1/scanner/latest`는 인증이 필요하며 공용 시장 상위 신호와 현재 로그인 사용자의 관심종목 신호만 반환합니다.
 - `WATCHLIST` 태그는 전역 캐시에 영구 저장하지 않고 현재 사용자의 `WatchList.user_id`를 확인한 응답·실행 컨텍스트에서 부여합니다.
 - 다른 사용자의 관심종목 티커나 `WATCHLIST` 태그가 응답에 포함되면 멀티테넌시 회귀로 처리합니다.
-- 스윙 예측은 현재 `GLOBAL_SWING_POOL`을 사용하는 공용 캐시이며, 사용자 관심종목 포함 여부는 GitHub #8에서 계약 확정 전입니다.
+- `GET /api/v1/account/balance`의 `focused_radar_tickers`도 `/scanner/latest`와 같은 사용자 신호 컨텍스트를 사용하며 현재 사용자의 관심종목만 강제 포함합니다.
+- `GET/POST /api/v1/scanner/swing-predict`는 인증이 필요하지만 사용자 관심종목을 결합하지 않는 공용 시장 기능입니다. 모든 사용자가 `GLOBAL_SWING_POOL`을 공유하며 응답의 `scope`는 항상 `global`입니다.
+- 스윙 예측의 DB 세션은 공용 스냅샷의 재시작 복구에 사용하고, 인증 사용자 의존성은 갱신 비용이 있는 API의 접근 제어에 사용합니다.
 - 상세 생산자·캐시·소비자 관계는 `docs/SCANNER_DATA_FLOW.md`를 따릅니다.

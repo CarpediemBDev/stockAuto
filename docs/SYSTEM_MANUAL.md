@@ -468,6 +468,12 @@ graph TD
 
     UserContext -->|6. 사용자별 응답| ScannerAPI["GET /scanner/latest"]
 
+    UserContext -->|6. 사용자별 레이더| AccountRadar["GET /account/balance"]
+
+    PublicSeed -->|공용 120일 일봉 분석| SwingCache["GLOBAL_SWING_POOL"]
+
+    SwingCache -->|scope=global 공용 응답| SwingAPI["GET/POST /scanner/swing-predict"]
+
     Scheduler -->|7. 최종 매수/매도 주문 집행 요청| KIS_Broker["kis_broker.py - BaseBroker 인터페이스"]
 
     KIS_Broker -->|8. 실전/모의 거래소 전송| KIS_Server["한국투자증권 실전/모의 서버"]
@@ -480,7 +486,7 @@ graph TD
 
     class Toss,YF_Active,Naver yf;
 
-    class PublicSeed,Scanner,MarketCache,WatchCache,UserContext,ScannerAPI,Scheduler scan;
+    class PublicSeed,Scanner,MarketCache,WatchCache,UserContext,ScannerAPI,AccountRadar,SwingCache,SwingAPI,Scheduler scan;
 
 ```
 
@@ -512,7 +518,9 @@ graph TD
 
    - **정밀 저격 정찰:** 공용 후보와 관심종목 추가 티커의 시세를 `data_provider`를 통해 분석하되, 공용 신호 캐시와 관심종목 분석 캐시를 분리합니다.
 
-   - **사용자별 재결합:** `build_user_signal_context()`가 현재 사용자의 관심종목만 공용 신호와 결합합니다. API와 자동매매는 이 컨텍스트를 소비해야 합니다.
+   - **사용자별 재결합:** `build_user_signal_context()`가 현재 사용자의 관심종목만 공용 신호와 결합합니다. `/scanner/latest`, 자동매매, `/account/balance` 레이더가 같은 컨텍스트를 소비합니다.
+
+   - **공용 스윙 계약:** 스윙 예측은 관심종목을 결합하지 않고 공용 시장 시드만 분석합니다. 인증 사용자는 모두 `GLOBAL_SWING_POOL`과 DB 스냅샷을 공유하며 응답의 `scope`는 `global`입니다.
 
    - **주문 체결:** 사용자별 최종 후보에 대해서만 한투(`KISBroker`) API로 주문하고 체결 및 포트폴리오를 동기화합니다.
 

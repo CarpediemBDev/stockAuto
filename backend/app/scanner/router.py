@@ -95,19 +95,19 @@ async def trigger_overseas_scan(
 
 @router.get("/swing-predict")
 async def get_swing_prediction(
-    current_user: models.User = Depends(get_current_user),
+    _authenticated_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """캐시된 스윙 예측 후보를 즉시 반환합니다."""
+    """인증된 모든 사용자가 공유하는 공용 시장 스윙 후보를 반환합니다."""
     return read_swing_prediction_cache(get_swing_cache_key(), db)
 
 
 @router.post("/swing-predict/refresh")
 async def refresh_swing_prediction(
-    current_user: models.User = Depends(get_current_user),
+    _authenticated_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """내일 세력돌파 및 스윙 상승 가능성이 있는 TOP 5 종목군을 수동 갱신합니다."""
+    """모든 인증 사용자가 공유하는 공용 시장 스윙 후보를 수동 갱신합니다."""
     cache_key = get_swing_cache_key()
     if reserve_swing_prediction_refresh(cache_key):
         refreshing_swing_response(cache_key, db)

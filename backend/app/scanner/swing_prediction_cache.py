@@ -15,6 +15,7 @@ SWING_SYNC_FAILED = "failed"
 SWING_SYNC_FRESH = "fresh"
 SWING_SYNC_REFRESHING = "refreshing"
 SWING_SYNC_STALE = "stale"
+SWING_SCOPE_GLOBAL = "global"
 
 
 _swing_prediction_cache_lock = threading.RLock()
@@ -34,6 +35,7 @@ def serialize_swing_cache_key(cache_key: tuple[str, ...]) -> str:
 def empty_swing_response(sync_status: str = SWING_SYNC_EMPTY) -> dict:
     return {
         "candidates": [],
+        "scope": SWING_SCOPE_GLOBAL,
         "sync_status": sync_status,
         "updated_at": None,
     }
@@ -55,6 +57,7 @@ def snapshot_to_swing_response(snapshot: models.SwingPredictionSnapshot, sync_st
         candidates = []
     return {
         "candidates": candidates,
+        "scope": SWING_SCOPE_GLOBAL,
         "sync_status": sync_status or snapshot.sync_status,
         "updated_at": snapshot.created_at.isoformat() if snapshot.created_at else None,
     }
@@ -66,6 +69,7 @@ def read_swing_prediction_cache(cache_key: tuple[str, ...], db: Session) -> dict
         if cached:
             response = {
                 "candidates": list(cached["candidates"]),
+                "scope": SWING_SCOPE_GLOBAL,
                 "sync_status": cached["sync_status"],
                 "updated_at": cached["updated_at"],
             }
@@ -92,6 +96,7 @@ def write_swing_prediction_cache(cache_key: tuple[str, ...], candidates: list, s
     with _swing_prediction_cache_lock:
         _swing_prediction_cache[cache_key] = {
             "candidates": list(candidates),
+            "scope": SWING_SCOPE_GLOBAL,
             "sync_status": sync_status,
             "updated_at": updated_at,
             "timestamp": time.time(),
