@@ -44,7 +44,7 @@ def create_user_settings(session_factory, *, is_running=True):
     return db, db_settings
 
 
-def test_partial_buy_is_applied_idempotently_and_resumes_after_final_fill(
+def test_partial_buy_is_applied_idempotently_and_preserves_running_preference(
     session_factory,
     monkeypatch,
 ):
@@ -73,7 +73,6 @@ def test_partial_buy_is_applied_idempotently_and_resumes_after_final_fill(
 
     assert application.applied_qty == 2
     assert application.is_unresolved is True
-    assert db_settings.is_running is False
     holding = db.query(Holding).filter(Holding.user_id == db_settings.user_id).one()
     assert holding.ticker == "AAPL"
     assert holding.strategy_type == "episodic_pivot"
@@ -120,7 +119,7 @@ def test_partial_buy_is_applied_idempotently_and_resumes_after_final_fill(
     check_db.close()
 
 
-def test_partial_sell_uses_only_fill_delta_and_manual_stop_disables_auto_resume(
+def test_partial_sell_uses_only_fill_delta_and_preserves_manual_stop(
     session_factory,
     monkeypatch,
 ):
@@ -177,7 +176,7 @@ def test_partial_sell_uses_only_fill_delta_and_manual_stop_disables_auto_resume(
     assert order.applied_filled_qty == 4
     assert db.query(Holding).one().quantity == 6
 
-    reconciler.disable_auto_resume_for_user(db, db_settings.user_id)
+    db_settings.is_running = False
     db.commit()
     db.close()
 
@@ -202,7 +201,6 @@ def test_partial_sell_uses_only_fill_delta_and_manual_stop_disables_auto_resume(
     assert final_order.applied_filled_qty == 10
     assert check_db.query(Holding).count() == 0
     assert [log.quantity for log in sell_logs] == [4, 6]
-    assert final_settings.is_running is False
     check_db.close()
 
 
@@ -228,11 +226,10 @@ def test_unresolved_order_guard_detects_pending_order(session_factory):
     )
 
     assert reconciler.has_unresolved_orders(db, db_settings.user_id) is True
-    assert db_settings.is_running is False
     db.close()
 
 
-def test_multiple_order_intents_inherit_auto_resume_until_all_are_terminal(session_factory):
+def test_multiple_order_intents_preserve_running_preference_until_terminal(session_factory):
     db, db_settings = create_user_settings(session_factory)
     orders = []
 
@@ -251,8 +248,6 @@ def test_multiple_order_intents_inherit_auto_resume_until_all_are_terminal(sessi
         )
         reconciler.begin_order_submission(db, order, db_settings)
         orders.append(order)
-
-    assert [order.resume_after_resolution for order in orders] == [True, True]
 
     for index, order in enumerate(orders, start=1):
         reconciler.finalize_order_submission(

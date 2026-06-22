@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.scanner.data_provider import fetch_ohlcv
+from uuid import uuid4
 
 from app.core.database import get_db
 from app.bot.broker_factory import get_broker_client
@@ -14,6 +15,11 @@ from fastapi.concurrency import run_in_threadpool
 from app.core.dependencies import get_current_user
 from app.core.models import User, Holding, TradeLog, ActionLog
 from app.core.config import settings as app_settings
+from app.core.locks import (
+    RedisLockUnavailable,
+    acquire_symbol_order_lock,
+    acquire_user_operation_lock,
+)
 
 from app.core.response import SuccessResponseRoute
 router = APIRouter(route_class=SuccessResponseRoute, tags=["Account"])
@@ -192,149 +198,179 @@ async def force_liquidate(
     [개인투자자 위험 영역] 보유 중인 모든 종목 즉시 시장가 전량 강제 매도 청산.
     현재 보유 중인 모든 종목을 실시간 시장 가격으로 일괄 일시 처분합니다.
     """
-    holdings = db.query(Holding).filter(Holding.user_id == current_user.id).all()
-    if not holdings:
-        return {"message": "현재 보유 주식이 없어 청산할 주식이 없습니다."}
-    if has_unresolved_orders(db, current_user.id):
+    operation_id = str(uuid4())
+    try:
+        user_lease = await acquire_user_operation_lock(current_user.id, operation_id)
+    except RedisLockUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="주문 동시성 제어 서비스에 연결할 수 없어 청산을 시작하지 않았습니다.",
+        ) from exc
+    if user_lease is None:
         raise HTTPException(
             status_code=409,
-            detail="미해결 증권사 주문이 있어 전량 청산을 시작할 수 없습니다.",
+            detail="이미 이 계정의 다른 거래 작업이 진행 중입니다.",
         )
 
-
-
-    broker = get_broker_client(current_user.settings)
-    liquidated_tickers = []
-    trade_mode = (current_user.settings.trade_mode or "SIMULATED").upper()
-    is_kis_order = trade_mode in {"MOCK", "REAL"}
-    was_running = bool(current_user.settings.is_running)
-
-    if is_kis_order:
-        from app.bot.scheduler import get_market_session
-
-        market_session = get_market_session()
-        from app.bot.market_session import MarketSession
-        if market_session == MarketSession.CLOSED:
-            raise HTTPException(
-                status_code=400,
-                detail="미국 시장이 닫혀 있어 전량 청산 주문을 전송할 수 없습니다.",
-            )
-        current_user.settings.is_running = False
-        db.commit()
-    else:
-        from app.bot.market_session import MarketSession
-        market_session = MarketSession.REGULAR
-
     try:
-        for h in holdings:
-            clean_ticker = h.ticker
-
-            # 실시간 청산 가격 조회 (데이터 프로바이더 연동으로 결합도 해제)
-            try:
-                df = await fetch_ohlcv(clean_ticker, interval="1m", period="1d")
-                if not df.empty:
-                    price = float(df["Close"].iloc[-1])
-                else:
-                    price = h.highest_price or h.avg_price
-            except Exception:
-                price = h.highest_price or h.avg_price
-
-            if is_kis_order:
-                metadata = await run_in_threadpool(
-                    broker.get_order_metadata,
-                    clean_ticker,
-                    market_session,
-                )
-                order_intent = create_order_intent(
-                    db,
-                    current_user.settings,
-                    side="SELL",
-                    ticker=clean_ticker,
-                    prefixed_ticker=h.ticker,
-                    ticker_name=h.ticker_name,
-                    requested_qty=h.quantity,
-                    submitted_price=price,
-                    exchange_code=metadata.get("exchange_code"),
-                    order_division=metadata.get("order_division"),
-                    regime_mode="LIQUIDATE",
-                    signal_score=0,
-                    sell_reason="사용자 수동 전량 청산",
-                    source="MANUAL_LIQUIDATION",
-                    resume_after_resolution=False,
-                )
-                begin_order_submission(db, order_intent, current_user.settings)
-                try:
-                    res = await run_in_threadpool(
-                        broker.sell_order,
-                        ticker=clean_ticker,
-                        quantity=h.quantity,
-                        price=price,
-                        session=market_session,
-                        client_order_id=order_intent.intent_id,
-                    )
-                except Exception as exc:
-                    res = {
-                        "success": False,
-                        "order_submitted": True,
-                        "submission_unknown": True,
-                        "status": "ACK_UNKNOWN",
-                        "order_no": "",
-                        "filled_qty": 0,
-                        "filled_price": 0.0,
-                        "fill_confirmed": False,
-                        "message": f"Broker acknowledgement unknown: {exc}",
-                    }
-
-                application = finalize_order_submission(
-                    db,
-                    order_intent,
-                    current_user.settings,
-                    res,
-                )
-                if application.applied_qty > 0:
-                    liquidated_tickers.append(h.ticker)
-                if application.is_unresolved:
-                    return {
-                        "message": (
-                            f"{h.ticker} 청산 주문이 {order_intent.status} 상태입니다. "
-                            "자동매매를 정지하고 주문 재조정을 계속합니다."
-                        )
-                    }
-                if not res.get("success"):
-                    if was_running:
-                        current_user.settings.is_running = True
-                        db.commit()
-                    return {"message": f"{h.ticker} 청산 주문이 거부되었습니다: {res.get('message', 'Unknown error')}"}
-                continue
-
-            # SIMULATED 모드는 즉시 체결 결과를 기존 방식으로 반영합니다.
-            res = await run_in_threadpool(
-                broker.sell_order,
-                ticker=clean_ticker,
-                quantity=h.quantity,
-                price=price,
-                session=market_session,
+        holdings = db.query(Holding).filter(Holding.user_id == current_user.id).all()
+        if not holdings:
+            return {"message": "현재 보유 주식이 없어 청산할 주식이 없습니다."}
+        if has_unresolved_orders(db, current_user.id):
+            raise HTTPException(
+                status_code=409,
+                detail="미해결 증권사 주문이 있어 전량 청산을 시작할 수 없습니다.",
             )
 
-            if res.get("success"):
-                filled_price = res.get("filled_price", price)
-                filled_qty = res.get("filled_qty", h.quantity)
-                order_no = res.get("order_no", "LIQUIDATE_MANUAL")
+        broker = get_broker_client(current_user.settings)
+        liquidated_tickers = []
+        trade_mode = (current_user.settings.trade_mode or "SIMULATED").upper()
+        is_kis_order = trade_mode in {"MOCK", "REAL"}
 
-                # 💡 [수수료 정밀 반영] 스케줄러의 자동 매도와 동일한 수수료 공식 적용
-                buy_gross = h.avg_price * filled_qty
-                buy_fee = buy_gross * app_settings.KIS_FEE_RATE
+        from app.bot.market_session import MarketSession
+        if is_kis_order:
+            from app.bot.scheduler import get_market_session
+
+            market_session = get_market_session()
+            if market_session == MarketSession.CLOSED:
+                raise HTTPException(
+                    status_code=400,
+                    detail="미국 시장이 닫혀 있어 전량 청산 주문을 전송할 수 없습니다.",
+                )
+        else:
+            market_session = MarketSession.REGULAR
+
+        for holding in holdings:
+            clean_ticker = holding.ticker
+            symbol_request_id = str(uuid4())
+            try:
+                symbol_lease = await acquire_symbol_order_lock(
+                    current_user.id,
+                    clean_ticker,
+                    symbol_request_id,
+                )
+            except RedisLockUnavailable as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"{clean_ticker} 주문 락을 확인할 수 없어 청산을 중단했습니다.",
+                ) from exc
+            if symbol_lease is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{clean_ticker} 주문이 이미 진행 중입니다.",
+                )
+
+            try:
+                try:
+                    df = await fetch_ohlcv(clean_ticker, interval="1m", period="1d")
+                    price = (
+                        float(df["Close"].iloc[-1])
+                        if not df.empty
+                        else holding.highest_price or holding.avg_price
+                    )
+                except Exception:
+                    price = holding.highest_price or holding.avg_price
+
+                if is_kis_order:
+                    metadata = await run_in_threadpool(
+                        broker.get_order_metadata,
+                        clean_ticker,
+                        market_session,
+                    )
+                    order_intent = create_order_intent(
+                        db,
+                        current_user.settings,
+                        side="SELL",
+                        ticker=clean_ticker,
+                        prefixed_ticker=holding.ticker,
+                        strategy_type=holding.strategy_type,
+                        ticker_name=holding.ticker_name,
+                        requested_qty=holding.quantity,
+                        submitted_price=price,
+                        exchange_code=metadata.get("exchange_code"),
+                        order_division=metadata.get("order_division"),
+                        regime_mode="LIQUIDATE",
+                        signal_score=0,
+                        sell_reason="사용자 수동 전량 청산",
+                        source="MANUAL_LIQUIDATION",
+                    )
+                    begin_order_submission(db, order_intent, current_user.settings)
+                    try:
+                        result = await run_in_threadpool(
+                            broker.sell_order,
+                            ticker=clean_ticker,
+                            quantity=holding.quantity,
+                            price=price,
+                            session=market_session,
+                            client_order_id=order_intent.intent_id,
+                        )
+                    except Exception as exc:
+                        result = {
+                            "success": False,
+                            "order_submitted": True,
+                            "submission_unknown": True,
+                            "status": "ACK_UNKNOWN",
+                            "order_no": "",
+                            "filled_qty": 0,
+                            "filled_price": 0.0,
+                            "fill_confirmed": False,
+                            "message": f"Broker acknowledgement unknown: {exc}",
+                        }
+
+                    application = finalize_order_submission(
+                        db,
+                        order_intent,
+                        current_user.settings,
+                        result,
+                    )
+                    if application.applied_qty > 0:
+                        liquidated_tickers.append(holding.ticker)
+                    if application.is_unresolved:
+                        return {
+                            "message": (
+                                f"{holding.ticker} 청산 주문이 {order_intent.status} 상태입니다. "
+                                "사용자 봇 설정을 유지하고 주문 재조정을 계속합니다."
+                            )
+                        }
+                    if not result.get("success"):
+                        return {
+                            "message": (
+                                f"{holding.ticker} 청산 주문이 거부되었습니다: "
+                                f"{result.get('message', 'Unknown error')}"
+                            )
+                        }
+                    continue
+
+                result = await run_in_threadpool(
+                    broker.sell_order,
+                    ticker=clean_ticker,
+                    quantity=holding.quantity,
+                    price=price,
+                    session=market_session,
+                )
+                if not result.get("success"):
+                    continue
+
+                filled_price = float(result.get("filled_price", price))
+                filled_qty = int(result.get("filled_qty", holding.quantity))
+                if filled_qty <= 0 or filled_qty > holding.quantity:
+                    raise ValueError(
+                        f"Invalid liquidation fill quantity for {holding.ticker}: {filled_qty}"
+                    )
+                order_no = result.get("order_no", "LIQUIDATE_MANUAL")
+                buy_gross = holding.avg_price * filled_qty
+                buy_fee = buy_gross * app_settings.SIMULATED_FEE_RATE
                 sell_gross = filled_price * filled_qty
-                sell_fee = sell_gross * app_settings.KIS_FEE_RATE
+                sell_fee = sell_gross * app_settings.SIMULATED_FEE_RATE
                 sec_fee = sell_gross * app_settings.SEC_FEE_RATE
-
                 realized_pnl = sell_gross - buy_gross - buy_fee - sell_fee - sec_fee
                 calc_return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
 
                 db.add(TradeLog(
                     user_id=current_user.id,
-                    ticker=h.ticker,
-                    ticker_name=h.ticker_name,
+                    ticker=holding.ticker,
+                    strategy_type=holding.strategy_type,
+                    ticker_name=holding.ticker_name,
                     trade_type="SELL",
                     price=filled_price,
                     quantity=filled_qty,
@@ -342,21 +378,31 @@ async def force_liquidate(
                     regime_mode="LIQUIDATE",
                     signal_score=0,
                     realized_pnl=round(realized_pnl, 2),
-                    return_rate=round(calc_return_rate, 2)
+                    return_rate=round(calc_return_rate, 2),
                 ))
-                db.delete(h)
-                liquidated_tickers.append(h.ticker)
-
-        if is_kis_order and was_running:
-            current_user.settings.is_running = True
-        db.commit()
+                if filled_qty == holding.quantity:
+                    db.delete(holding)
+                else:
+                    holding.quantity -= filled_qty
+                db.commit()
+                liquidated_tickers.append(holding.ticker)
+            finally:
+                await symbol_lease.release()
 
         return {
             "message": (
                 f"보유 중인 {len(liquidated_tickers)}개 종목"
-                f"({', '.join(liquidated_tickers)})이 모두 시장가 일괄 청산되었습니다."
+                f"({', '.join(liquidated_tickers)})이 시장가 청산 처리되었습니다."
             )
         }
-    except Exception as e:
+    except HTTPException:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"일괄 청산 과정 중 오류가 발생했습니다: {str(e)}")
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"일괄 청산 과정 중 오류가 발생했습니다: {str(exc)}",
+        ) from exc
+    finally:
+        await user_lease.release()

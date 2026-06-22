@@ -107,7 +107,6 @@ def test_competitive_seed_preserves_existing_user_settings(tmp_path, monkeypatch
             admin = db.query(User).filter(User.username == "admin").one()
             assert admin.settings.strategy_type == "strategy_c"
             assert admin.settings.trade_mode == "REAL"
-            assert admin.settings.is_running is False
             strategy = db.query(Strategy).filter(
                 Strategy.strategy_type == "regime_switching"
             ).one()

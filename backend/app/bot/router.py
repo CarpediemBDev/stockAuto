@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.bot.order_reconciler import disable_auto_resume_for_user, has_unresolved_orders
+from app.bot.order_reconciler import has_unresolved_orders
 from app.core.database import get_db
 from app.core.models import User, UserSettings, utc_now_aware
 from app.core.dependencies import get_current_user
@@ -54,7 +54,6 @@ def stop_bot(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    disable_auto_resume_for_user(db, current_user.id)
     settings = current_user.settings
     if not settings:
         settings = UserSettings(user_id=current_user.id, is_running=False)

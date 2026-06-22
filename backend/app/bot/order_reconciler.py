@@ -50,15 +50,6 @@ def has_unresolved_orders(db, user_id: int) -> bool:
     ).first() is not None
 
 
-def disable_auto_resume_for_user(db, user_id: int) -> None:
-    orders = db.query(BrokerOrder).filter(
-        BrokerOrder.user_id == user_id,
-        BrokerOrder.status.in_(UNRESOLVED_ORDER_STATUSES),
-    ).all()
-    for order in orders:
-        order.resume_after_resolution = False
-
-
 def _normalize_status(raw_status: str | None) -> str:
     status = (raw_status or "PENDING").upper()
     if status in {"SUBMITTED", "PENDING", "UNCONFIRMED", "UNFILLED"}:
@@ -251,18 +242,6 @@ def apply_broker_report(db, order: BrokerOrder, report: dict) -> FillApplication
     return application
 
 
-def _resume_user_if_safe(db, order: BrokerOrder, db_settings: UserSettings) -> bool:
-    if order.status not in TERMINAL_ORDER_STATUSES or not order.resume_after_resolution:
-        return False
-    db.flush()
-    if has_unresolved_orders(db, order.user_id):
-        return False
-    db_settings.is_running = True
-    order.resume_after_resolution = False
-    return True
-
-
-
 def create_order_intent(
     db,
     db_settings: UserSettings,
@@ -281,15 +260,7 @@ def create_order_intent(
     signal_score: int | None = None,
     sell_reason: str | None = None,
     source: str = "STRATEGY",
-    resume_after_resolution: bool | None = None,
 ) -> BrokerOrder:
-    if resume_after_resolution is None:
-        inherited_resume_request = db.query(BrokerOrder.id).filter(
-            BrokerOrder.user_id == db_settings.user_id,
-            BrokerOrder.status.in_(UNRESOLVED_ORDER_STATUSES),
-            BrokerOrder.resume_after_resolution.is_(True),
-        ).first() is not None
-        resume_after_resolution = bool(db_settings.is_running) or inherited_resume_request
 
     order = BrokerOrder(
         user_id=db_settings.user_id,
@@ -312,7 +283,6 @@ def create_order_intent(
         regime_mode=regime_mode,
         signal_score=signal_score,
         sell_reason=sell_reason,
-        resume_after_resolution=resume_after_resolution,
         submitted_at=utc_now_aware(),
     )
     db.add(order)
@@ -327,7 +297,6 @@ def begin_order_submission(db, order: BrokerOrder, db_settings: UserSettings) ->
     order.status = "SUBMITTING"
     order.submission_attempts += 1
     order.submission_started_at = utc_now_aware()
-    db_settings.is_running = False
     db.commit()
 
 
@@ -348,7 +317,6 @@ def finalize_order_submission(
     if acknowledgement_unknown:
         order.status = "ACK_UNKNOWN"
         order.last_error = order_result.get("message") or "Broker acknowledgement is unknown."
-        db_settings.is_running = False
         db.commit()
         return FillApplication(order=order, error=order.last_error)
 
@@ -357,15 +325,10 @@ def finalize_order_submission(
         order.last_error = order_result.get("message")
         order.resolved_at = utc_now_aware()
         application = FillApplication(order=order)
-        _resume_user_if_safe(db, order, db_settings)
         db.commit()
         return application
 
     application = apply_broker_report(db, order, order_result)
-    if application.is_unresolved:
-        db_settings.is_running = False
-    else:
-        _resume_user_if_safe(db, order, db_settings)
     db.commit()
     return application
 
@@ -416,7 +379,6 @@ def record_submitted_order(
             regime_mode=regime_mode,
             signal_score=signal_score,
             sell_reason=sell_reason,
-            resume_after_resolution=False,
             submitted_at=utc_now_aware(),
         )
         db.add(order)
@@ -431,8 +393,7 @@ def record_submitted_order(
         application = apply_broker_report(db, order, order_result)
 
     if application.is_unresolved:
-        order.resume_after_resolution = order.resume_after_resolution or bool(db_settings.is_running)
-        db_settings.is_running = False
+        pass
 
     db.commit()
     return application
@@ -476,7 +437,7 @@ def _reconcile_one_order(db, order: BrokerOrder) -> tuple[FillApplication, bool,
             report = {"status": "ERROR", "message": str(exc)}
         application = apply_broker_report(db, order, report)
 
-    resumed = _resume_user_if_safe(db, order, db_settings)
+    resolved = order.status in TERMINAL_ORDER_STATUSES
 
     stale_alert = _should_send_stale_alert(order)
     if stale_alert:
@@ -491,11 +452,12 @@ def _reconcile_one_order(db, order: BrokerOrder) -> tuple[FillApplication, bool,
             f"{order.applied_filled_qty}/{order.requested_qty}.",
             "INFO",
         )
-    if resumed:
+    if resolved:
         _append_action(
             db,
             order,
-            f"[ORDER RESOLVED] {order.side} {order.ticker} {order.status}; automatic trading resumed.",
+            f"[ORDER RESOLVED] {order.side} {order.ticker} {order.status}; "
+            "the user's bot preference was preserved.",
             "INFO",
         )
     elif stale_alert:
@@ -507,7 +469,7 @@ def _reconcile_one_order(db, order: BrokerOrder) -> tuple[FillApplication, bool,
             "ERROR",
         )
 
-    return application, resumed, stale_alert
+    return application, resolved, stale_alert
 
 
 def reconcile_open_orders_once(session_factory=SessionLocal) -> int:
@@ -534,7 +496,7 @@ def reconcile_open_orders_once(session_factory=SessionLocal) -> int:
             if not order or order.status not in UNRESOLVED_ORDER_STATUSES:
                 continue
 
-            application, resumed, stale_alert = _reconcile_one_order(db, order)
+            application, resolved, stale_alert = _reconcile_one_order(db, order)
             user_id = order.user_id
             side = order.side
             ticker = order.ticker
@@ -545,13 +507,13 @@ def reconcile_open_orders_once(session_factory=SessionLocal) -> int:
             db.commit()
             processed += 1
 
-            if application.applied_qty > 0 or resumed:
-                resume_text = "\nAutomatic trading resumed." if resumed else ""
+            if application.applied_qty > 0 or resolved:
+                resolution_text = "\nOrder resolved; bot preference unchanged." if resolved else ""
                 send_message_async(
                     user_id,
                     f"*Order Reconciliation Updated*\n"
                     f"Side: `{side}`\nTicker: `{ticker}`\nStatus: `{status}`\n"
-                    f"Applied: `{cumulative}/{requested}`{resume_text}",
+                    f"Applied: `{cumulative}/{requested}`{resolution_text}",
                 )
             elif stale_alert:
                 send_message_async(
@@ -559,7 +521,7 @@ def reconcile_open_orders_once(session_factory=SessionLocal) -> int:
                     f"*Order Reconciliation Still Pending*\n"
                     f"Side: `{side}`\nTicker: `{ticker}`\nStatus: `{status}`\n"
                     f"Error: `{last_error or 'none'}`\n\n"
-                    "The bot remains stopped and will continue retrying automatically.",
+                    "New trading cycles remain blocked by the order ledger while reconciliation continues.",
                 )
         except Exception:
             db.rollback()

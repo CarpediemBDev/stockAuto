@@ -108,7 +108,7 @@ erDiagram
 * `kis_account_no` (VARCHAR, Nullable): 한국투자증권 계좌번호
 * `telegram_chat_id` (VARCHAR, Nullable): 텔레그램 CHAT ID
 * `telegram_enabled` (BOOLEAN, Default: False): 텔레그램 알림 활성화 여부
-* `is_running` (BOOLEAN, Default: False): 백그라운드 봇 스케줄러 가동 여부
+* `is_running` (BOOLEAN, Default: False): 사용자가 선택한 자동매매 실행 의도. 주문 처리·재조정·강제 청산은 이 값을 자동으로 변경하지 않습니다.
 * `updated_at` (DATETIME): 마지막 갱신 시간
 
 ### ③ `trade_logs` (매매 체결 기록)
@@ -161,6 +161,16 @@ erDiagram
 * `id` (INTEGER, PK): 기본 키
 * `ticker` (VARCHAR, Unique, Index): 영문 티커 (예: `NVDA`)
 * `name_ko` (VARCHAR): 완성형 한글 정식 명칭 (예: `엔비디아`)
+
+### ⑧ `broker_orders` (증권사 주문 영구 원장)
+증권사 주문 의도, 접수 번호, 누적 체결량과 DB 반영량을 저장하여 프로세스 재시작 후에도 중복 주문과 이중 체결 반영을 차단합니다.
+* `user_id` (INTEGER, FK -> `users.id`): 주문 소유 사용자
+* `intent_id` (VARCHAR, Unique): 증권사 전송 전에 생성되는 내부 주문 식별자
+* `broker_order_no` (VARCHAR, Nullable): 증권사 접수 번호
+* `status` (VARCHAR): `INTENT_CREATED`, `SUBMITTING`, `ACK_UNKNOWN`, `PENDING`, `PARTIAL`, `FILLED` 등 주문 상태
+* `requested_qty`, `broker_filled_qty`, `applied_filled_qty`: 요청·증권사 누적 체결·DB 적용 수량
+* `strategy_type`: 체결을 반영할 보유 전략 슬롯
+* 과거 `resume_after_resolution` 컬럼은 제거되었습니다. 봇 실행 의도는 `user_settings.is_running`에서만 관리합니다.
 
 ---
 

@@ -89,7 +89,6 @@ def test_partial_buy_balance_uses_only_applied_fill_delta(
 
     assert application.applied_qty == 30
     assert application.is_unresolved is True
-    assert db_settings.is_running is False
 
     order = db.query(BrokerOrder).one()
     holding = db.query(Holding).one()

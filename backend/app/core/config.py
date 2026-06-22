@@ -104,6 +104,18 @@ class Settings:
         # Gemini API Key for AI Sentiment (Phase 21)
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+        # 주문 중복 실행 차단용 Redis. Redis 장애 시 주문은 fail-closed 처리합니다.
+        redis_url = os.getenv("REDIS_URL")
+        if not redis_url or not redis_url.strip():
+            raise RuntimeError("REDIS_URL environment variable is required but missing.")
+        self.REDIS_URL = redis_url.strip()
+        
+        self.REDIS_SOCKET_TIMEOUT_SECONDS = float(
+            os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "2.0")
+        )
+        if self.REDIS_SOCKET_TIMEOUT_SECONDS <= 0:
+            raise RuntimeError("REDIS_SOCKET_TIMEOUT_SECONDS must be positive")
+
         cookie_samesite = os.getenv("REFRESH_COOKIE_SAMESITE", "lax").strip().lower()
         if cookie_samesite not in {"lax", "strict", "none"}:
             raise RuntimeError("REFRESH_COOKIE_SAMESITE must be one of: lax, strict, none")

@@ -77,7 +77,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
     config = make_alembic_config(db_url)
 
     script = ScriptDirectory.from_config(config)
-    assert script.get_current_head() == "c8e9f0123456"
+    assert script.get_current_head() == "d9f0a1234567"
 
     command.upgrade(config, "head")
 
@@ -124,12 +124,12 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             "requested_qty",
             "broker_filled_qty",
             "applied_filled_qty",
-            "resume_after_resolution",
             "submission_attempts",
             "discovery_attempts",
             "submission_started_at",
             "response_received_at",
         } <= broker_order_columns
+        assert "resume_after_resolution" not in broker_order_columns
         
         broker_credential_columns = {column["name"] for column in inspector.get_columns("broker_credentials")}
         assert {

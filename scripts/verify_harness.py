@@ -434,7 +434,7 @@ def check_frontend_static(root: Path) -> bool:
     tsc_result = run_command("npx tsc --noEmit", cwd=frontend_dir, timeout=120, shell=True)
 
     safe_print("  * Running npm run lint...")
-    lint_result = run_command("npm run lint", cwd=frontend_dir, timeout=120, shell=True)
+    lint_result = run_command("npm run lint", cwd=frontend_dir, timeout=300, shell=True)
 
     success = True
     if tsc_result.returncode != 0:

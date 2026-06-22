@@ -170,7 +170,7 @@ def test_multiple_matching_orders_are_not_linked(session_factory, monkeypatch):
     unresolved = check_db.query(BrokerOrder).filter(BrokerOrder.intent_id == intent_id).one()
     assert unresolved.status == "AMBIGUOUS"
     assert unresolved.broker_order_no is None
-    assert check_db.query(UserSettings).one().is_running is False
+    assert check_db.query(UserSettings).one().is_running is True
     assert order_date == unresolved.broker_order_date
     check_db.close()
 

@@ -11,7 +11,7 @@ from app.core.database import Base
 from app.core.models import BrokerOrder, Holding, User, UserSettings, BrokerCredential
 
 
-def test_kis_force_liquidation_keeps_holdings_and_bot_paused_when_ack_is_unknown(
+def test_kis_force_liquidation_keeps_holdings_and_bot_preference_when_ack_is_unknown(
     monkeypatch,
 ):
     engine = create_engine(
@@ -73,8 +73,8 @@ def test_kis_force_liquidation_keeps_holdings_and_bot_paused_when_ack_is_unknown
     assert "청산 주문이 ACK_UNKNOWN 상태입니다" in response["message"]
     assert order.status == "ACK_UNKNOWN"
     assert order.source == "MANUAL_LIQUIDATION"
-    assert order.resume_after_resolution is False
-    assert settings.is_running is False
+    assert order.strategy_type == holding.strategy_type
+    assert settings.is_running is True
     assert holding.quantity == 3
 
     db.close()

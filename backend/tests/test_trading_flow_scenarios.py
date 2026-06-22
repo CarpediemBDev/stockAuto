@@ -102,6 +102,9 @@ class FakeBroker:
             "cash_balance": 15_000_000.0,
         }
 
+    def get_order_metadata(self, ticker, session):
+        return {"exchange_code": "NASD", "order_division": "00"}
+
     def buy_order(self, ticker, quantity, price=None, session="REGULAR_MARKET"):
         self.buy_calls.append((ticker, quantity, price))
         return dict(self.buy_result)
@@ -263,7 +266,7 @@ async def test_run_user_trading_flow_skips_holding_write_when_buy_fails(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_run_user_trading_flow_stops_bot_when_buy_fill_is_unconfirmed(monkeypatch):
+async def test_run_user_trading_flow_preserves_bot_preference_when_buy_fill_is_unconfirmed(monkeypatch):
     signal = make_signal()
     user_settings = make_user_settings()
     fake_db = FakeDb(user_settings=user_settings)
@@ -289,15 +292,14 @@ async def test_run_user_trading_flow_stops_bot_when_buy_fill_is_unconfirmed(monk
         sentiment="BULLISH",
         session="REGULAR_MARKET",
     )
-
-    assert user_settings.is_running is False
     assert fake_db.holdings == []
+    assert user_settings.is_running is True
     assert any("ORDER RECONCILIATION" in message for _level, message in logs)
     assert any("BUY-PENDING" in message for _user_id, message in messages)
 
 
 @pytest.mark.asyncio
-async def test_run_user_trading_flow_records_partial_buy_then_stops_bot(monkeypatch):
+async def test_run_user_trading_flow_records_partial_buy_and_preserves_bot_preference(monkeypatch):
     signal = make_signal()
     user_settings = make_user_settings()
     fake_db = FakeDb(user_settings=user_settings)
@@ -327,7 +329,7 @@ async def test_run_user_trading_flow_records_partial_buy_then_stops_bot(monkeypa
     assert len(fake_db.holdings) == 1
     assert fake_db.holdings[0].quantity == 4
     assert fake_db.holdings[0].avg_price == 100.5
-    assert user_settings.is_running is False
+    assert user_settings.is_running is True
     assert any("BUY-PARTIAL" in message for _user_id, message in messages)
 
 
@@ -395,7 +397,7 @@ async def test_run_user_trading_flow_records_successful_sell(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_user_trading_flow_stops_bot_without_deleting_unconfirmed_sell(monkeypatch):
+async def test_run_user_trading_flow_preserves_bot_preference_without_deleting_unconfirmed_sell(monkeypatch):
     signal = make_signal()
     user_settings = make_user_settings()
     holding = Holding(
@@ -453,7 +455,7 @@ async def test_run_user_trading_flow_stops_bot_without_deleting_unconfirmed_sell
     assert fake_db.holdings == [holding]
     assert fake_db.deleted == []
     assert fake_db.trade_logs == []
-    assert user_settings.is_running is False
+    assert user_settings.is_running is True
     assert any("SELL-PENDING" in message for _user_id, message in messages)
 
 
@@ -517,6 +519,58 @@ async def test_run_user_trading_flow_keeps_remaining_quantity_after_partial_sell
     assert fake_db.deleted == []
     assert len(fake_db.trade_logs) == 1
     assert fake_db.trade_logs[0].quantity == 2
-    assert user_settings.is_running is False
     assert any("partially sold" in message for _level, message in logs)
     assert any("SELL-PARTIAL" in message for _user_id, message in messages)
+
+
+@pytest.mark.asyncio
+async def test_symbol_lock_contention_does_not_create_broker_order_intent(monkeypatch):
+    signal = make_signal()
+    user_settings = make_user_settings()
+    user_settings.trade_mode = "MOCK"
+    fake_db = FakeDb(user_settings=user_settings)
+    fake_broker = FakeBroker()
+    install_flow_fakes(monkeypatch, fake_db, fake_broker, FakeStrategy())
+
+    async def busy_symbol_lock(*_args, **_kwargs):
+        return None
+
+    def fail_if_intent_created(*_args, **_kwargs):
+        raise AssertionError("Order intent must not be created before acquiring the symbol lock")
+
+    monkeypatch.setattr(scheduler, "acquire_symbol_order_lock", busy_symbol_lock)
+    monkeypatch.setattr(scheduler, "create_order_intent", fail_if_intent_created)
+
+    await scheduler.run_user_trading_flow(
+        user_id=1,
+        signal_map={"AAPL": signal},
+        all_signals=[signal],
+        exchange_rate=1500.0,
+        sentiment="BULLISH",
+        session="REGULAR_MARKET",
+    )
+
+    assert fake_broker.buy_calls == []
+    assert fake_db.added == []
+
+
+@pytest.mark.asyncio
+async def test_redis_unavailable_fails_closed_before_opening_user_session(monkeypatch):
+    async def unavailable_user_lock(*_args, **_kwargs):
+        raise scheduler.RedisLockUnavailable("redis unavailable")
+
+    monkeypatch.setattr(scheduler, "acquire_user_operation_lock", unavailable_user_lock)
+    monkeypatch.setattr(
+        scheduler,
+        "SessionLocal",
+        lambda: (_ for _ in ()).throw(AssertionError("DB session must not open")),
+    )
+
+    await scheduler.run_user_trading_flow(
+        user_id=1,
+        signal_map={},
+        all_signals=[],
+        exchange_rate=1500.0,
+        sentiment="NEUTRAL",
+        session="REGULAR_MARKET",
+    )

@@ -1,0 +1,29 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: stockauto-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+  # 데이터베이스(PostgreSQL 등) 컨테이너가 필요하다면 아래 주석을 풀고 사용하세요.
+  # 비밀번호나 유저명은 .env (또는 .env.local) 파일의 변수를 참조하는 것이 실무 표준입니다.
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: stockauto-postgres
+  #   ports:
+  #     - "5432:5432"
+  #   environment:
+  #     POSTGRES_USER: ${DB_USER:-stockauto}
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+  #     POSTGRES_DB: ${DB_NAME:-stockauto_db}
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+volumes:
+  redis_data:
+  # postgres_data:

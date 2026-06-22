@@ -197,7 +197,6 @@ class BrokerOrder(Base):
     submission_attempts = Column(Integer, nullable=False, default=0)
     discovery_attempts = Column(Integer, nullable=False, default=0)
     retry_count = Column(Integer, nullable=False, default=0)
-    resume_after_resolution = Column(Boolean, nullable=False, default=False)
     last_error = Column(Text, nullable=True)
     submitted_at = Column(AwareDateTime, nullable=False, default=utc_now_aware)
     submission_started_at = Column(AwareDateTime, nullable=True)

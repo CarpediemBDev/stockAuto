@@ -10,6 +10,7 @@ from app.bot.scheduler import start_scheduler
 from app.bot.order_discovery import discover_orphan_orders_once
 from app.bot.order_reconciler import reconcile_open_orders_once
 from app.core.logging import logger
+from app.core.redis_client import close_redis_client, ping_redis
 
 # 💡 모듈형 아키텍처 라우터 전격 임포트
 from app.auth.router import router as auth_router
@@ -40,6 +41,14 @@ async def lifespan(app: FastAPI):
     discover_orphan_orders_once()
     reconcile_open_orders_once()
 
+    if await ping_redis():
+        logger.info("Backend Lifespan: Redis order-lock service is ready")
+    else:
+        logger.critical(
+            "Backend Lifespan: Redis is unavailable. The API remains online, "
+            "but trading orders will fail closed."
+        )
+
     # Start the background trading loop scheduler
     logger.info("Backend Lifespan: Initializing Scheduler...")
     start_scheduler()
@@ -52,14 +61,17 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("=" * 50)
-    logger.info("[Shutdown Step 1/3] 텔레그램 봇 폴링 통신 채널 안전 종료 중...")
+    logger.info("[Shutdown Step 1/4] 텔레그램 봇 폴링 통신 채널 안전 종료 중...")
     stop_telegram_bot()
 
-    logger.info("[Shutdown Step 2/3] 자동매매 스케줄러 및 크롤링 프로세스 중지 중...")
+    logger.info("[Shutdown Step 2/4] 자동매매 스케줄러 및 크롤링 프로세스 중지 중...")
     from app.bot.scheduler import stop_scheduler
     stop_scheduler()
 
-    logger.info("[Shutdown Step 3/3] FastAPI 서버 자원(DB 커넥션 등) 해제 완료 대기...")
+    logger.info("[Shutdown Step 3/4] Redis 주문 락 클라이언트 종료 중...")
+    await close_redis_client()
+
+    logger.info("[Shutdown Step 4/4] FastAPI 서버 자원(DB 커넥션 등) 해제 완료 대기...")
     logger.info("=" * 50)
     logger.info("✅ 안전 종료 프로세스가 완료되었습니다. (모든 자원 반환 완료)")
 

@@ -14,7 +14,7 @@ from app.bot.broker_factory import (
     get_broker_catalog,
     normalize_broker_provider,
 )
-from app.bot.order_reconciler import disable_auto_resume_for_user, has_unresolved_orders
+from app.bot.order_reconciler import has_unresolved_orders
 from app.core.config import TRADE_MODE_CATALOG, VALID_TRADE_MODES, settings as app_settings
 from app.core.credentials import CredentialCryptoError, decrypt_credential, encrypt_credential
 from app.core.database import get_db
@@ -533,8 +533,6 @@ def toggle_user_bot(
             status_code=status.HTTP_409_CONFLICT,
             detail="미해결 증권사 주문이 있어 봇을 시작할 수 없습니다.",
         )
-    if target_settings.is_running:
-        disable_auto_resume_for_user(db, user_id)
     target_settings.is_running = not target_settings.is_running
     db.commit()
     db.refresh(target_settings)

@@ -263,9 +263,6 @@ def _process_command(user_id: int, text: str):
                     send_message_sync(user_id, "🟢 *자율 트레이딩 자동매매 루프를 가동했습니다.*")
 
         elif cmd == "/stop":
-            from app.bot.order_reconciler import disable_auto_resume_for_user
-
-            disable_auto_resume_for_user(db, user_id)
             if not db_settings.is_running:
                 db.commit()
                 send_message_sync(user_id, "⚠️ *이미 자동매매 루프가 정지되어 있습니다.*")

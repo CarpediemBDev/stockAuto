@@ -2,10 +2,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.bot.broker_factory import get_broker_client
-from app.bot.order_reconciler import (
-    _resume_user_if_safe,
-    apply_broker_report,
-)
+from app.bot.order_reconciler import apply_broker_report
 from app.core.database import SessionLocal
 from app.core.logging import logger
 from app.core.models import ActionLog, BrokerOrder, UserSettings, utc_now_aware
@@ -66,14 +63,9 @@ def _abort_stale_unsubmitted_intents(db) -> int:
     ).all()
     aborted = 0
     for order in orders:
-        db_settings = db.query(UserSettings).filter(
-            UserSettings.user_id == order.user_id
-        ).first()
         order.status = "ABORTED"
         order.last_error = "The process stopped before broker submission began."
         order.resolved_at = utc_now_aware()
-        if db_settings:
-            _resume_user_if_safe(db, order, db_settings)
         db.add(ActionLog(
             user_id=order.user_id,
             level="WARNING",
@@ -171,13 +163,13 @@ def discover_orphan_orders_once(session_factory=SessionLocal) -> int:
                 order.last_error = (
                     f"{len(candidates)} broker orders match this intent; automatic linking was refused."
                 )
-                db_settings.is_running = False
                 db.add(ActionLog(
                     user_id=order.user_id,
                     level="ERROR",
                     message=(
                         f"[ORDER DISCOVERY AMBIGUOUS] {order.side} {order.ticker} has "
-                        f"{len(candidates)} matching KIS orders. Trading remains stopped."
+                        f"{len(candidates)} matching KIS orders. "
+                        "New trading cycles remain blocked by the order ledger."
                     ),
                 ))
                 notifications.append((
@@ -185,7 +177,7 @@ def discover_orphan_orders_once(session_factory=SessionLocal) -> int:
                     f"*Order Recovery Ambiguous*\n"
                     f"Side: `{order.side}`\nTicker: `{order.ticker}`\n"
                     f"Candidates: `{len(candidates)}`\n\n"
-                    "Automatic linking was refused and trading remains stopped.",
+                    "Automatic linking was refused; the user's bot preference was preserved.",
                 ))
                 continue
 
@@ -195,7 +187,6 @@ def discover_orphan_orders_once(session_factory=SessionLocal) -> int:
             order.last_error = None
             linked_order_numbers.add(candidate["order_no"])
             application = apply_broker_report(db, order, candidate)
-            resumed = _resume_user_if_safe(db, order, db_settings)
             matched_count += 1
             db.add(ActionLog(
                 user_id=order.user_id,
@@ -210,8 +201,8 @@ def discover_orphan_orders_once(session_factory=SessionLocal) -> int:
                 order.user_id,
                 f"*Orphan Order Recovered*\n"
                 f"Side: `{order.side}`\nTicker: `{order.ticker}`\n"
-                f"Order No: `{order.broker_order_no}`\nStatus: `{order.status}`"
-                + ("\nAutomatic trading resumed." if resumed else ""),
+                f"Order No: `{order.broker_order_no}`\nStatus: `{order.status}`\n"
+                "Bot preference unchanged.",
             ))
 
         db.commit()
