@@ -14,18 +14,8 @@ if errorlevel 1 (
 )
 echo.
 
-echo [2/3] Starting Backend (FastAPI)...
-start "StockAuto Backend" cmd /k "cd backend && python run.py local"
-echo [OK] Backend terminal launched.
+echo [2/3] Starting both Backend and Frontend in THIS window...
+echo Please wait... (Press Ctrl+C to stop both servers)
 echo.
 
-echo [3/3] Starting Frontend (Next.js)...
-start "StockAuto Frontend" cmd /k "cd frontend && npm run dev"
-echo [OK] Frontend terminal launched.
-echo.
-
-echo ===================================================
-echo All servers launched! Check the new terminal windows.
-echo This window will close in 5 seconds.
-echo ===================================================
-timeout /t 5 >nul
+npx -y concurrently -k -p "[{name}]" -n "BACK,FRONT" -c "bgBlue.bold,bgMagenta.bold" "cd backend && python run.py local" "cd frontend && npm run dev"
