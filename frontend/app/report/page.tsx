@@ -155,10 +155,15 @@ export default function ReportPage() {
               <span className="font-bold text-xs tracking-wider uppercase">승률 (Win Rate)</span>
               <Target className="w-5 h-5 text-zinc-500" />
             </div>
-            <div className="flex items-baseline space-x-1">
-              <span className="text-4xl font-extrabold tracking-tight text-white">
-                {kpi.win_rate}%
-              </span>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-baseline space-x-1">
+                <span className="text-4xl font-extrabold tracking-tight text-white">
+                  {kpi.win_rate}%
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-bold tracking-tight mt-1.5 opacity-0 pointer-events-none select-none" aria-hidden="true">
+                <span className="px-2 py-0.5 border border-transparent">-</span>
+              </div>
             </div>
           </div>
         </div>
@@ -170,10 +175,15 @@ export default function ReportPage() {
               <span className="font-bold text-xs tracking-wider uppercase">프로핏 팩터</span>
               <TrendingUp className="w-5 h-5 text-zinc-500" />
             </div>
-            <div className="flex items-baseline space-x-1">
-              <span className="text-4xl font-extrabold tracking-tight text-white">
-                {kpi.profit_factor}
-              </span>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-baseline space-x-1">
+                <span className="text-4xl font-extrabold tracking-tight text-white">
+                  {kpi.profit_factor}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-bold tracking-tight mt-1.5 opacity-0 pointer-events-none select-none" aria-hidden="true">
+                <span className="px-2 py-0.5 border border-transparent">-</span>
+              </div>
             </div>
           </div>
         </div>
