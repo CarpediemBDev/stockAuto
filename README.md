@@ -22,6 +22,7 @@
 ### 백엔드 (Backend)
 
 - **FastAPI**: 고성능 비동기 API 서버
+- **Redis**: 분산 락(Distributed Lock) 및 동시 주문 제어
 - **yfinance**: 글로벌 시장 데이터 추출
 - **pandas/numpy**: 고성능 기술적 지표 계산
 - **SQLite**: 거래 로그 및 관심 종목 관리
@@ -48,12 +49,21 @@
    cd stockAuto
    ```
 
+### ⚡ 원클릭 간편 실행 (Windows 전용)
+
+로컬 개발 환경(프론트엔드, 백엔드)을 한 번에 실행하고 Redis 상태를 자동 점검하려면, 프로젝트 최상단 폴더에 있는 **`start_dev.bat` 파일을 더블 클릭**하세요. 새 터미널 창들이 열리며 개발 서버가 자동 구동됩니다.
+*(수동 환경 설정 및 실행 방법은 아래의 과정을 참고하세요.)*
+
 2. **백엔드 설정**
 
    > StockAuto의 공식 파이썬 백엔드 가상환경 디렉터리는 **`backend/venv`** 입니다.
 
    ```bash
    cd backend
+   
+   # Redis 인프라 백그라운드 실행 (주문 동시성 제어용 필수)
+   docker compose up -d redis
+
    python -m venv venv
    # Windows PowerShell: venv\Scripts\Activate.ps1
    # Git Bash: source venv/Scripts/activate
