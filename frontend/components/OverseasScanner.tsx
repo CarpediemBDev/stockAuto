@@ -226,10 +226,10 @@ export function OverseasScanner({
             onClick={() => runManualScan()}
             disabled={isLoading || isManualScanning}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium transition-all active:scale-95 disabled:opacity-50"
-            title="현재 캐시와 별개로 해외 마켓 스캔을 새로 실행합니다"
+            title="최신 시장 데이터를 기반으로 스캔을 새로 실행합니다"
           >
             <RefreshCw size={13} className={cn((isSpinning || isManualScanning) && "animate-spin text-indigo-400")} />
-            {isManualScanning ? "수동 스캔 중..." : isLoading ? "캐시 확인 중..." : "수동 스캔"}
+            {isManualScanning ? "수동 스캔 중..." : isLoading ? "데이터 분석 중..." : "수동 스캔"}
           </button>
         </div>
       </div>
@@ -268,17 +268,17 @@ export function OverseasScanner({
           <div className="flex flex-col items-center justify-center py-20 text-zinc-500">
             <Radar size={40} className="animate-ping mb-4 opacity-20 text-indigo-500" />
             <p className="text-sm font-medium">
-              {isManualScanning ? "해외 마켓 수동 스캔을 실행 중입니다..." : "최신 스캐너 캐시를 확인하고 있습니다..."}
+              {isManualScanning ? "해외 마켓 수동 스캔을 실행 중입니다..." : "최신 시장 데이터를 실시간으로 분석하고 있습니다..."}
             </p>
             <p className="text-xs text-zinc-600 mt-2">
-              {isManualScanning ? "Stage 1: 15분봉 벌크 스캔 중 (7,000+ Tickers)" : "저장된 최신 시그널을 불러오는 중"}
+              {isManualScanning ? "Stage 1: 15분봉 벌크 스캔 중 (7,000+ Tickers)" : "AI가 가장 최근 분석한 시그널 데이터를 불러오는 중"}
             </p>
           </div>
         ) : results.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-zinc-500">
             <Zap size={30} className="mb-3 opacity-20" />
-            <p className="text-sm">자동 캐시에 저장된 최신 시그널이 없습니다.</p>
-            <p className="text-xs text-zinc-600 mt-2">정규장 외에는 자동 캐시가 비어 있을 수 있습니다. 필요하면 수동 스캔을 실행하세요.</p>
+            <p className="text-sm">현재 분석 완료된 최신 시그널이 없습니다.</p>
+            <p className="text-xs text-zinc-600 mt-2">정규장 외에는 자동 분석 데이터가 없을 수 있습니다. 필요시 수동 스캔을 실행하세요.</p>
           </div>
         ) : (
           <table className="w-full min-w-[850px] text-left border-collapse">
