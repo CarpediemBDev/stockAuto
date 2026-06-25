@@ -44,9 +44,6 @@ class LocalSimulatedBroker(BaseBroker):
         if exchange_rate <= 0:
             raise ValueError("환율은 0보다 커야 합니다.")
 
-        # 시작 시점의 환율을 고정해야 평가 시점 환율 변화가 환차손익으로 반영됩니다.
-        initial_cash_usd = initial_cash / settings.SIMULATED_INITIAL_FX_RATE
-
         # 누적 실현 손익 계산 (TradeLog 기준 매매 누적 성과 - USD 기준)
         total_realized_pnl_usd = sum(log.realized_pnl for log in trade_logs) if trade_logs else 0.0
 
@@ -110,21 +107,25 @@ class LocalSimulatedBroker(BaseBroker):
                             total_purchase_usd += (h.avg_price * h.quantity)
                             total_eval_usd += (h.avg_price * h.quantity)
 
-        # 💡 [환율 왜곡 보정] 남은 가상 예수금을 USD 기준으로 산출한 뒤 최종 시점에 환율을 곱하여 원화 환산
-        cash_balance_usd = max(0.0, initial_cash_usd + total_realized_pnl_usd - total_purchase_usd)
-        cash_balance = cash_balance_usd * exchange_rate
-        stock_balance = total_eval_usd * exchange_rate
+        # 수익률은 외화 기준으로 계산합니다.
+        # 환율은 매매 정산/원화 평가에 필요한 값이지만, 전략 성과 수익률에는 포함하지 않습니다.
+        # 따라서 미투자 현금뿐 아니라 보유 포지션도 환율 변화만으로 수익률이 바뀌지 않습니다.
+        strategy_initial_cash_usd = initial_cash / settings.SIMULATED_INITIAL_FX_RATE
+        cash_balance_usd = max(0.0, strategy_initial_cash_usd + total_realized_pnl_usd - total_purchase_usd)
+        cash_balance = cash_balance_usd * settings.SIMULATED_INITIAL_FX_RATE
+        stock_balance = total_eval_usd * settings.SIMULATED_INITIAL_FX_RATE
         total_asset = cash_balance + stock_balance
+        profit_loss = total_asset - initial_cash
 
         # 가상 수익률 계산
-        profit_rate = round(((total_asset - initial_cash) / initial_cash) * 100, 2)
+        profit_rate = round((profit_loss / initial_cash) * 100, 2)
 
         return {
             "total_asset": int(total_asset),
             "cash_balance": int(cash_balance),
             "stock_balance": int(stock_balance),
             "profit_rate": profit_rate,
-            "profit_loss": int(total_asset - initial_cash),
+            "profit_loss": int(profit_loss),
             "fx_rate": exchange_rate,
             "is_mock": True,
             "provider": "Simulated"
