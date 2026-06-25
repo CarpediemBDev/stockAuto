@@ -2,10 +2,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
+from sqlalchemy.orm import Session
 
 from app.bot.broker_factory import get_broker_client
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.locks import acquire_symbol_order_lock, RedisLockUnavailable
 from app.core.logging import logger
 from app.core.models import ActionLog, BrokerOrder, Holding, TradeLog, UserSettings, utc_now_aware
 from app.core.telegram import send_message_async
@@ -43,7 +45,8 @@ class FillApplication:
         return self.order.status in UNRESOLVED_ORDER_STATUSES
 
 
-def has_unresolved_orders(db, user_id: int) -> bool:
+def has_unresolved_orders(db: Session, user_id: int) -> bool:
+    """주어진 사용자의 미체결/진행중 주문이 존재하는지 여부를 반환합니다."""
     return db.query(BrokerOrder.id).filter(
         BrokerOrder.user_id == user_id,
         BrokerOrder.status.in_(UNRESOLVED_ORDER_STATUSES),
@@ -70,12 +73,32 @@ def _mark_integrity_error(order: BrokerOrder, message: str) -> FillApplication:
 
 
 
-def _apply_buy_delta(db, order: BrokerOrder, delta: int, filled_price: float) -> tuple[bool, int]:
+def _apply_buy_delta(db: Session, order: BrokerOrder, delta: int, filled_price: float) -> tuple[bool, int]:
+    """
+    매수 주문에 대한 체결 수량(delta)을 Holding 및 TradeLog에 반영합니다.
+    새로운 Holding이 생성되었는지 여부와 최종 수량을 반환합니다.
+    """
     holding = db.query(Holding).filter(
         Holding.user_id == order.user_id,
         Holding.ticker == order.ticker,
         Holding.strategy_type == order.strategy_type,
     ).first()
+
+    db.add(TradeLog(
+        user_id=order.user_id,
+        ticker=order.ticker,
+        strategy_type=order.strategy_type,
+        ticker_name=order.ticker_name or (holding.ticker_name if holding else order.ticker),
+        trade_type="BUY",
+        price=filled_price,
+        quantity=delta,
+        order_no=order.broker_order_no,
+        regime_mode=order.regime_mode,
+        signal_score=order.signal_score,
+        realized_pnl=0.0,
+        return_rate=0.0,
+    ))
+
     if holding:
         old_qty = holding.quantity
         new_qty = old_qty + delta
@@ -102,7 +125,12 @@ def _apply_buy_delta(db, order: BrokerOrder, delta: int, filled_price: float) ->
     return True, delta
 
 
-def _apply_sell_delta(db, order: BrokerOrder, delta: int, filled_price: float) -> tuple[int, float, float]:
+def _apply_sell_delta(db: Session, order: BrokerOrder, delta: int, filled_price: float) -> tuple[int, float, float]:
+    """
+    매도 주문에 대한 체결 수량(delta)을 Holding 및 TradeLog에 반영하고,
+    실현 손익 및 수익률을 계산합니다.
+    반환값: (잔여수량, 실현손익, 수익률)
+    """
     holding = db.query(Holding).filter(
         Holding.user_id == order.user_id,
         Holding.ticker == order.ticker,
@@ -149,7 +177,11 @@ def _apply_sell_delta(db, order: BrokerOrder, delta: int, filled_price: float) -
     return remaining_qty, round(realized_pnl, 2), round(return_rate, 2)
 
 
-def apply_broker_report(db, order: BrokerOrder, report: dict) -> FillApplication:
+def apply_broker_report(db: Session, order: BrokerOrder, report: dict) -> FillApplication:
+    """
+    브로커의 주문 상태 리포트를 분석하여 BrokerOrder 상태를 갱신하고,
+    부분 체결에 대한 델타를 계산해 Holding/TradeLog에 반영합니다.
+    """
     status = _normalize_status(report.get("status"))
     if status == "ERROR":
         message = report.get("message") or "Broker order status lookup failed."
@@ -243,7 +275,7 @@ def apply_broker_report(db, order: BrokerOrder, report: dict) -> FillApplication
 
 
 def create_order_intent(
-    db,
+    db: Session,
     db_settings: UserSettings,
     *,
     side: str,
@@ -291,7 +323,8 @@ def create_order_intent(
     return order
 
 
-def begin_order_submission(db, order: BrokerOrder, db_settings: UserSettings) -> None:
+def begin_order_submission(db: Session, order: BrokerOrder, db_settings: UserSettings) -> None:
+    """주문 인텐트를 실제 브로커 제출 상태(SUBMITTING)로 변경합니다."""
     if order.status != "INTENT_CREATED":
         raise ValueError(f"Order intent {order.intent_id} cannot be submitted from {order.status}.")
     order.status = "SUBMITTING"
@@ -301,11 +334,12 @@ def begin_order_submission(db, order: BrokerOrder, db_settings: UserSettings) ->
 
 
 def finalize_order_submission(
-    db,
+    db: Session,
     order: BrokerOrder,
     db_settings: UserSettings,
     order_result: dict,
 ) -> FillApplication:
+    """브로커 제출 결과를 바탕으로 주문의 최종 상태를 결정합니다."""
     order.response_received_at = utc_now_aware()
     order_no = str(order_result.get("order_no") or "").strip()
     if order_no:
@@ -334,7 +368,7 @@ def finalize_order_submission(
 
 
 def record_submitted_order(
-    db,
+    db: Session,
     db_settings: UserSettings,
     *,
     side: str,
@@ -410,7 +444,8 @@ def _append_action(db, order: BrokerOrder, message: str, level: str) -> None:
     db.add(ActionLog(user_id=order.user_id, message=message, level=level))
 
 
-def _reconcile_one_order(db, order: BrokerOrder) -> tuple[FillApplication, bool, bool]:
+def _reconcile_one_order(db: Session, order: BrokerOrder) -> tuple[FillApplication, bool, bool]:
+    """단일 미체결 주문에 대해 브로커 상태를 재조회하고 결과를 반영합니다."""
     db_settings = db.query(UserSettings).filter(UserSettings.user_id == order.user_id).first()
     if not db_settings:
         return _mark_integrity_error(order, "User settings no longer exist."), False, False
@@ -472,7 +507,7 @@ def _reconcile_one_order(db, order: BrokerOrder) -> tuple[FillApplication, bool,
     return application, resolved, stale_alert
 
 
-def reconcile_open_orders_once(session_factory=SessionLocal) -> int:
+async def reconcile_open_orders_once(session_factory=SessionLocal) -> int:
     lookup_db = session_factory()
     try:
         order_ids = [
@@ -496,33 +531,47 @@ def reconcile_open_orders_once(session_factory=SessionLocal) -> int:
             if not order or order.status not in UNRESOLVED_ORDER_STATUSES:
                 continue
 
-            application, resolved, stale_alert = _reconcile_one_order(db, order)
             user_id = order.user_id
-            side = order.side
             ticker = order.ticker
-            status = order.status
-            cumulative = order.applied_filled_qty
-            requested = order.requested_qty
-            last_error = order.last_error
-            db.commit()
-            processed += 1
 
-            if application.applied_qty > 0 or resolved:
-                resolution_text = "\nOrder resolved; bot preference unchanged." if resolved else ""
-                send_message_async(
-                    user_id,
-                    f"*Order Reconciliation Updated*\n"
-                    f"Side: `{side}`\nTicker: `{ticker}`\nStatus: `{status}`\n"
-                    f"Applied: `{cumulative}/{requested}`{resolution_text}",
-                )
-            elif stale_alert:
-                send_message_async(
-                    user_id,
-                    f"*Order Reconciliation Still Pending*\n"
-                    f"Side: `{side}`\nTicker: `{ticker}`\nStatus: `{status}`\n"
-                    f"Error: `{last_error or 'none'}`\n\n"
-                    "New trading cycles remain blocked by the order ledger while reconciliation continues.",
-                )
+            try:
+                symbol_lease = await acquire_symbol_order_lock(user_id, ticker, str(uuid4()))
+            except RedisLockUnavailable:
+                logger.exception(f"[OrderReconciler] Redis lock unavailable for {ticker}")
+                continue
+
+            if symbol_lease is None:
+                logger.info(f"[OrderReconciler] Lock active for {ticker}, skipping reconciliation")
+                continue
+
+            try:
+                application, resolved, stale_alert = _reconcile_one_order(db, order)
+                side = order.side
+                status = order.status
+                cumulative = order.applied_filled_qty
+                requested = order.requested_qty
+                last_error = order.last_error
+                db.commit()
+                processed += 1
+
+                if application.applied_qty > 0 or resolved:
+                    resolution_text = "\nOrder resolved; bot preference unchanged." if resolved else ""
+                    send_message_async(
+                        user_id,
+                        f"*Order Reconciliation Updated*\n"
+                        f"Side: `{side}`\nTicker: `{ticker}`\nStatus: `{status}`\n"
+                        f"Applied: `{cumulative}/{requested}`{resolution_text}",
+                    )
+                elif stale_alert:
+                    send_message_async(
+                        user_id,
+                        f"*Order Reconciliation Still Pending*\n"
+                        f"Side: `{side}`\nTicker: `{ticker}`\nStatus: `{status}`\n"
+                        f"Error: `{last_error or 'none'}`\n\n"
+                        "New trading cycles remain blocked by the order ledger while reconciliation continues.",
+                    )
+            finally:
+                await symbol_lease.release()
         except Exception:
             db.rollback()
             logger.exception("[OrderReconciler] Failed to reconcile broker order id=%s", order_id)

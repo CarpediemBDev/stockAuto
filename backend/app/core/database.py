@@ -71,3 +71,14 @@ def get_db():
         yield db
     finally:
         db.close()
+
+from contextlib import contextmanager
+
+@contextmanager
+def micro_session():
+    """스케줄러 등 백그라운드 작업에서 단발성 트랜잭션을 위한 컨텍스트 매니저."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

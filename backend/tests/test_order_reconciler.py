@@ -44,7 +44,8 @@ def create_user_settings(session_factory, *, is_running=True):
     return db, db_settings
 
 
-def test_partial_buy_is_applied_idempotently_and_preserves_running_preference(
+@pytest.mark.asyncio
+async def test_partial_buy_is_applied_idempotently_and_preserves_running_preference(
     session_factory,
     monkeypatch,
 ):
@@ -102,7 +103,7 @@ def test_partial_buy_is_applied_idempotently_and_preserves_running_preference(
     monkeypatch.setattr(reconciler, "get_broker_client", lambda _settings: broker)
     monkeypatch.setattr(reconciler, "send_message_async", lambda user_id, text: messages.append((user_id, text)))
 
-    assert reconciler.reconcile_open_orders_once(session_factory) == 1
+    assert await reconciler.reconcile_open_orders_once(session_factory) == 1
 
     check_db = session_factory()
     final_order = check_db.query(BrokerOrder).one()
@@ -119,7 +120,8 @@ def test_partial_buy_is_applied_idempotently_and_preserves_running_preference(
     check_db.close()
 
 
-def test_partial_sell_uses_only_fill_delta_and_preserves_manual_stop(
+@pytest.mark.asyncio
+async def test_partial_sell_uses_only_fill_delta_and_preserves_manual_stop(
     session_factory,
     monkeypatch,
 ):
@@ -191,7 +193,7 @@ def test_partial_sell_uses_only_fill_delta_and_preserves_manual_stop(
     monkeypatch.setattr(reconciler, "get_broker_client", lambda _settings: broker)
     monkeypatch.setattr(reconciler, "send_message_async", lambda *_args, **_kwargs: None)
 
-    assert reconciler.reconcile_open_orders_once(session_factory) == 1
+    assert await reconciler.reconcile_open_orders_once(session_factory) == 1
 
     check_db = session_factory()
     final_order = check_db.query(BrokerOrder).one()

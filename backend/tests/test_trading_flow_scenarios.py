@@ -74,6 +74,12 @@ class FakeDb:
     def close(self):
         self.closed = True
 
+    def expunge_all(self):
+        pass
+
+    def merge(self, instance):
+        return instance
+
 
 class FakeBroker:
     def __init__(self, holdings_payload=None, buy_result=None, sell_result=None):

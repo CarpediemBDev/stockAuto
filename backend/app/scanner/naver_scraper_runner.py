@@ -7,7 +7,9 @@ from app.core.logging import logger
 
 def normalize_naver_rankings_payload(payload) -> dict[str, list[str]]:
     if isinstance(payload, list):
-        unique_tickers = list(dict.fromkeys(ticker for ticker in payload if ticker))
+        unique_tickers = list(dict.fromkeys(
+            ticker.strip().upper() for ticker in payload if isinstance(ticker, str) and ticker.strip()
+        ))
         return {"NAVER_US_RANKING": unique_tickers} if unique_tickers else {}
 
     if not isinstance(payload, dict):
@@ -18,7 +20,9 @@ def normalize_naver_rankings_payload(payload) -> dict[str, list[str]]:
     for tag, tickers in payload.items():
         if not isinstance(tag, str) or not isinstance(tickers, list):
             continue
-        cleaned = list(dict.fromkeys(ticker for ticker in tickers if ticker))
+        cleaned = list(dict.fromkeys(
+            ticker.strip().upper() for ticker in tickers if isinstance(ticker, str) and ticker.strip()
+        ))
         if cleaned:
             results[tag] = cleaned
     return results

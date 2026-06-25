@@ -426,27 +426,37 @@ export default function PersonalSettingsPage() {
                     </h2>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {modeCards.map((mode) => {
-                      const Icon = mode.icon;
-                      const isActive = dbSettings.trade_mode === mode.id;
-                      return (
-                        <button
-                          key={mode.id}
-                          onClick={() => setDbSettings((prev) => ({ ...prev, trade_mode: mode.id }))}
-                          className={`p-4 rounded-lg border text-left cursor-pointer transition-all ${
-                            isActive ? mode.color : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-800"
-                          }`}
-                        >
-                          <div className="flex justify-between items-start mb-2">
-                            <span className="font-bold text-xs">{mode.label}</span>
-                            <Icon className="w-4 h-4" />
-                          </div>
-                          <p className="text-[10px] text-zinc-500 leading-relaxed">{mode.description}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {modeCards.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center p-6 bg-red-500/10 border border-red-500/20 rounded-xl gap-3 text-center">
+                      <AlertTriangle className="w-6 h-6 text-red-500" />
+                      <div>
+                        <p className="text-xs font-bold text-red-400 mb-1">통신 또는 인증 오류로 설정을 불러오지 못했습니다.</p>
+                        <p className="text-[11px] text-red-400/80">페이지를 새로고침하거나 다시 로그인해 주세요.</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {modeCards.map((mode) => {
+                        const Icon = mode.icon;
+                        const isActive = dbSettings.trade_mode === mode.id;
+                        return (
+                          <button
+                            key={mode.id}
+                            onClick={() => setDbSettings((prev) => ({ ...prev, trade_mode: mode.id }))}
+                            className={`p-4 rounded-lg border text-left cursor-pointer transition-all ${
+                              isActive ? mode.color : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-800"
+                            }`}
+                          >
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="font-bold text-xs">{mode.label}</span>
+                              <Icon className="w-4 h-4" />
+                            </div>
+                            <p className="text-[10px] text-zinc-500 leading-relaxed">{mode.description}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-4 pt-6 border-t border-zinc-900">
@@ -469,24 +479,30 @@ export default function PersonalSettingsPage() {
                       <div>
                         <label className="block text-xs font-semibold text-zinc-400 mb-1.5">Provider</label>
                         <div className="flex gap-2">
-                          {dbSettings.available_brokers
-                            .filter((broker) => broker.supported_modes.includes(dbSettings.trade_mode))
-                            .map((broker) => (
-                              <button
-                                key={broker.id}
-                                type="button"
-                                onClick={() => setDbSettings(prev => ({ ...prev, broker_provider: broker.id }))}
-                                className={`flex-1 py-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
-                                  dbSettings.broker_provider === broker.id
-                                    ? broker.tone === "amber"
-                                      ? "border-amber-500 bg-amber-500/10 text-amber-400"
-                                      : "border-blue-500 bg-blue-500/10 text-blue-400"
-                                    : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-800"
-                                }`}
-                              >
-                                {broker.label} ({broker.id})
-                              </button>
-                            ))}
+                          {dbSettings.available_brokers.length === 0 ? (
+                            <div className="w-full py-3 rounded-lg border border-red-500/20 bg-red-500/5 text-red-400/80 text-xs text-center">
+                              사용 가능한 증권사 정보를 불러오지 못했습니다.
+                            </div>
+                          ) : (
+                            dbSettings.available_brokers
+                              .filter((broker) => broker.supported_modes.includes(dbSettings.trade_mode))
+                              .map((broker) => (
+                                <button
+                                  key={broker.id}
+                                  type="button"
+                                  onClick={() => setDbSettings(prev => ({ ...prev, broker_provider: broker.id }))}
+                                  className={`flex-1 py-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                                    dbSettings.broker_provider === broker.id
+                                      ? broker.tone === "amber"
+                                        ? "border-amber-500 bg-amber-500/10 text-amber-400"
+                                        : "border-blue-500 bg-blue-500/10 text-blue-400"
+                                      : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-800"
+                                  }`}
+                                >
+                                  {broker.label} ({broker.id})
+                                </button>
+                              ))
+                          )}
                         </div>
                       </div>
 

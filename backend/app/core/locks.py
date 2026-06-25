@@ -51,10 +51,16 @@ class RedisLockLease:
         self._renew_task = asyncio.create_task(self._renew_loop())
 
     async def _renew_loop(self) -> None:
+        import time
         interval = max(1.0, self.ttl_seconds / 3)
+        start_time = time.monotonic()
+        max_renew_duration = 600  # Hard timeout: 10 minutes
         try:
             while True:
                 await asyncio.sleep(interval)
+                if time.monotonic() - start_time > max_renew_duration:
+                    logger.error("[RedisLock] Hard timeout reached. Stopping renewal for key=%s", self.key)
+                    return
                 renewed = await _call_redis(
                     "eval",
                     _RENEW_SCRIPT,

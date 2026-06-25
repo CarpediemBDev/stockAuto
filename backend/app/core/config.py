@@ -60,7 +60,9 @@ def _env_bool(name: str, default: bool) -> bool:
 
 def get_allowed_origins() -> list[str]:
     configured = os.getenv("ALLOWED_ORIGINS", "")
-    origins = [*DEFAULT_ALLOWED_ORIGINS]
+    origins = []
+    if APP_ENV != "prod":
+        origins.extend(DEFAULT_ALLOWED_ORIGINS)
     origins.extend(origin.strip() for origin in configured.split(",") if origin.strip())
     return list(dict.fromkeys(origins))
 
@@ -109,7 +111,7 @@ class Settings:
         if not redis_url or not redis_url.strip():
             raise RuntimeError("REDIS_URL environment variable is required but missing.")
         self.REDIS_URL = redis_url.strip()
-        
+
         self.REDIS_SOCKET_TIMEOUT_SECONDS = float(
             os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "2.0")
         )
@@ -129,6 +131,9 @@ class Settings:
 
         if cookie_samesite == "none" and not self.REFRESH_COOKIE_SECURE:
             raise RuntimeError("SameSite=None refresh cookies require REFRESH_COOKIE_SECURE=true")
+
+        if self.IS_PROD and not self.REFRESH_COOKIE_SECURE:
+            raise RuntimeError("Production refresh cookies must be secure")
 
         # 1. 초기 생성 시 무조건 안전한 SIMULATED 모드로 하드코딩 셋업
         # (이후 main.py에서 사용자가 화면(어드민)을 통해 저장한 DB 값을 읽어와 덮어씌웁니다)

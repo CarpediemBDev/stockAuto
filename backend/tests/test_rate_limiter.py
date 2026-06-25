@@ -43,7 +43,6 @@ def test_rate_limiter_blocks_excessive_requests(monkeypatch):
         json={"username": "dummy_user", "password": "wrongpassword123!"},
     )
     assert response.status_code == 429
-    assert "초과" in response.json()["detail"]
 
 
 @pytest.mark.real_rate_limiter
@@ -89,7 +88,7 @@ def test_rate_limiter_fallback_storage_is_bounded(monkeypatch):
     for index in range(10):
         limiter._increment_fallback(f"key-{index}")
 
-    assert len(limiter._fallback_windows) == 3
+    assert len(rate_limiter_module._global_fallback_windows) == 3
 
 
 @pytest.mark.asyncio

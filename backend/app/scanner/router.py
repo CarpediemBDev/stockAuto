@@ -110,13 +110,18 @@ async def refresh_swing_prediction(
     """모든 인증 사용자가 공유하는 공용 시장 스윙 후보를 수동 갱신합니다."""
     cache_key = get_swing_cache_key()
     if reserve_swing_prediction_refresh(cache_key):
-        refreshing_swing_response(cache_key, db)
+        response_data = refreshing_swing_response(cache_key, db)
         threading.Thread(
             target=background_refresh_swing_prediction,
             args=(cache_key,),
             daemon=True,
         ).start()
+        message = "스윙 예측 갱신이 백그라운드에서 시작되었습니다."
+    else:
+        response_data = read_swing_prediction_cache(cache_key, db)
+        message = "이미 스윙 예측 갱신이 진행 중이거나 최신 데이터입니다."
+
     return {
-        "data": refreshing_swing_response(cache_key, db),
-        "message": "스윙 예측 갱신이 백그라운드에서 시작되었습니다.",
+        "data": response_data,
+        "message": message,
     }
