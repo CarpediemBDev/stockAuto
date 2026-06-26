@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.bot.broker_factory import (
     create_broker_verification_client,
+    ensure_broker_supports_trade_mode,
     get_broker_catalog,
     normalize_broker_provider,
 )
@@ -78,6 +79,16 @@ def _normalize_trade_mode(mode: str) -> str:
 def _normalize_broker_provider(provider: Optional[str]) -> str:
     try:
         return normalize_broker_provider(provider)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+def _ensure_broker_mode_supported(provider: str, trade_mode: str) -> None:
+    try:
+        ensure_broker_supports_trade_mode(provider, trade_mode)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -225,6 +236,11 @@ def _verify_credential_values(
     if mode == "SIMULATED":
         return True, f"SIMULATED 모드는 {broker_name} 통신 검증이 필요하지 않습니다."
 
+    try:
+        broker_name = ensure_broker_supports_trade_mode(broker_name, mode)
+    except ValueError as exc:
+        return False, str(exc)
+
     missing_fields = []
     if _is_missing_or_placeholder(app_key): missing_fields.append("APP KEY")
     if _is_missing_or_placeholder(app_secret): missing_fields.append("APP SECRET")
@@ -300,6 +316,7 @@ def update_user_settings(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"{trade_mode} 모드에서는 증권사를 선택해야 합니다.",
             )
+        _ensure_broker_mode_supported(provider, trade_mode)
         cred = db.query(BrokerCredential).filter_by(user_id=current_user.id, broker_name=provider).first()
         if not cred or cred.verification_status != "verified" or cred.verified_trade_mode != trade_mode:
             raise HTTPException(
@@ -349,6 +366,7 @@ def save_credential(
             detail="SIMULATED 모드는 인증정보 저장이 필요하지 않습니다.",
         )
     broker_name = _normalize_broker_provider(payload.broker_name)
+    _ensure_broker_mode_supported(broker_name, trade_mode)
 
     success, message = _verify_credential_values(
         trade_mode,
@@ -412,6 +430,8 @@ def verify_current_credential(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="SIMULATED 모드는 인증정보 검증이 필요하지 않습니다.",
         )
+    broker_name = _normalize_broker_provider(payload.broker_name)
+    _ensure_broker_mode_supported(broker_name, trade_mode)
 
     try:
         app_key, app_secret, account_no = _credential_values(cred)
@@ -421,7 +441,7 @@ def verify_current_credential(
     if any(_is_missing_or_placeholder(value) for value in (app_key, app_secret, account_no)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="저장된 인증정보가 불안정합니다.")
 
-    success, message = _verify_credential_values(trade_mode, payload.broker_name, app_key, app_secret, account_no, current_user.id)
+    success, message = _verify_credential_values(trade_mode, broker_name, app_key, app_secret, account_no, current_user.id)
     if success:
         cred.verification_status = "verified"
         cred.verified_trade_mode = trade_mode

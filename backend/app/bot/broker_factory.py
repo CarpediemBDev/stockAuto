@@ -25,8 +25,6 @@ BROKER_REGISTRY = {
         "client_class": TossClient,
         "broker_classes": {
             "SIMULATED": LocalSimulatedBroker,
-            "MOCK": TossBroker,
-            "REAL": TossBroker,
         },
     },
 }
@@ -55,8 +53,22 @@ def normalize_broker_provider(provider: str | None) -> str:
     return normalized
 
 
-def create_broker_verification_client(provider: str, credential, trade_mode: str):
+def broker_supports_trade_mode(provider: str | None, trade_mode: str | None) -> bool:
     normalized = normalize_broker_provider(provider)
+    mode = (trade_mode or "SIMULATED").upper().strip()
+    return mode in BROKER_REGISTRY[normalized]["broker_classes"]
+
+
+def ensure_broker_supports_trade_mode(provider: str | None, trade_mode: str | None) -> str:
+    normalized = normalize_broker_provider(provider)
+    mode = (trade_mode or "SIMULATED").upper().strip()
+    if mode not in BROKER_REGISTRY[normalized]["broker_classes"]:
+        raise ValueError(f"{normalized} 증권사는 {mode} 모드를 지원하지 않습니다.")
+    return normalized
+
+
+def create_broker_verification_client(provider: str, credential, trade_mode: str):
+    normalized = ensure_broker_supports_trade_mode(provider, trade_mode)
     client_class = BROKER_REGISTRY[normalized]["client_class"]
     return client_class(db_credential=credential, trade_mode=trade_mode)
 
@@ -81,8 +93,7 @@ def get_broker_client(db_settings=None) -> BaseBroker:
                 cred = candidate
                 break
 
+    ensure_broker_supports_trade_mode(provider, mode)
     provider_map = BROKER_REGISTRY[provider]["broker_classes"]
     broker_class = provider_map.get(mode)
-    if broker_class is None:
-        raise ValueError(f"{provider} 증권사는 {mode} 모드를 지원하지 않습니다.")
     return broker_class(db_settings, db_credential=cred)

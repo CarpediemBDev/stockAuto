@@ -93,6 +93,15 @@ function normalizeTradeMode(value: unknown, modes: TradeModeOption[]): TradeMode
     : modes[0]?.id || "SIMULATED";
 }
 
+function supportsTradeMode(broker: BrokerOption | undefined, tradeMode: string): boolean {
+  return !broker || broker.supported_modes.includes(tradeMode);
+}
+
+function unsupportedTradeModeMessage(broker: BrokerOption | undefined, tradeMode: string): string {
+  if (!broker) return "";
+  return `${broker.label}은 현재 ${tradeMode} 모드를 지원하지 않습니다.`;
+}
+
 export default function PersonalSettingsPage() {
   const router = useRouter();
   const { clearAuth, isAuthenticated, isInitialized, username: storedUsername } = useAuthStore();
@@ -174,6 +183,9 @@ export default function PersonalSettingsPage() {
   }, [mutateSettings]);
 
   const activeBroker = dbSettings.broker_provider || dbSettings.available_brokers[0]?.id || "";
+  const activeBrokerOption = useMemo(() => {
+    return dbSettings.available_brokers.find((broker) => broker.id === activeBroker);
+  }, [dbSettings.available_brokers, activeBroker]);
   const activeCred = useMemo(() => {
     return dbSettings.credentials.find((c) => c.broker_name === activeBroker);
   }, [dbSettings.credentials, activeBroker]);
@@ -182,6 +194,8 @@ export default function PersonalSettingsPage() {
     (mode) => mode.id === dbSettings.trade_mode
   );
   const requiresBrokerCredentials = Boolean(activeTradeMode?.requires_credentials);
+  const selectedModeUnsupported = !supportsTradeMode(activeBrokerOption, dbSettings.trade_mode);
+  const selectedModeUnsupportedMessage = unsupportedTradeModeMessage(activeBrokerOption, dbSettings.trade_mode);
   const isVerifiedForSelectedMode = useMemo(() => {
     if (!activeCred) return false;
     return (
@@ -200,6 +214,12 @@ export default function PersonalSettingsPage() {
   }, [activeCred, isVerifiedForSelectedMode]);
 
   const handleVerifyCredential = async (provider: string) => {
+    const broker = dbSettings.available_brokers.find((item) => item.id === provider);
+    if (!supportsTradeMode(broker, dbSettings.trade_mode)) {
+      toast.error(unsupportedTradeModeMessage(broker, dbSettings.trade_mode));
+      return;
+    }
+
     if (!requiresBrokerCredentials) {
       toast.info(`${dbSettings.trade_mode} 모드는 ${provider} 인증정보가 필요하지 않습니다.`);
       return;
@@ -256,6 +276,11 @@ export default function PersonalSettingsPage() {
   };
 
   const handleSave = async (forceReal = false) => {
+    if (selectedModeUnsupported) {
+      toast.error(selectedModeUnsupportedMessage);
+      return;
+    }
+
     if (dbSettings.trade_mode === "REAL" && !forceReal) {
       setShowRealWarning(true);
       return;
@@ -369,6 +394,8 @@ export default function PersonalSettingsPage() {
     ...mode,
     color: modeToneClasses[mode.tone] || modeToneClasses.blue,
     icon: modeIcons[mode.id] || Server,
+    isUnsupported: !supportsTradeMode(activeBrokerOption, mode.id),
+    unsupportedMessage: unsupportedTradeModeMessage(activeBrokerOption, mode.id),
   }));
 
   if (isSettingsLoading || !isInitialized || !isAuthenticated) {
@@ -442,8 +469,15 @@ export default function PersonalSettingsPage() {
                         return (
                           <button
                             key={mode.id}
+                            type="button"
+                            disabled={mode.isUnsupported}
+                            title={mode.isUnsupported ? mode.unsupportedMessage : undefined}
                             onClick={() => setDbSettings((prev) => ({ ...prev, trade_mode: mode.id }))}
-                            className={`p-4 rounded-lg border text-left cursor-pointer transition-all ${
+                            className={`p-4 rounded-lg border text-left transition-all ${
+                              mode.isUnsupported
+                                ? "cursor-not-allowed border-zinc-900 bg-zinc-900/10 opacity-45"
+                                : "cursor-pointer"
+                            } ${
                               isActive ? mode.color : "border-zinc-900 bg-zinc-900/10 hover:border-zinc-800"
                             }`}
                           >
@@ -452,6 +486,11 @@ export default function PersonalSettingsPage() {
                               <Icon className="w-4 h-4" />
                             </div>
                             <p className="text-[10px] text-zinc-500 leading-relaxed">{mode.description}</p>
+                            {mode.isUnsupported && (
+                              <p className="mt-2 text-[10px] font-bold text-red-400">
+                                {mode.unsupportedMessage}
+                              </p>
+                            )}
                           </button>
                         );
                       })}
@@ -484,14 +523,18 @@ export default function PersonalSettingsPage() {
                               사용 가능한 증권사 정보를 불러오지 못했습니다.
                             </div>
                           ) : (
-                            dbSettings.available_brokers
-                              .filter((broker) => broker.supported_modes.includes(dbSettings.trade_mode))
-                              .map((broker) => (
+                            dbSettings.available_brokers.map((broker) => {
+                              const brokerUnsupported = !supportsTradeMode(broker, dbSettings.trade_mode);
+                              return (
                                 <button
                                   key={broker.id}
                                   type="button"
+                                  disabled={brokerUnsupported}
+                                  title={brokerUnsupported ? unsupportedTradeModeMessage(broker, dbSettings.trade_mode) : undefined}
                                   onClick={() => setDbSettings(prev => ({ ...prev, broker_provider: broker.id }))}
-                                  className={`flex-1 py-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                                  className={`flex-1 py-3 rounded-lg border text-xs font-bold transition-all ${
+                                    brokerUnsupported ? "cursor-not-allowed opacity-45" : "cursor-pointer"
+                                  } ${
                                     dbSettings.broker_provider === broker.id
                                       ? broker.tone === "amber"
                                         ? "border-amber-500 bg-amber-500/10 text-amber-400"
@@ -500,12 +543,25 @@ export default function PersonalSettingsPage() {
                                   }`}
                                 >
                                   {broker.label} ({broker.id})
+                                  {brokerUnsupported && (
+                                    <span className="ml-1 text-[10px] text-red-400">미지원</span>
+                                  )}
                                 </button>
-                              ))
+                              );
+                            })
                           )}
                         </div>
                       </div>
 
+                      {selectedModeUnsupported ? (
+                        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 flex items-start gap-3">
+                          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                          <p className="text-xs font-semibold text-red-300 leading-relaxed">
+                            {selectedModeUnsupportedMessage}
+                          </p>
+                        </div>
+                      ) : (
+                        <>
                       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                         <div className="rounded-lg border border-zinc-900 bg-zinc-900/20 p-3">
                           <p className="text-[10px] text-zinc-500 mb-1">저장 상태</p>
@@ -622,6 +678,8 @@ export default function PersonalSettingsPage() {
                         </button>
                       </div>
                       </div>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -629,7 +687,8 @@ export default function PersonalSettingsPage() {
                 <div className="flex justify-end items-center pt-6 border-t border-zinc-900">
                   <button
                     onClick={() => handleSave(false)}
-                    disabled={isSaving}
+                    disabled={isSaving || selectedModeUnsupported}
+                    title={selectedModeUnsupported ? selectedModeUnsupportedMessage : undefined}
                     className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center gap-2 cursor-pointer shadow-md shadow-blue-900/30"
                   >
                     {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
