@@ -259,7 +259,8 @@ def _verify_credential_values(
         return False, f"검증 중 알 수 없는 오류가 발생했습니다: {str(exc)}"
 
 
-@router.get("/")
+@router.get("/", include_in_schema=False)
+@router.get("")
 def get_user_settings(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -272,7 +273,8 @@ def get_user_settings(
         db.refresh(db_settings)
     return _settings_response(db_settings)
 
-@router.post("/")
+@router.post("/", include_in_schema=False)
+@router.post("")
 def update_user_settings(
     payload: SettingsUpdateSchema,
     current_user: User = Depends(get_current_user),

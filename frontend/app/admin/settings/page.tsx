@@ -84,7 +84,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   simulated_initial_cash_krw: 0,
 };
 
-const SETTINGS_ENDPOINT = "/admin/";
+const SETTINGS_ENDPOINT = "/admin";
 
 function normalizeTradeMode(value: unknown, modes: TradeModeOption[]): TradeMode {
   const normalized = typeof value === "string" ? value : "";
@@ -279,7 +279,7 @@ export default function PersonalSettingsPage() {
         telegram_enabled: dbSettings.telegram_enabled,
       };
 
-      const res = await api.post("/admin/", payload);
+      const res = await api.post(SETTINGS_ENDPOINT, payload);
       applySettings(res.data);
       toast.success("설정이 통합 저장되었습니다.");
     } catch (err) {
