@@ -24,6 +24,7 @@ import useSWR from "swr";
 import { fetcher } from "@/lib/api";
 import { toast } from "sonner";
 import { useTimezone } from "@/store/timezoneStore";
+import { ScannerTabs, type ScannerTab } from "@/components/ScannerTabs";
 
 interface ScoreCardFactor {
   factor: string;
@@ -102,8 +103,8 @@ function HeaderTooltip({ title, desc }: HeaderTooltipProps) {
 interface OverseasScannerProps {
   onAddToWatchlist?: (ticker: string, name: string) => void;
   watchlistTickers?: string[];
-  activeTab?: "15m" | "swing";
-  setActiveTab?: (tab: "15m" | "swing") => void;
+  activeTab?: ScannerTab;
+  setActiveTab?: (tab: ScannerTab) => void;
 }
 
 export function OverseasScanner({ 
@@ -234,33 +235,7 @@ export function OverseasScanner({
         </div>
       </div>
 
-      {/* 2-Tab Selector inside Scanner Container */}
-      <div className="flex border-b border-zinc-800/80 bg-zinc-900/20 px-5 pt-3 gap-6">
-        <button
-          onClick={() => setActiveTab?.("15m")}
-          className={cn(
-            "pb-3 text-xs font-bold transition-all duration-300 flex items-center gap-2 cursor-pointer border-b-2",
-            activeTab === "15m"
-              ? "border-amber-500 text-amber-400 font-extrabold"
-              : "border-transparent text-zinc-500 hover:text-zinc-300"
-          )}
-        >
-          <span className={cn("w-1.5 h-1.5 rounded-full bg-amber-500", activeTab === "15m" && "animate-pulse")} />
-          15m 단타(기존)
-        </button>
-        <button
-          onClick={() => setActiveTab?.("swing")}
-          className={cn(
-            "pb-3 text-xs font-bold transition-all duration-300 flex items-center gap-2 cursor-pointer border-b-2",
-            activeTab === "swing"
-              ? "border-indigo-500 text-indigo-400 font-extrabold"
-              : "border-transparent text-zinc-500 hover:text-zinc-300"
-          )}
-        >
-          <span className={cn("w-1.5 h-1.5 rounded-full bg-indigo-500", activeTab === "swing" && "animate-pulse")} />
-          내일 세력돌파 예측(스윙)
-        </button>
-      </div>
+      <ScannerTabs activeTab={activeTab} setActiveTab={setActiveTab} />
 
       {/* 테이블 영역 */}
       <div className="flex-1 overflow-auto custom-scrollbar">
@@ -306,7 +281,7 @@ export function OverseasScanner({
               {results.filter((r) => !r.source || r.source.length === 0 || r.source.some((s) => s !== "WATCHLIST")).map((item, idx) => {
                 const signal = SIGNAL_CONFIG[item.signal_type] || SIGNAL_CONFIG.NEUTRAL;
                 const SignalIcon = signal.icon;
-                const isInWatchlist = watchlistTickers.includes(item.ticker);
+                const isInWatchlist = watchlistTickers.includes(item.ticker.toUpperCase());
                 const d = item.details;
 
                 return (

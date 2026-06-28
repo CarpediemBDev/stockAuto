@@ -3,17 +3,11 @@
 import React, { useState, useCallback } from 'react';
 import { Eye, Plus, Trash2, Bot } from 'lucide-react';
 import BotSignals from '@/components/BotSignals';
-import { watchlistAPI, translationAPI } from '@/lib/api';
+import { translationAPI } from '@/lib/api';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/api';
 import { reportHandledError } from '@/lib/utils';
-import { toast } from 'sonner';
-
-interface WatchItem {
-  id: number;
-  ticker: string;
-  ticker_name: string;
-}
+import { useWatchlistActions } from '@/hooks/useWatchlistActions';
 
 interface TranslationItem {
   ticker: string;
@@ -27,10 +21,15 @@ interface ScannerSignal {
 }
 
 const ManualWatchList = () => {
-  const { data: watchData, isLoading: watchLoading, mutate: mutateWatchList } = useSWR('/watchlist', fetcher, { refreshInterval: 15000 });
+  const {
+    items,
+    isLoading: watchLoading,
+    addToWatchlist,
+    deleteFromWatchlist,
+    deletingId,
+  } = useWatchlistActions();
   const { data: scannerData, isLoading: scannerLoading } = useSWR('/scanner/latest', fetcher, { refreshInterval: 15000 });
 
-  const items: WatchItem[] = Array.isArray(watchData) ? watchData : (watchData?.data || []);
   const signals: ScannerSignal[] = Array.isArray(scannerData) ? scannerData : (scannerData?.signals || []);
   const loading = watchLoading || scannerLoading;
 
@@ -71,43 +70,36 @@ const ManualWatchList = () => {
 
     setIsSubmitting(true);
     try {
-      await watchlistAPI.add(tickerClean, nameClean);
+      await addToWatchlist(tickerClean, nameClean);
       setInputValue('');
       setShowAddForm(false);
-      await mutateWatchList();
-      toast.success(`${tickerClean} (${nameClean})이(가) 관심종목에 추가되었습니다.`);
-    } catch (error) {
-      toast.error(reportHandledError('Failed to add ticker', error));
+    } catch {
+      // useWatchlistActions already reports the failure to the user.
     } finally {
       setIsSubmitting(false);
     }
-  }, [inputValue, mutateWatchList]);
+  }, [addToWatchlist, inputValue]);
 
   const handleSelectSuggestion = useCallback(async (ticker: string, nameKo: string) => {
     setIsSubmitting(true);
     try {
-      await watchlistAPI.add(ticker, nameKo);
+      await addToWatchlist(ticker, nameKo);
       setInputValue('');
       setShowAddForm(false);
-      await mutateWatchList();
-      toast.success(`${ticker} (${nameKo})이(가) 관심종목에 추가되었습니다.`);
-    } catch (error) {
-      toast.error(reportHandledError('Failed to add suggestion', error));
+    } catch {
+      // useWatchlistActions already reports the failure to the user.
     } finally {
       setIsSubmitting(false);
     }
-  }, [mutateWatchList]);
+  }, [addToWatchlist]);
 
   const handleDelete = useCallback(async (id: number) => {
     try {
-      await watchlistAPI.delete(id);
-      await mutateWatchList();
-      toast.success("관심종목에서 성공적으로 제거되었습니다.");
-    } catch (error) {
-      const msg = reportHandledError('Failed to delete ticker', error);
-      toast.error(`삭제 실패: ${msg}`);
+      await deleteFromWatchlist(id);
+    } catch {
+      // useWatchlistActions already reports the failure to the user.
     }
-  }, [mutateWatchList]);
+  }, [deleteFromWatchlist]);
 
   // 실시간 필터링 Suggestions 계산
   const query = inputValue.trim().toLowerCase();
@@ -280,6 +272,7 @@ const ManualWatchList = () => {
                     <td className="px-5 py-3 text-right">
                       <button 
                         onClick={() => handleDelete(item.id)}
+                        disabled={deletingId === item.id}
                         className="p-1.5 text-slate-600 hover:text-rose-400 hover:bg-rose-400/10 rounded-md transition-all opacity-40 group-hover:opacity-100 cursor-pointer"
                         title="관심종목 삭제"
                       >

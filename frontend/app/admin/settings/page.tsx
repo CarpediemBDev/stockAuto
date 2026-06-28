@@ -17,7 +17,7 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
-import api, { authAPI } from "@/lib/api";
+import { accountAPI, adminAPI, authAPI, reportAPI } from "@/lib/api";
 import useSWR from "swr";
 
 type SubTab = "environment" | "telegram" | "danger";
@@ -165,7 +165,7 @@ export default function PersonalSettingsPage() {
   const { isLoading: isSettingsLoading, mutate: mutateSettings } = useSWR<Partial<UserSettings>>(
     isInitialized && isAuthenticated ? SETTINGS_ENDPOINT : null,
     async () => {
-      const res = await api.get(SETTINGS_ENDPOINT);
+      const res = await adminAPI.getSettings();
       return res.data;
     },
     {
@@ -237,7 +237,7 @@ export default function PersonalSettingsPage() {
 
     setIsCredentialSaving(true);
     try {
-      const res = await api.post("/admin/credentials/verify-and-save", {
+      const res = await adminAPI.verifyAndSaveCredentials({
         trade_mode: dbSettings.trade_mode,
         broker_name: provider,
         app_key: form.app_key,
@@ -261,7 +261,7 @@ export default function PersonalSettingsPage() {
   const handleDeleteCredentials = async (provider: string) => {
     setIsCredentialDeleting(true);
     try {
-      const res = await api.delete(`/admin/credentials/${provider}`);
+      const res = await adminAPI.deleteCredential(provider);
       if (res.data?.settings) {
         applySettings(res.data.settings);
       } else {
@@ -304,7 +304,7 @@ export default function PersonalSettingsPage() {
         telegram_enabled: dbSettings.telegram_enabled,
       };
 
-      const res = await api.post(SETTINGS_ENDPOINT, payload);
+      const res = await adminAPI.saveSettings(payload);
       applySettings(res.data);
       toast.success("설정이 통합 저장되었습니다.");
     } catch (err) {
@@ -317,7 +317,7 @@ export default function PersonalSettingsPage() {
   const handleResetBalance = async () => {
     setIsDangerActionLoading(true);
     try {
-      await api.post("/account/reset-balance");
+      await accountAPI.resetBalance();
       toast.success("가상 계좌 자산과 로그를 초기화했습니다.");
       setShowResetModal(false);
       await fetchSettings();
@@ -331,7 +331,7 @@ export default function PersonalSettingsPage() {
   const handleForceLiquidate = async () => {
     setIsDangerActionLoading(true);
     try {
-      const res = await api.post("/account/force-liquidate");
+      const res = await accountAPI.forceLiquidate();
       toast.success(res.data.message || "보유 주식을 전량 청산했습니다.");
       setShowLiquidateModal(false);
     } catch (err) {
@@ -344,7 +344,7 @@ export default function PersonalSettingsPage() {
   const handleTriggerPersonalReport = async () => {
     setIsPersonalReportSending(true);
     try {
-      await api.post('/report/trigger-personal-report');
+      await reportAPI.triggerPersonalReport();
       toast.success("본인 텔레그램으로 성적표가 발송되었습니다.");
     } catch (err) {
       toast.error((err as Error).message || "리포트 발송 중 오류가 발생했습니다.");

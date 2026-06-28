@@ -10,6 +10,7 @@ from app.scanner.indicators import (
 )
 from app.core.logging import logger
 from app.bot.backtest_metrics import calculate_performance_metrics
+from app.bot.trade_calculations import calculate_buy_total, calculate_realized_pnl
 
 from app.core.config import settings
 
@@ -44,18 +45,15 @@ class BacktestBroker:
 
     def buy_order(self, ticker: str, quantity: int, price: float, buy_stage: int, timestamp: datetime, ticker_name: str = "") -> dict:
         """가상 매수 주문 집행 및 KIS 매수 수수료가 적용된 평단가 가중평균 시뮬레이션"""
-        cost = quantity * price
-        buy_fee = cost * settings.SIMULATED_FEE_RATE
-        total_cost = cost + buy_fee
+        fee_rate = settings.SIMULATED_FEE_RATE
+        _, _, total_cost = calculate_buy_total(price, quantity, fee_rate)
         
         if self.cash < total_cost:
             # 잔고 안전장치: 남은 예수금 내에서 수수료까지 감안하여 최대한 매매 시도
-            max_qty = int(self.cash / (price * (1 + settings.SIMULATED_FEE_RATE)))
+            max_qty = int(self.cash / (price * (1 + fee_rate)))
             if max_qty >= 1:
                 quantity = max_qty
-                cost = quantity * price
-                buy_fee = cost * settings.SIMULATED_FEE_RATE
-                total_cost = cost + buy_fee
+                _, _, total_cost = calculate_buy_total(price, quantity, fee_rate)
             else:
                 return {"success": False, "message": "Insufficient cash for backtest buy order."}
 
@@ -110,22 +108,14 @@ class BacktestBroker:
 
         h = self.holdings[ticker]
         sell_qty = min(quantity, h["quantity"])
-        revenue = sell_qty * price
+        pnl = calculate_realized_pnl(
+            avg_price=h["avg_price"],
+            filled_price=price,
+            quantity=sell_qty,
+            fee_rate=settings.SIMULATED_FEE_RATE,
+        )
         
-        # 매도 시 제비용 차감
-        sell_fee = revenue * settings.SIMULATED_FEE_RATE
-        sec_fee = revenue * settings.SEC_FEE_RATE
-        net_revenue = revenue - sell_fee - sec_fee
-        
-        self.cash += net_revenue
-        
-        # 총 매입 금액 및 매수 시 수수료 계산
-        buy_gross = h["avg_price"] * sell_qty
-        buy_fee = buy_gross * settings.SIMULATED_FEE_RATE
-        
-        # 최종 실수익 (Net realized PnL) = 매도 정산금 - (매수 금액 + 매수 시 수수료)
-        realized_pnl = net_revenue - (buy_gross + buy_fee)
-        return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
+        self.cash += pnl.net_revenue
         
         order_no = f"BT-SELL-{timestamp.strftime('%Y%m%d%H%M%S')}"
         self.trade_logs.append({
@@ -137,8 +127,8 @@ class BacktestBroker:
             "quantity": sell_qty,
             "order_no": order_no,
             "buy_stage": h["buy_stage"],
-            "realized_pnl": round(realized_pnl, 2),
-            "return_rate": round(return_rate, 2),
+            "realized_pnl": round(pnl.realized_pnl, 2),
+            "return_rate": round(pnl.return_rate, 2),
             "reason": reason
         })
 

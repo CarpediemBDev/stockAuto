@@ -2,25 +2,22 @@
 
 import { OverseasScanner } from "@/components/OverseasScanner";
 import { SwingPredictorCard } from "@/components/SwingPredictorCard";
+import { AfterHoursScanner } from "@/components/AfterHoursScanner";
 import ManualWatchList from "@/components/ManualWatchList";
 import { useState, useCallback, useEffect } from "react";
 import { useAuthStore } from "@/store/authStore";
-import { watchlistAPI } from "@/lib/api";
 import { useRouter } from "next/navigation";
-import { reportHandledError } from "@/lib/utils";
-
-interface WatchItem {
-  id: number;
-  ticker: string;
-  ticker_name: string | null;
-}
+import type { ScannerTab } from "@/components/ScannerTabs";
+import { useWatchlistActions } from "@/hooks/useWatchlistActions";
 
 export default function ScannerPage() {
   const router = useRouter();
   const { isAuthenticated, isInitialized } = useAuthStore();
-  const [watchlistKey, setWatchlistKey] = useState(0);
-  const [watchlistTickers, setWatchlistTickers] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<"15m" | "swing">("15m");
+  const [activeTab, setActiveTab] = useState<ScannerTab>("15m");
+  const {
+    tickers: watchlistTickers,
+    addToWatchlist,
+  } = useWatchlistActions(isAuthenticated);
 
   // Auth Guard
   useEffect(() => {
@@ -29,38 +26,13 @@ export default function ScannerPage() {
     }
   }, [isInitialized, isAuthenticated, router]);
 
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    let isMounted = true;
-
-    async function loadWatchlist() {
-      try {
-        const res = await watchlistAPI.getAll();
-        if (isMounted) {
-          setWatchlistTickers(res.data.map((item: WatchItem) => item.ticker));
-        }
-      } catch (error) {
-        reportHandledError("Failed to fetch watchlist tickers", error);
-      }
-    }
-
-    loadWatchlist();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [watchlistKey, isAuthenticated]);
-
   const handleAddToWatchlist = useCallback(async (ticker: string, name: string) => {
     try {
-      await watchlistAPI.add(ticker, name);
-      setWatchlistKey(prev => prev + 1);
-    } catch (error) {
-      reportHandledError("Failed to add to watchlist", error);
+      await addToWatchlist(ticker, name);
+    } catch {
+      // useWatchlistActions already reports the failure to the user.
     }
-  }, []);
+  }, [addToWatchlist]);
 
   if (!isInitialized || !isAuthenticated) {
     return (
@@ -91,16 +63,23 @@ export default function ScannerPage() {
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
               />
-            ) : (
+            ) : activeTab === "swing" ? (
               <SwingPredictorCard
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
+              />
+            ) : (
+              <AfterHoursScanner
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                onAddToWatchlist={handleAddToWatchlist}
+                watchlistTickers={watchlistTickers}
               />
             )}
           </div>
           <div className="lg:col-span-3 min-w-0">
             <div className="sticky top-6 space-y-4">
-              <ManualWatchList key={watchlistKey} />
+              <ManualWatchList />
             </div>
           </div>
         </div>

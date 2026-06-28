@@ -194,6 +194,8 @@ export const tradeAPI = {
 export const accountAPI = {
   getBalance: (config?: AxiosRequestConfig) => api.get('/account/balance', config),
   getHoldings: (config?: AxiosRequestConfig) => api.get('/account/holdings', config),
+  resetBalance: () => api.post('/account/reset-balance'),
+  forceLiquidate: () => api.post('/account/force-liquidate'),
 };
 
 export const scannerAPI = {
@@ -201,6 +203,8 @@ export const scannerAPI = {
   runOverseasScan: (config?: AxiosRequestConfig) => api.post('/scanner/overseas', {}, { timeout: 120000, ...config }),
   getSwingPredict: (config?: AxiosRequestConfig) => api.get('/scanner/swing-predict', config),
   refreshSwingPredict: (config?: AxiosRequestConfig) => api.post('/scanner/swing-predict/refresh', {}, { timeout: 120000, ...config }),
+  getAfterHoursCandidates: (config?: AxiosRequestConfig) => api.get('/scanner/after-hours-candidates', config),
+  refreshAfterHoursCandidates: (config?: AxiosRequestConfig) => api.post('/scanner/after-hours-candidates/refresh', {}, { timeout: 120000, ...config }),
 };
 
 export const marketAPI = {
@@ -228,7 +232,15 @@ export const reportAPI = {
 };
 
 export const adminAPI = {
+  getSettings: (config?: AxiosRequestConfig) => api.get('/admin', config),
+  saveSettings: (payload: Record<string, unknown>) => api.post('/admin', payload),
+  verifyAndSaveCredentials: (payload: Record<string, unknown>) => api.post('/admin/credentials/verify-and-save', payload),
+  deleteCredential: (provider: string) => api.delete(`/admin/credentials/${provider}`),
+  getUsers: (config?: AxiosRequestConfig) => api.get('/admin/users', config),
+  toggleUserBot: (userId: number) => api.post(`/admin/users/${userId}/toggle-bot`),
+  deleteUser: (userId: number) => api.post(`/admin/users/${userId}/delete`),
   getSystemLogs: (config?: AxiosRequestConfig) => api.get('/admin/system-logs', config),
+  getDiscoveryStats: (config?: AxiosRequestConfig) => api.get('/admin/discovery-stats', config),
   getBacktestTournament: (config?: AxiosRequestConfig) => api.get('/admin/backtest/tournament', { timeout: 120000, ...config }),
 };
 

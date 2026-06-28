@@ -38,6 +38,11 @@ from app.bot.order_reconciler import (
     has_unresolved_orders,
     reconcile_open_orders_once,
 )
+from app.bot.trade_calculations import (
+    calculate_buy_total,
+    calculate_realized_pnl,
+    fee_rate_for_trade_mode,
+)
 from app.bot.order_discovery import discover_orphan_orders_once
 import time
 from uuid import uuid4
@@ -730,14 +735,14 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
                     return
 
-                buy_gross = h.avg_price * filled_qty
-                buy_fee = buy_gross * settings.KIS_FEE_RATE
-                sell_gross = filled_price * filled_qty
-                sell_fee = sell_gross * settings.KIS_FEE_RATE
-                sec_fee = sell_gross * settings.SEC_FEE_RATE
-
-                realized_pnl = sell_gross - buy_gross - buy_fee - sell_fee - sec_fee
-                calc_return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
+                pnl = calculate_realized_pnl(
+                    avg_price=h.avg_price,
+                    filled_price=filled_price,
+                    quantity=filled_qty,
+                    fee_rate=settings.KIS_FEE_RATE,
+                )
+                realized_pnl = pnl.realized_pnl
+                calc_return_rate = pnl.return_rate
 
                 with micro_session(ctx) as db:
                     h_db = db.merge(h)
@@ -1134,7 +1139,12 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 clean_ticker, strategy_instance, signal, score, next_stage,
                 current_price, final_qty, existing_holding, slot_key, metadata
             ))
-            slot_cash_usd -= (current_price * final_qty) * (1 + settings.KIS_FEE_RATE)
+            _, _, reserved_order_total = calculate_buy_total(
+                current_price,
+                final_qty,
+                fee_rate_for_trade_mode(ctx.db_settings.trade_mode),
+            )
+            slot_cash_usd -= reserved_order_total
             if not existing_holding:
                 slot_holdings_count += 1
 

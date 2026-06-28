@@ -9,6 +9,8 @@ from app.bot.backtest_metrics import (
     assess_strategy_report,
     calculate_performance_metrics,
 )
+from app.bot.trade_calculations import calculate_buy_total, calculate_realized_pnl
+from app.core.config import settings
 from app.strategies.strategy_factory import get_strategy
 from app.core.logging import logger
 from app.translations.translator import Translator
@@ -199,19 +201,14 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
             if sell_reason:
                 # 매도 청산 집행
                 sell_qty = h.quantity
-                revenue = sell_qty * current_price
-                sell_fee = revenue * 0.0007 # 0.07% 수수료
-                sec_fee = revenue * 0.0000278 # SEC Fee
-                net_revenue = revenue - sell_fee - sec_fee
+                pnl = calculate_realized_pnl(
+                    avg_price=h.avg_price,
+                    filled_price=current_price,
+                    quantity=sell_qty,
+                    fee_rate=settings.SIMULATED_FEE_RATE,
+                )
                 
-                cash_balance += net_revenue
-                
-                # 매입 평단금 계산
-                buy_gross = h.avg_price * sell_qty
-                buy_fee = buy_gross * 0.0007
-                
-                realized_pnl = net_revenue - (buy_gross + buy_fee)
-                calc_return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
+                cash_balance += pnl.net_revenue
                 
                 trade_logs.append({
                     "timestamp": t.strftime('%Y-%m-%d %H:%M:%S') if hasattr(t, 'strftime') else str(t),
@@ -219,8 +216,8 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
                     "trade_type": "SELL",
                     "price": current_price,
                     "quantity": sell_qty,
-                    "realized_pnl": realized_pnl,
-                    "return_rate": calc_return_rate,
+                    "realized_pnl": pnl.realized_pnl,
+                    "return_rate": pnl.return_rate,
                     "reason": sell_reason,
                     "strategy_type": h.strategy_type
                 })
@@ -352,9 +349,11 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
                         
                     if final_qty >= 1:
                         # 매수 집행 및 수수료 정산
-                        cost = final_qty * current_price
-                        buy_fee = cost * 0.0007
-                        total_cost = cost + buy_fee
+                        _, _, total_cost = calculate_buy_total(
+                            current_price,
+                            final_qty,
+                            settings.SIMULATED_FEE_RATE,
+                        )
                         
                         cash_balance -= total_cost
                         slot_cash_usd -= total_cost

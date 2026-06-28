@@ -21,7 +21,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 
 import useSWR from 'swr';
-import api, { fetcher } from '@/lib/api';
+import { adminAPI, fetcher } from '@/lib/api';
 import { toast } from "sonner";
 import { getErrorMessage } from '@/lib/utils';
 
@@ -84,7 +84,7 @@ export function UserManagement() {
   const handleToggleUserBot = async (userId: number) => {
     setActionUserId(userId);
     try {
-      const res = await api.post(`/admin/users/${userId}/toggle-bot`);
+      const res = await adminAPI.toggleUserBot(userId);
       toast.success(res.data.is_running ? "봇이 성공적으로 가동되었습니다." : "봇이 일시정지 되었습니다.");
       mutate();
     } catch (error) {
@@ -100,7 +100,7 @@ export function UserManagement() {
     }
     setActionUserId(userId);
     try {
-      await api.post(`/admin/users/${userId}/delete`);
+      await adminAPI.deleteUser(userId);
       toast.success(`[${username}] 계정이 안전하게 영구 삭제되었습니다.`);
       setSelectedUserId(null); // Close drawer on success
       mutate();

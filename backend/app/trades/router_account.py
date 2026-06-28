@@ -11,6 +11,7 @@ from app.bot.order_reconciler import (
     finalize_order_submission,
     has_unresolved_orders,
 )
+from app.bot.trade_calculations import calculate_realized_pnl, fee_rate_for_trade_mode
 from fastapi.concurrency import run_in_threadpool
 from app.core.dependencies import get_current_user
 from app.core.models import User, Holding, TradeLog, ActionLog
@@ -368,13 +369,12 @@ async def force_liquidate(
                         f"Invalid liquidation fill quantity for {holding.ticker}: {filled_qty}"
                     )
                 order_no = result.get("order_no", "LIQUIDATE_MANUAL")
-                buy_gross = holding.avg_price * filled_qty
-                buy_fee = buy_gross * app_settings.SIMULATED_FEE_RATE
-                sell_gross = filled_price * filled_qty
-                sell_fee = sell_gross * app_settings.SIMULATED_FEE_RATE
-                sec_fee = sell_gross * app_settings.SEC_FEE_RATE
-                realized_pnl = sell_gross - buy_gross - buy_fee - sell_fee - sec_fee
-                calc_return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
+                pnl = calculate_realized_pnl(
+                    avg_price=holding.avg_price,
+                    filled_price=filled_price,
+                    quantity=filled_qty,
+                    fee_rate=fee_rate_for_trade_mode(trade_mode),
+                )
 
                 db.add(TradeLog(
                     user_id=current_user.id,
@@ -387,8 +387,8 @@ async def force_liquidate(
                     order_no=order_no,
                     regime_mode="LIQUIDATE",
                     signal_score=0,
-                    realized_pnl=round(realized_pnl, 2),
-                    return_rate=round(calc_return_rate, 2),
+                    realized_pnl=round(pnl.realized_pnl, 2),
+                    return_rate=round(pnl.return_rate, 2),
                 ))
                 if filled_qty == holding.quantity:
                     db.delete(holding)

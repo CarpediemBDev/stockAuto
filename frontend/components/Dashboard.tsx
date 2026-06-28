@@ -12,7 +12,7 @@ import { fetcher } from "@/lib/api";
 
 export function Dashboard() {
   const { data: statusData } = useSWR('/bot/status', fetcher, { refreshInterval: 15000 });
-  const { data: logsData } = useSWR('/trades/logs', fetcher, { refreshInterval: 15000 });
+  const { data: logsData } = useSWR('/trades', fetcher, { refreshInterval: 15000 });
 
   const isBotRunning = statusData?.is_running || false;
   const isReal = statusData?.is_real || false;

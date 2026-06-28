@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.bot.broker_factory import get_broker_client
-from app.core.config import settings
+from app.bot.trade_calculations import calculate_realized_pnl, fee_rate_for_trade_mode
 from app.core.database import SessionLocal
 from app.core.locks import acquire_symbol_order_lock, RedisLockUnavailable
 from app.core.logging import logger
@@ -144,14 +144,12 @@ def _apply_sell_delta(db: Session, order: BrokerOrder, delta: int, filled_price:
             f"for {order.ticker} ({order.strategy_type})."
         )
 
-    buy_gross = holding.avg_price * delta
-    fee_rate = settings.SIMULATED_FEE_RATE if order.trade_mode == "SIMULATED" else settings.KIS_FEE_RATE
-    buy_fee = buy_gross * fee_rate
-    sell_gross = filled_price * delta
-    sell_fee = sell_gross * fee_rate
-    sec_fee = sell_gross * settings.SEC_FEE_RATE
-    realized_pnl = sell_gross - buy_gross - buy_fee - sell_fee - sec_fee
-    return_rate = (realized_pnl / buy_gross) * 100 if buy_gross > 0 else 0.0
+    pnl = calculate_realized_pnl(
+        avg_price=holding.avg_price,
+        filled_price=filled_price,
+        quantity=delta,
+        fee_rate=fee_rate_for_trade_mode(order.trade_mode),
+    )
 
     db.add(TradeLog(
         user_id=order.user_id,
@@ -164,8 +162,8 @@ def _apply_sell_delta(db: Session, order: BrokerOrder, delta: int, filled_price:
         order_no=order.broker_order_no,
         regime_mode=order.regime_mode,
         signal_score=order.signal_score,
-        realized_pnl=round(realized_pnl, 2),
-        return_rate=round(return_rate, 2),
+        realized_pnl=round(pnl.realized_pnl, 2),
+        return_rate=round(pnl.return_rate, 2),
     ))
 
     remaining_qty = holding.quantity - delta
@@ -174,7 +172,7 @@ def _apply_sell_delta(db: Session, order: BrokerOrder, delta: int, filled_price:
     else:
         holding.quantity = remaining_qty
 
-    return remaining_qty, round(realized_pnl, 2), round(return_rate, 2)
+    return remaining_qty, round(pnl.realized_pnl, 2), round(pnl.return_rate, 2)
 
 
 def apply_broker_report(db: Session, order: BrokerOrder, report: dict) -> FillApplication:
