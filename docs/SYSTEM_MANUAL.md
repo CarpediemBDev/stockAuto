@@ -759,19 +759,21 @@ npm run local
 프로덕션 환경으로 전체 시스템을 배포할 때, 프론트엔드와 백엔드를 모두 **Google Cloud Run** 서버리스 컨테이너 환경으로 통일하여 올립니다.
 
 #### A. 컨테이너 빌드 파일 (Dockerfiles)
-*   **백엔드 Dockerfile (`/backend/Dockerfile`)**: Python 3.10-slim 이미지 기반으로 requirements.txt 설치 후, Cloud Run 주입 포트 `$PORT`를 받아 Uvicorn 기동.
-*   **프론트엔드 Dockerfile (`/frontend/Dockerfile`)**: Node 18-alpine 이미지 기반의 멀티스테이지 빌드로 Next.js 프로덕션 빌드 서빙.
+*   **백엔드 Dockerfile (`/backend/Dockerfile`)**: Python 3.12-slim 이미지 기반으로 requirements.txt 설치 후, `APP_ENV=prod`를 기본 프로필로 고정하고 Cloud Run 주입 포트 `$PORT`(기본 8000)를 받아 Uvicorn 기동.
+*   **프론트엔드 Dockerfile (`/frontend/Dockerfile`)**: Node 20-alpine 이미지 기반의 멀티스테이지 빌드로 Next.js 프로덕션 빌드 서빙.
 
 #### B. 깃허브 자동 CI/CD 및 환경변수 연동
 1.  **백엔드 서비스 배포**:
     *   Google Cloud Run에서 `backend/Dockerfile`을 소스로 지정하여 서비스를 생성합니다.
     *   완료 시 생성되는 백엔드 HTTPS 주소(`https://stockauto-be-xxxx-a.run.app`)를 획득합니다.
+    *   운영 환경은 `backend/.env.prod.example`을 기준으로 `APP_ENV=prod`, `JWT_SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `ALLOWED_ORIGINS`를 반드시 실제 값으로 주입합니다.
     *   환경변수 `ALLOWED_ORIGINS`에 프론트엔드의 정확한 Origin을 등록합니다. 여러 주소는 쉼표로 구분하며 와일드카드는 사용하지 않습니다.
     *   동일 출처 프록시 사용 시 Refresh Cookie는 `REFRESH_COOKIE_SAMESITE=lax`, `REFRESH_COOKIE_SECURE=true`를 유지합니다.
 2.  **프론트엔드 서비스 배포**:
     *   Google Cloud Run에서 `frontend/Dockerfile`을 소스로 지정하여 서비스를 생성합니다.
     *   브라우저가 백엔드를 직접 cross-site 호출하지 않도록 `NEXT_PUBLIC_API_BASE=/api/v1`을 사용합니다.
     *   서버 측 Next.js rewrite 대상은 `BACKEND_API_ORIGIN=https://stockauto-be-xxxx-a.run.app`으로 주입합니다.
+    *   운영 빌드 환경은 `frontend/.env.prod.example`을 기준으로 `NEXT_PUBLIC_APP_ENV=prod`, `NEXT_PUBLIC_API_BASE=/api/v1`, `BACKEND_API_ORIGIN`을 실제 값으로 설정합니다.
     *   이 구조에서는 `/api/v1/*` 요청과 HttpOnly Refresh Cookie가 프론트엔드와 동일한 Origin에서 처리되어 서드파티 쿠키 차단 영향을 받지 않습니다.
 
 #### C. 데이터베이스 영속성 (SQLite) 및 프로덕션 아키텍처 권장사항

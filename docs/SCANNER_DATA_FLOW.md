@@ -13,12 +13,13 @@
 
 | 데이터 | 소유권 | 생산자 | 저장·캐시 | 허용 소비자 |
 | :--- | :--- | :--- | :--- | :--- |
-| 공용 시장 시드 | 공용 | Toss, Yahoo Finance, Naver, 안전 기본 목록 | 실행 중 source map | 공용 시장 스캐너, 글로벌 스윙 후보 |
+| 공용 시장 시드 | 공용 | Toss, Yahoo Finance, Naver, 안전 기본 목록 | 실행 중 source map | 공용 시장 스캐너, 글로벌 스윙 후보, 에프터장 후보 |
 | 공용 시장 신호 | 공용 | `scan_overseas_market()` | `latest_scanned_signals` | 사용자 컨텍스트 빌더, 공용 레이더, 시뮬레이터 가격 조회 |
 | 관심종목 소유권 | 사용자별 | 관심종목 CRUD API | `watchlist.user_id` | 해당 사용자 API·자동매매 컨텍스트 |
 | 관심종목 분석 결과 | 티커 단위 공용 사실 | `analyze_single_ticker()` | `latest_watchlist_signals[ticker]` | 사용자 소유권 확인 후에만 결합 |
 | 사용자 신호 컨텍스트 | 요청·사이클별 사용자 데이터 | `build_user_signal_context()` | 영구 전역 저장 금지 | `/scanner/latest`, 사용자 자동매매, 사용자 레이더 |
 | 스윙 예측 후보 | 현재 구현상 공용 | `scan_next_day_candidates()` | `GLOBAL_SWING_POOL` 및 DB snapshot | 인증된 사용자 조회, 관리자 백테스트 |
+| 에프터장 상승 후보 | 공용 | `refresh_after_hours_candidate_cache()` | 프로세스 메모리 캐시 | 인증된 사용자 공용 조회(scope=global), 자동매매 진입 신호와 분리 |
 
 `latest_watchlist_signals`에 사용자 ID가 없는 이유는 분석 결과가 동일 티커의 시장 사실이기 때문입니다. 사용자 포함 여부는 반드시 `WatchList.user_id` 조회 결과로 제한합니다.
 
@@ -43,6 +44,9 @@ flowchart LR
 
     PublicSources --> SwingPool["GLOBAL_SWING_POOL"]
     SwingPool -->|"인증 사용자 공용 응답(scope=global)"| SwingAPI["/scanner/swing-predict"]
+
+    PublicSources --> AfterHoursPool["After-hours candidate cache"]
+    AfterHoursPool -->|"인증 사용자 공용 응답(scope=global)"| AfterHoursAPI["/scanner/after-hours-candidates"]
 ```
 
 ## 4. 경로별 계약
@@ -54,6 +58,7 @@ flowchart LR
 | 자동매매 사이클 | 내부 | 전체 | 활성 사용자별 결합 | `build_user_signal_context()` 사용 |
 | `GET /account/balance` 레이더 | 필수 | 사용 | 모두 결합 | `build_user_signal_context()` 재사용, 2사용자 API 격리 검증 완료 |
 | `GET/POST /scanner/swing-predict` | 필수 | 글로벌 풀 | 결합하지 않음 | 인증된 모든 사용자에게 동일한 `scope=global` 공용 시장 후보 제공 |
+| `GET/POST /scanner/after-hours-candidates` | 필수 | 글로벌 풀 | 결합하지 않음 | 정규장 흐름과 에프터장 확인 신호를 결합한 관찰용 후보 제공 |
 
 ## 5. 금지되는 구현
 
@@ -88,4 +93,5 @@ flowchart LR
 - GitHub [#8 멀티테넌시 분리 후 사용자 관심종목 재결합 누락](https://github.com/CarpediemBDev/stockAuto/issues/8)
 - `/scanner/latest`와 `/account/balance`는 동일한 사용자 신호 컨텍스트를 사용하고 2사용자 격리·삭제 후 제거 시나리오를 통과했습니다.
 - 스윙 예측은 관심종목을 결합하지 않는 인증된 공용 시장 기능으로 확정했으며 응답의 `scope` 값은 `global`입니다.
+- 에프터장 후보는 관심종목을 결합하지 않는 인증된 공용 시장 기능이며 `/scanner/latest` 자동매매 후보 캐시와 분리됩니다.
 - 회귀 테스트 원장은 `backend/tests/test_scanner_multitenancy.py`이며 GitHub #8 완료 근거로 사용합니다.
