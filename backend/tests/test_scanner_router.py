@@ -8,10 +8,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.scanner.router as scanner_router_module
+import app.scanner.after_hours_scanner as after_hours_module
 import app.scanner.swing_prediction_cache as swing_cache_module
 from app.core.database import Base, get_db
 from app.core.dependencies import get_current_user
 from app.core.models import SwingPredictionSnapshot, User, WatchList
+import pandas as pd
 
 
 def create_scanner_app() -> FastAPI:
@@ -50,6 +52,30 @@ def create_authenticated_scanner_app():
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_current_user] = override_get_current_user
     return app, db, engine
+
+
+def normalized_swing_candidate(ticker: str = "AAPL", score: float = 77.0) -> dict:
+    return {
+        "ticker": ticker,
+        "score": score,
+        "vcp_triggered": False,
+        "vud_ratio": 1.0,
+        "bollinger_band_width_percentile": 100.0,
+        "obv_divergence": 0.0,
+        "close": 0.0,
+        "change_pct": 0.0,
+        "is_bullish_trend": False,
+    }
+
+
+def test_swing_candidate_normalization_maps_legacy_squeeze_field():
+    candidate = swing_cache_module.normalize_swing_candidate(
+        {"ticker": "aapl", "score": 77.0, "squeeze_pct": 18.5}
+    )
+
+    assert candidate["ticker"] == "AAPL"
+    assert candidate["bollinger_band_width_percentile"] == 18.5
+    assert "squeeze_pct" not in candidate
 
 
 def test_manual_overseas_scan_updates_latest_signal_cache(monkeypatch):
@@ -159,8 +185,203 @@ def test_swing_prediction_cache_read_does_not_run_heavy_scan(monkeypatch):
         swing_cache_module.clear_swing_prediction_cache()
 
 
+def test_after_hours_candidate_cache_read_requires_authentication():
+    after_hours_module.clear_after_hours_candidate_cache()
+    app = create_scanner_app()
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/scanner/after-hours-candidates")
+
+    assert response.status_code == 401
+
+
+def test_after_hours_candidate_cache_empty_response():
+    after_hours_module.clear_after_hours_candidate_cache()
+    app, db, engine = create_authenticated_scanner_app()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/scanner/after-hours-candidates")
+
+        assert response.status_code == 200
+        assert response.json()["data"] == {
+            "candidates": [],
+            "scope": "global",
+            "sync_status": "empty",
+            "updated_at": None,
+            "universe_size": 0,
+        }
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+        after_hours_module.clear_after_hours_candidate_cache()
+
+
+def _make_after_hours_fixture_frame() -> pd.DataFrame:
+    previous_regular_index = pd.date_range(
+        "2026-06-25 09:30",
+        "2026-06-25 15:59",
+        freq="1min",
+        tz="America/New_York",
+    )
+    current_regular_index = pd.date_range(
+        "2026-06-26 09:30",
+        "2026-06-26 15:59",
+        freq="1min",
+        tz="America/New_York",
+    )
+    after_hours_index = pd.date_range(
+        "2026-06-26 16:00",
+        "2026-06-26 16:20",
+        freq="1min",
+        tz="America/New_York",
+    )
+
+    previous_regular = pd.DataFrame(
+        {
+            "Open": 100.0,
+            "High": 101.0,
+            "Low": 99.5,
+            "Close": 100.0,
+            "Volume": 1000,
+        },
+        index=previous_regular_index,
+    )
+    current_close = pd.Series(
+        [100.0 + (idx / (len(current_regular_index) - 1)) * 7.0 for idx in range(len(current_regular_index))],
+        index=current_regular_index,
+    )
+    current_regular = pd.DataFrame(
+        {
+            "Open": current_close,
+            "High": current_close + 0.25,
+            "Low": current_close - 0.35,
+            "Close": current_close,
+            "Volume": 2600,
+        },
+        index=current_regular_index,
+    )
+    after_close = pd.Series(
+        [107.1 + (idx / (len(after_hours_index) - 1)) * 2.4 for idx in range(len(after_hours_index))],
+        index=after_hours_index,
+    )
+    after_hours = pd.DataFrame(
+        {
+            "Open": after_close,
+            "High": after_close + 0.2,
+            "Low": after_close - 0.1,
+            "Close": after_close,
+            "Volume": 3500,
+        },
+        index=after_hours_index,
+    )
+    return pd.concat([previous_regular, current_regular, after_hours])
+
+
+def test_after_hours_refresh_scores_regular_flow_and_after_hours_confirmation(monkeypatch):
+    after_hours_module.clear_after_hours_candidate_cache()
+    fixture = pd.concat({"AAPL": _make_after_hours_fixture_frame()}, axis=1)
+
+    async def fake_get_seed_tickers():
+        return ["AAPL"], {"AAPL": ["MARKET", "YAHOO_GAINER"]}
+
+    async def fake_fetch_bulk_ohlcv(tickers, interval, period, prepost=False):
+        assert tickers == ["AAPL"]
+        assert interval == "1m"
+        assert period == "5d"
+        assert prepost is True
+        return fixture
+
+    async def fake_fetch_ticker_news(ticker):
+        assert ticker == "AAPL"
+        return [{"title": "AAPL earnings contract expands after market"}]
+
+    monkeypatch.setattr(after_hours_module, "get_seed_tickers", fake_get_seed_tickers)
+    monkeypatch.setattr(after_hours_module, "fetch_bulk_ohlcv", fake_fetch_bulk_ohlcv)
+    monkeypatch.setattr(after_hours_module, "fetch_ticker_news", fake_fetch_ticker_news)
+
+    try:
+        response = asyncio.run(after_hours_module.refresh_after_hours_candidate_cache(limit=5))
+
+        assert response["sync_status"] == "fresh"
+        assert response["universe_size"] == 1
+        assert len(response["candidates"]) == 1
+        candidate = response["candidates"][0]
+        assert candidate["ticker"] == "AAPL"
+        assert candidate["signal_type"] == "STRONG_AFTER_HOURS"
+        assert candidate["score"] >= 80
+        assert candidate["details"]["after_hours_change_pct"] > 2
+        assert "earnings" in candidate["catalyst_keywords"]
+        assert "contract" in candidate["catalyst_keywords"]
+    finally:
+        after_hours_module.clear_after_hours_candidate_cache()
+
+
+def test_after_hours_refresh_uses_cached_translation_only(monkeypatch):
+    after_hours_module.clear_after_hours_candidate_cache()
+    fixture = pd.concat({"AAPL": _make_after_hours_fixture_frame()}, axis=1)
+
+    async def fake_get_seed_tickers():
+        return ["AAPL"], {"AAPL": ["MARKET"]}
+
+    async def fake_fetch_bulk_ohlcv(tickers, interval, period, prepost=False):
+        return fixture
+
+    async def fake_fetch_ticker_news(ticker):
+        return []
+
+    def fail_external_info_lookup(ticker):
+        raise AssertionError("after-hours refresh must not auto-learn translations")
+
+    monkeypatch.setattr(after_hours_module, "get_seed_tickers", fake_get_seed_tickers)
+    monkeypatch.setattr(after_hours_module, "fetch_bulk_ohlcv", fake_fetch_bulk_ohlcv)
+    monkeypatch.setattr(after_hours_module, "fetch_ticker_news", fake_fetch_ticker_news)
+    monkeypatch.setattr("app.translations.translator.fetch_ticker_info_sync", fail_external_info_lookup)
+    monkeypatch.setattr(after_hours_module.Translator, "_cache", {})
+
+    try:
+        response = asyncio.run(after_hours_module.refresh_after_hours_candidate_cache(limit=5))
+
+        assert response["sync_status"] == "fresh"
+        assert response["candidates"][0]["name"] in {"AAPL", "Apple"}
+    finally:
+        after_hours_module.clear_after_hours_candidate_cache()
+
+
+def test_after_hours_refresh_respects_fresh_cache_cooldown(monkeypatch):
+    after_hours_module.clear_after_hours_candidate_cache()
+    fixture = pd.concat({"AAPL": _make_after_hours_fixture_frame()}, axis=1)
+    fetch_count = 0
+
+    async def fake_get_seed_tickers():
+        return ["AAPL"], {"AAPL": ["MARKET"]}
+
+    async def fake_fetch_bulk_ohlcv(tickers, interval, period, prepost=False):
+        nonlocal fetch_count
+        fetch_count += 1
+        return fixture
+
+    async def fake_fetch_ticker_news(ticker):
+        return []
+
+    monkeypatch.setattr(after_hours_module, "get_seed_tickers", fake_get_seed_tickers)
+    monkeypatch.setattr(after_hours_module, "fetch_bulk_ohlcv", fake_fetch_bulk_ohlcv)
+    monkeypatch.setattr(after_hours_module, "fetch_ticker_news", fake_fetch_ticker_news)
+
+    try:
+        first_response = asyncio.run(after_hours_module.refresh_after_hours_candidate_cache(limit=5))
+        second_response = asyncio.run(after_hours_module.refresh_after_hours_candidate_cache(limit=5))
+
+        assert fetch_count == 1
+        assert first_response["sync_status"] == "fresh"
+        assert second_response["sync_status"] == "fresh"
+        assert second_response["updated_at"] == first_response["updated_at"]
+    finally:
+        after_hours_module.clear_after_hours_candidate_cache()
+
+
 def test_swing_prediction_refresh_updates_cached_response(monkeypatch):
-    expected = [{"ticker": "AAPL", "score": 77.0}]
+    expected = [normalized_swing_candidate()]
     refresh_done = threading.Event()
 
     async def fake_refresh_swing_prediction_cache(cache_key, db_arg=None, refresh_reserved=False):
@@ -200,7 +421,7 @@ def test_swing_prediction_refresh_updates_cached_response(monkeypatch):
 
 
 def test_swing_prediction_refreshing_status_survives_next_poll(monkeypatch):
-    expected = [{"ticker": "AAPL", "score": 77.0}]
+    expected = [normalized_swing_candidate()]
 
     async def keep_refresh_reserved(cache_key, db_arg=None, refresh_reserved=False):
         return None
@@ -238,7 +459,7 @@ def test_swing_prediction_refreshing_status_survives_next_poll(monkeypatch):
 
 
 def test_swing_prediction_read_falls_back_to_persisted_snapshot():
-    expected = [{"ticker": "AAPL", "score": 77.0}]
+    expected = [normalized_swing_candidate()]
 
     swing_cache_module.clear_swing_prediction_cache()
     app, db, engine = create_authenticated_scanner_app()
@@ -296,7 +517,7 @@ def test_swing_prediction_refresh_failure_persists_failed_status(monkeypatch):
 
 
 def test_swing_prediction_refresh_failure_persists_stale_status(monkeypatch):
-    expected = [{"ticker": "AAPL", "score": 77.0}]
+    expected = [normalized_swing_candidate()]
 
     async def fail_scan_next_day_candidates(tickers):
         raise RuntimeError("upstream failed")
@@ -331,7 +552,7 @@ def test_swing_prediction_refresh_failure_persists_stale_status(monkeypatch):
 
 
 def test_swing_prediction_refresh_uses_discovery_seed_tickers(monkeypatch):
-    expected = [{"ticker": "AAPL", "score": 81.0}]
+    expected = [normalized_swing_candidate(score=81.0)]
     scanned_tickers = []
 
     async def fake_get_seed_tickers():
@@ -364,7 +585,7 @@ def test_swing_prediction_refresh_uses_discovery_seed_tickers(monkeypatch):
 
 
 def test_swing_prediction_refresh_failure_returns_stale_snapshot(monkeypatch):
-    expected = [{"ticker": "AAPL", "score": 77.0}]
+    expected = [normalized_swing_candidate()]
     refresh_done = threading.Event()
 
     async def fail_refresh_swing_prediction_cache(cache_key, db_arg=None, refresh_reserved=False):

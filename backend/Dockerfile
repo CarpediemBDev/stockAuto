@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # 소스코드 전체 복사
 COPY . .
 
+ENV APP_ENV=prod
+ENV PORT=8000
+
 # 구글 클라우드 런은 포트 8080을 기본 포트로 매핑하거나, $PORT 환경변수를 주입합니다.
 # Uvicorn이 쉘 환경변수 $PORT를 동적으로 받아 구동되도록 CMD를 설정합니다.
-CMD uvicorn app.main:app --host 0.0.0.0 --port $PORT
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

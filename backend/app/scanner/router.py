@@ -14,6 +14,13 @@ from app.scanner.swing_prediction_cache import (
     release_swing_prediction_refresh,
     reserve_swing_prediction_refresh,
 )
+from app.scanner.after_hours_scanner import (
+    DEFAULT_SCAN_LIMIT,
+    is_after_hours_cache_fresh_enough,
+    read_after_hours_candidate_cache,
+    refresh_after_hours_candidate_cache,
+    reserve_after_hours_refresh,
+)
 import asyncio
 import threading
 
@@ -84,6 +91,14 @@ def background_refresh_swing_prediction(cache_key: tuple[str, ...]) -> None:
         release_swing_prediction_refresh(cache_key)
         logger.exception("[SwingPrediction] Background refresh thread failed unexpectedly")
 
+
+def background_refresh_after_hours_candidates(limit: int) -> None:
+    """HTTP 응답 루프와 분리된 스레드에서 에프터장 후보 캐시를 갱신합니다."""
+    try:
+        asyncio.run(refresh_after_hours_candidate_cache(limit=limit, refresh_reserved=True))
+    except Exception:
+        logger.exception("[AfterHoursScanner] Background refresh thread failed unexpectedly")
+
 @router.post("/overseas")
 async def trigger_overseas_scan(
     background_tasks: BackgroundTasks,
@@ -120,6 +135,42 @@ async def refresh_swing_prediction(
     else:
         response_data = read_swing_prediction_cache(cache_key, db)
         message = "이미 스윙 예측 갱신이 진행 중이거나 최신 데이터입니다."
+
+    return {
+        "data": response_data,
+        "message": message,
+    }
+
+
+@router.get("/after-hours-candidates")
+async def get_after_hours_candidates(
+    _authenticated_user: models.User = Depends(get_current_user),
+):
+    """정규장 흐름과 에프터장 확인 신호를 결합한 공용 후보 랭킹을 반환합니다."""
+    return read_after_hours_candidate_cache()
+
+
+@router.post("/after-hours-candidates/refresh")
+async def refresh_after_hours_candidates(
+    _authenticated_user: models.User = Depends(get_current_user),
+    limit: int = DEFAULT_SCAN_LIMIT,
+):
+    """정규장 기반 에프터장 후보 랭킹을 백그라운드에서 수동 갱신합니다."""
+    bounded_limit = max(1, min(limit, 200))
+    if is_after_hours_cache_fresh_enough():
+        response_data = read_after_hours_candidate_cache()
+        message = "에프터장 후보 캐시가 최신 상태라 새 외부 스캔을 생략했습니다."
+    elif reserve_after_hours_refresh():
+        response_data = read_after_hours_candidate_cache()
+        threading.Thread(
+            target=background_refresh_after_hours_candidates,
+            args=(bounded_limit,),
+            daemon=True,
+        ).start()
+        message = "에프터장 후보 스캔이 백그라운드에서 시작되었습니다."
+    else:
+        response_data = read_after_hours_candidate_cache()
+        message = "이미 에프터장 후보 스캔이 진행 중입니다."
 
     return {
         "data": response_data,

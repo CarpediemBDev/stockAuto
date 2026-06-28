@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import threading
 import time
 
@@ -22,6 +23,55 @@ _swing_prediction_cache_lock = threading.RLock()
 _swing_prediction_cache: dict[tuple[str, ...], dict] = {}
 _swing_prediction_refresh_lock = threading.Lock()
 _swing_prediction_refreshing: set[tuple[str, ...]] = set()
+
+
+def _finite_number(value, default: float = 0.0) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    return numeric if math.isfinite(numeric) else default
+
+
+def normalize_swing_candidate(candidate: dict) -> dict | None:
+    if not isinstance(candidate, dict):
+        return None
+
+    ticker = str(candidate.get("ticker") or "").upper().strip()
+    if not ticker:
+        return None
+
+    normalized = dict(candidate)
+    bollinger_band_width_percentile = candidate.get(
+        "bollinger_band_width_percentile",
+        candidate.get("squeeze_pct", 100.0),
+    )
+    normalized.update(
+        {
+            "ticker": ticker,
+            "score": max(0.0, min(100.0, _finite_number(candidate.get("score")))),
+            "vcp_triggered": bool(candidate.get("vcp_triggered", False)),
+            "vud_ratio": _finite_number(candidate.get("vud_ratio"), 1.0),
+            "bollinger_band_width_percentile": _finite_number(bollinger_band_width_percentile, 100.0),
+            "obv_divergence": _finite_number(candidate.get("obv_divergence")),
+            "close": _finite_number(candidate.get("close")),
+            "change_pct": _finite_number(candidate.get("change_pct")),
+            "is_bullish_trend": bool(candidate.get("is_bullish_trend", False)),
+        }
+    )
+    normalized.pop("squeeze_pct", None)
+    return normalized
+
+
+def normalize_swing_candidates(candidates: list) -> list[dict]:
+    if not isinstance(candidates, list):
+        return []
+    normalized = []
+    for candidate in candidates:
+        item = normalize_swing_candidate(candidate)
+        if item:
+            normalized.append(item)
+    return normalized
 
 
 def get_swing_cache_key() -> tuple[str, ...]:
@@ -52,7 +102,7 @@ def get_latest_swing_snapshot(db: Session, cache_key: tuple[str, ...]) -> models
 
 def snapshot_to_swing_response(snapshot: models.SwingPredictionSnapshot, sync_status: str | None = None) -> dict:
     try:
-        candidates = json.loads(snapshot.candidates_json)
+        candidates = normalize_swing_candidates(json.loads(snapshot.candidates_json))
     except json.JSONDecodeError:
         candidates = []
     return {
@@ -95,7 +145,7 @@ def read_swing_prediction_cache(cache_key: tuple[str, ...], db: Session) -> dict
 def write_swing_prediction_cache(cache_key: tuple[str, ...], candidates: list, sync_status: str, updated_at: str | None) -> None:
     with _swing_prediction_cache_lock:
         _swing_prediction_cache[cache_key] = {
-            "candidates": list(candidates),
+            "candidates": normalize_swing_candidates(candidates),
             "scope": SWING_SCOPE_GLOBAL,
             "sync_status": sync_status,
             "updated_at": updated_at,
@@ -104,10 +154,11 @@ def write_swing_prediction_cache(cache_key: tuple[str, ...], candidates: list, s
 
 
 def write_swing_prediction_snapshot(db: Session, cache_key: tuple[str, ...], seed_tickers: list[str], candidates: list, sync_status: str) -> models.SwingPredictionSnapshot:
+    normalized_candidates = normalize_swing_candidates(candidates)
     snapshot = models.SwingPredictionSnapshot(
         cache_key=serialize_swing_cache_key(cache_key),
         ticker_universe=json.dumps(seed_tickers, ensure_ascii=False),
-        candidates_json=json.dumps(candidates, ensure_ascii=False),
+        candidates_json=json.dumps(normalized_candidates, ensure_ascii=False),
         sync_status=sync_status,
     )
     db.add(snapshot)

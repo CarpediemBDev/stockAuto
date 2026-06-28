@@ -17,6 +17,7 @@ from app.scanner.router import router as scanner_router
 from app.scanner.swing_prediction_cache import (
     clear_swing_prediction_cache,
     get_swing_cache_key,
+    normalize_swing_candidate,
     write_swing_prediction_cache,
 )
 from app.trades.router_account import router as account_router
@@ -189,7 +190,7 @@ def test_swing_prediction_is_authenticated_global_market_data():
     session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     app = create_multitenant_app(session_factory)
     cache_key = get_swing_cache_key()
-    expected_candidates = [{"ticker": "NVDA", "score": 88.0}]
+    expected_candidates = [normalize_swing_candidate({"ticker": "NVDA", "score": 88.0})]
     clear_swing_prediction_cache()
     write_swing_prediction_cache(
         cache_key,

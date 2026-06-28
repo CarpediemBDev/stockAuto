@@ -137,6 +137,37 @@ class Translator:
                 db.close()
 
     @classmethod
+    def translate_cached(cls, ticker: str, default_name: str = None, db = None) -> str:
+        """Return a cached stock name without external API calls or DB writes."""
+        if not ticker:
+            return ""
+
+        if "_" in ticker:
+            ticker = ticker.split("_")[-1]
+        ticker_clean = ticker.upper().strip()
+
+        if ticker_clean in cls._cache:
+            return cls._cache[ticker_clean]
+
+        is_local_session = False
+        if db is None:
+            db = SessionLocal()
+            is_local_session = True
+
+        try:
+            db_trans = db.query(models.StockTranslation).filter(models.StockTranslation.ticker == ticker_clean).first()
+            if db_trans:
+                cls._cache[ticker_clean] = db_trans.name_ko
+                return db_trans.name_ko
+            return default_name or ticker_clean
+        except Exception as e:
+            logger.error(f"Error reading cached ticker translation '{ticker_clean}': {e}")
+            return default_name or ticker_clean
+        finally:
+            if is_local_session:
+                db.close()
+
+    @classmethod
     def auto_translate_name(cls, english_name: str) -> str:
         """영문 법인명을 정제한 후 무료 구글 번역 OpenAPI를 통해 깔끔한 한글 주식명으로 자동 실시간 번역합니다."""
         if not english_name:
