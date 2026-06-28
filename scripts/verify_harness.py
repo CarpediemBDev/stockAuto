@@ -86,7 +86,7 @@ def backend_python(root: Path) -> str:
 def print_banner() -> None:
     safe_print(f"{CYAN}{BOLD}")
     safe_print("=" * 65)
-    safe_print("   [SHIELD] STOCKAUTO VERIFICATION HARNESS v1.3.0")
+    safe_print("   [SHIELD] STOCKAUTO VERIFICATION HARNESS v1.4.0")
     safe_print("=" * 65)
     safe_print(f"{RESET}")
 
@@ -274,7 +274,7 @@ def validate_change_contract(root: Path, changed_files: list[str]) -> list[str]:
 
 
 def check_change_contract(root: Path) -> bool:
-    safe_print(f"{BOLD}[1/7] [CONTRACT] Change impact and handoff check...{RESET}")
+    safe_print(f"{BOLD}[1/8] [CONTRACT] Change impact and handoff check...{RESET}")
     changed_files = get_changed_files(root)
     sensitive_files = [path for path in changed_files if is_contract_sensitive(path)]
     errors = validate_change_contract(root, changed_files)
@@ -295,6 +295,39 @@ def check_change_contract(root: Path) -> bool:
     return True
 
 
+def check_release_risk_invariants(root: Path) -> bool:
+    safe_print(f"{BOLD}[2/8] [RISK] Numeric and process invariant checks...{RESET}")
+    python_exe = backend_python(root)
+    checks = (
+        root / "scripts" / "check_numeric_invariants.py",
+        root / "scripts" / "check_process_invariants.py",
+    )
+
+    success = True
+    for script_path in checks:
+        if not script_path.exists():
+            safe_print(f"  {RED}[FAIL] Missing risk audit script: {script_path}{RESET}")
+            success = False
+            continue
+
+        safe_print(f"  * Running {script_path.name}...")
+        result = run_command(
+            [python_exe, str(script_path), str(root)],
+            cwd=root,
+            timeout=60,
+        )
+        print_result_output(result)
+        if result.returncode != 0:
+            success = False
+
+    if success:
+        safe_print(f"  {GREEN}[OK] Release risk invariant checks passed.{RESET}\n")
+    else:
+        safe_print(f"  {RED}[FAIL] Release risk invariant checks failed.{RESET}")
+
+    return success
+
+
 def print_result_output(result) -> None:
     stdout = result.stdout.decode("utf-8", errors="ignore").strip()
     stderr = result.stderr.decode("utf-8", errors="ignore").strip()
@@ -305,7 +338,7 @@ def print_result_output(result) -> None:
 
 
 def check_backend_compile(root: Path) -> bool:
-    safe_print(f"{BOLD}[2/7] [BACKEND] Python compile check (Expanded)...{RESET}")
+    safe_print(f"{BOLD}[3/8] [BACKEND] Python compile check (Expanded)...{RESET}")
     backend_dir = root / "backend"
     python_exe = backend_python(root)
     failed_files: list[tuple[Path, str]] = []
@@ -336,7 +369,7 @@ def check_backend_compile(root: Path) -> bool:
 
 
 def check_nfc_encoding(root: Path) -> bool:
-    safe_print(f"{BOLD}[3/7] [CORE] NFC Encoding check (Korean)...{RESET}")
+    safe_print(f"{BOLD}[4/8] [CORE] NFC Encoding check (Korean)...{RESET}")
     failed_files = []
     import unicodedata
     
@@ -375,7 +408,7 @@ def check_nfc_encoding(root: Path) -> bool:
 
 
 def check_alembic_migrations(root: Path) -> bool:
-    safe_print(f"{BOLD}[4/7] [BACKEND] Alembic migrations check...{RESET}")
+    safe_print(f"{BOLD}[5/8] [BACKEND] Alembic migrations check...{RESET}")
     backend_dir = root / "backend"
     python_exe = backend_python(root)
     
@@ -396,7 +429,7 @@ def check_alembic_migrations(root: Path) -> bool:
 
 
 def check_backend_tests(root: Path) -> bool:
-    safe_print(f"{BOLD}[5/7] [BACKEND] pytest scenario harness...{RESET}")
+    safe_print(f"{BOLD}[6/8] [BACKEND] pytest scenario harness...{RESET}")
     backend_dir = root / "backend"
     tests_dir = backend_dir / "tests"
 
@@ -405,11 +438,17 @@ def check_backend_tests(root: Path) -> bool:
         return True
 
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(backend_dir) + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        str(root)
+        + os.pathsep
+        + str(backend_dir)
+        + os.pathsep
+        + env.get("PYTHONPATH", "")
+    )
     result = run_command(
         [backend_python(root), "-m", "pytest"],
         cwd=backend_dir,
-        timeout=120,
+        timeout=240,
         env=env,
     )
 
@@ -424,7 +463,7 @@ def check_backend_tests(root: Path) -> bool:
 
 
 def check_frontend_static(root: Path) -> bool:
-    safe_print(f"{BOLD}[6/7] [FRONTEND] TypeScript and ESLint checks...{RESET}")
+    safe_print(f"{BOLD}[7/8] [FRONTEND] TypeScript and ESLint checks...{RESET}")
     frontend_dir = root / "frontend"
 
     if not frontend_dir.exists():
@@ -455,7 +494,7 @@ def check_frontend_static(root: Path) -> bool:
 
 
 def check_frontend_e2e(root: Path) -> bool:
-    safe_print(f"{BOLD}[7/7] [FRONTEND] Playwright E2E smoke checks...{RESET}")
+    safe_print(f"{BOLD}[8/8] [FRONTEND] Playwright E2E smoke checks...{RESET}")
     frontend_dir = root / "frontend"
     playwright_config = frontend_dir / "playwright.config.ts"
 
@@ -507,6 +546,7 @@ def main() -> int:
     if run_full:
         checks = [
             check_change_contract,
+            check_release_risk_invariants,
             check_backend_compile,
             check_nfc_encoding,
             check_alembic_migrations,
@@ -518,6 +558,7 @@ def main() -> int:
         safe_print(f"  {YELLOW}[SMART SKIP] 단순 문서(Markdown 등) 수정만 감지되었습니다. 무거운 5가지 테스트를 건너뜁니다.{RESET}\n")
         checks = [
             check_change_contract,
+            check_release_risk_invariants,
             check_nfc_encoding, # 문서를 수정했어도 한글 자소 분리 방어선은 무조건 가동
         ]
 

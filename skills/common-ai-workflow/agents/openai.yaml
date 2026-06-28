@@ -1,0 +1,4 @@
+interface:
+  display_name: "Common AI Workflow"
+  short_description: "Reusable AI work rules and validation flow"
+  default_prompt: "Use $common-ai-workflow to set up clear AI work rules for this project."

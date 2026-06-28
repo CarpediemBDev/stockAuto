@@ -1,0 +1,4 @@
+interface:
+  display_name: "StockAuto Release Risk Auditor"
+  short_description: "Audit StockAuto SSOT, contract, and release risks."
+  default_prompt: "Audit StockAuto for duplicate business logic, process, calculation, contract, and release-runtime risks."

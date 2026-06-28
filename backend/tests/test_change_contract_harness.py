@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -105,3 +106,25 @@ def test_contract_change_without_doc_requires_explicit_reason(tmp_path):
         tmp_path,
         ["backend/app/scanner/router.py", task_path],
     ) == []
+
+
+def test_release_risk_check_runs_numeric_and_process_scripts(tmp_path, monkeypatch):
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "check_numeric_invariants.py").write_text("", encoding="utf-8")
+    (scripts_dir / "check_process_invariants.py").write_text("", encoding="utf-8")
+    calls = []
+
+    def fake_run_command(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(verify_harness, "backend_python", lambda root: "python")
+    monkeypatch.setattr(verify_harness, "run_command", fake_run_command)
+
+    assert verify_harness.check_release_risk_invariants(tmp_path) is True
+    called_scripts = {Path(command[1]).name for command in calls}
+    assert called_scripts == {
+        "check_numeric_invariants.py",
+        "check_process_invariants.py",
+    }
