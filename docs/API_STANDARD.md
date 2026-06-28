@@ -58,6 +58,7 @@ HTTP 상태 코드: `4xx` 또는 `5xx`
 - `GET /api/v1/account/balance`의 `focused_radar_tickers`도 `/scanner/latest`와 같은 사용자 신호 컨텍스트를 사용하며 현재 사용자의 관심종목만 강제 포함합니다.
 - `GET/POST /api/v1/scanner/swing-predict`는 인증이 필요하지만 사용자 관심종목을 결합하지 않는 공용 시장 기능입니다. 모든 사용자가 `GLOBAL_SWING_POOL`을 공유하며 응답의 `scope`는 항상 `global`입니다.
 - 스윙 예측의 DB 세션은 공용 스냅샷의 재시작 복구에 사용하고, 인증 사용자 의존성은 갱신 비용이 있는 API의 접근 제어에 사용합니다.
+- 스윙 예측 후보의 볼린저 밴드폭 지표 필드는 `bollinger_band_width_percentile`입니다. 현재 볼린저 밴드폭이 과거 밴드폭 분포에서 어느 백분위인지 나타내며, 낮을수록 수축이 강합니다. 기존 persisted snapshot의 `squeeze_pct`는 백엔드 정규화 단계에서 신규 필드로만 변환합니다.
 - `GET /api/v1/scanner/after-hours-candidates`와 `POST /api/v1/scanner/after-hours-candidates/refresh`는 인증이 필요하지만 사용자 관심종목을 결합하지 않는 공용 해외 시장 기능입니다.
 - 에프터장 후보 응답은 `scope=global`, `sync_status`, `updated_at`, `universe_size`, `candidates[]`를 반환하며 각 후보는 `score`, `signal_type`, `reasons`, `risk_flags`, `catalyst_keywords`, `details`를 포함합니다.
 - 에프터장 후보는 정규장 흐름과 에프터장 체결 확인을 표시하는 관찰용 랭킹이며 자동매매 진입 신호 캐시인 `/scanner/latest`와 섞지 않습니다.

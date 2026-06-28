@@ -88,17 +88,19 @@ async def fetch_ohlcv(
     period: str = "5d",
     start=None,
     end=None,
+    prepost: bool = False,
 ) -> pd.DataFrame:
     """
     지정한 단일 종목의 OHLCV 데이터를 비동기로 안전하게 가져오고 MultiIndex 컬럼을 단일화합니다.
     (💡 10초 전역 캐싱 적용 - 중복 요출 원천 차단)
     """
-    cache_key = (ticker, interval, period, str(start), str(end))
+    cache_key = (ticker, interval, period, str(start), str(end), prepost)
     try:
         download_kwargs = {
             "interval": interval,
             "progress": False,
             "threads": False,
+            "prepost": prepost,
         }
         if start is not None or end is not None:
             download_kwargs.update({"start": start, "end": end})
@@ -141,6 +143,7 @@ async def fetch_bulk_ohlcv(
     group_by: str = "ticker",
     start=None,
     end=None,
+    prepost: bool = False,
 ) -> pd.DataFrame:
     """
     여러 종목의 OHLCV 데이터를 벌크(대량)로 다운로드합니다.
@@ -155,6 +158,7 @@ async def fetch_bulk_ohlcv(
         group_by,
         str(start),
         str(end),
+        prepost,
     )
     try:
         download_kwargs = {
@@ -162,6 +166,7 @@ async def fetch_bulk_ohlcv(
             "group_by": group_by,
             "progress": False,
             "threads": False,
+            "prepost": prepost,
         }
         if start is not None or end is not None:
             download_kwargs.update({"start": start, "end": end})

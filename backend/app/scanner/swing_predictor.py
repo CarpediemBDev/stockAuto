@@ -22,7 +22,7 @@ async def analyze_swing_setup(ticker: str) -> dict:
         if df.empty or len(df) < 60:
             return {
                 "ticker": ticker, "score": 0.0, "vcp_triggered": False,
-                "vud_ratio": 1.0, "squeeze_pct": 100.0, "obv_divergence": 0.0,
+                "vud_ratio": 1.0, "bollinger_band_width_percentile": 100.0, "obv_divergence": 0.0,
                 "close": 0.0, "change_pct": 0.0, "reason": "데이터 부족 (최소 60거래일 필요)"
             }
 
@@ -75,10 +75,10 @@ async def analyze_swing_setup(ticker: str) -> dict:
 
         # 7. [지표 D] 볼린저 밴드 스퀴즈 수축도 산출 (최대 25점)
         _, squeeze_score_series = calculate_bb_squeeze(df, window=20, history_window=120)
-        current_squeeze_score = float(squeeze_score_series.iloc[-1]) # 0%에 가까울수록 역사적 대압착
+        bollinger_band_width_percentile = float(squeeze_score_series.iloc[-1]) # 0%에 가까울수록 역사적 대압착
         
         # 수축도가 높을수록 고점 부여 (0% => 25점, 100% => 0점)
-        squeeze_score = round((100.0 - current_squeeze_score) * 0.25, 1)
+        squeeze_score = round((100.0 - bollinger_band_width_percentile) * 0.25, 1)
 
         # 8. 종합 점수 집계 (0~100점)
         total_score = vcp_score + vud_score + obv_score + squeeze_score
@@ -96,7 +96,7 @@ async def analyze_swing_setup(ticker: str) -> dict:
             "score": total_score,
             "vcp_triggered": vcp_triggered,
             "vud_ratio": round(current_vud, 2),
-            "squeeze_pct": round(current_squeeze_score, 1),
+            "bollinger_band_width_percentile": round(bollinger_band_width_percentile, 1),
             "obv_divergence": round(current_obv_div, 1),
             "close": current_close,
             "change_pct": change_pct,
@@ -106,7 +106,7 @@ async def analyze_swing_setup(ticker: str) -> dict:
         logger.error(f"[SwingPredictor] Error analyzing {ticker}: {e}")
         return {
             "ticker": ticker, "score": 0.0, "vcp_triggered": False,
-            "vud_ratio": 1.0, "squeeze_pct": 100.0, "obv_divergence": 0.0,
+            "vud_ratio": 1.0, "bollinger_band_width_percentile": 100.0, "obv_divergence": 0.0,
             "close": 0.0, "change_pct": 0.0, "reason": f"오류 발생: {str(e)}"
         }
 

@@ -91,11 +91,11 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
           candidates: [
             {
               ticker: "MSFT", name: "마이크로소프트", price: 410.0, score: 92, signal_type: "STRONG_BUY",
-              vcp_triggered: true, vud_ratio: 0.3, squeeze_pct: 15.0, obv_divergence: 12.0, close: 410.0, change_pct: 1.5, is_bullish_trend: true
+              vcp_triggered: true, vud_ratio: 0.3, bollinger_band_width_percentile: 15.0, obv_divergence: 12.0, close: 410.0, change_pct: 1.5, is_bullish_trend: true
             },
             {
               ticker: "AAPL", name: "애플", price: 190.0, score: 88, signal_type: "BUY",
-              vcp_triggered: false, vud_ratio: 0.6, squeeze_pct: 25.0, obv_divergence: 5.0, close: 190.0, change_pct: -0.5, is_bullish_trend: true
+              vcp_triggered: false, vud_ratio: 0.6, bollinger_band_width_percentile: 25.0, obv_divergence: 5.0, close: 190.0, change_pct: -0.5, is_bullish_trend: true
             }
           ]
         }
@@ -115,11 +115,11 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
           candidates: [
             {
               ticker: "MSFT", name: "마이크로소프트", price: 410.0, score: 92, signal_type: "STRONG_BUY",
-              vcp_triggered: true, vud_ratio: 0.3, squeeze_pct: 15.0, obv_divergence: 12.0, close: 410.0, change_pct: 1.5, is_bullish_trend: true
+              vcp_triggered: true, vud_ratio: 0.3, bollinger_band_width_percentile: 15.0, obv_divergence: 12.0, close: 410.0, change_pct: 1.5, is_bullish_trend: true
             },
             {
               ticker: "AAPL", name: "애플", price: 190.0, score: 88, signal_type: "BUY",
-              vcp_triggered: false, vud_ratio: 0.6, squeeze_pct: 25.0, obv_divergence: 5.0, close: 190.0, change_pct: -0.5, is_bullish_trend: true
+              vcp_triggered: false, vud_ratio: 0.6, bollinger_band_width_percentile: 25.0, obv_divergence: 5.0, close: 190.0, change_pct: -0.5, is_bullish_trend: true
             }
           ]
         },
