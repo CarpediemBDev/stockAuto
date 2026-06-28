@@ -113,6 +113,8 @@ def test_release_risk_check_runs_numeric_and_process_scripts(tmp_path, monkeypat
     scripts_dir.mkdir()
     (scripts_dir / "check_numeric_invariants.py").write_text("", encoding="utf-8")
     (scripts_dir / "check_process_invariants.py").write_text("", encoding="utf-8")
+    (scripts_dir / "check_chaos_fuzzing.py").write_text("", encoding="utf-8")
+    (scripts_dir / "auto_rollback_guard.py").write_text("", encoding="utf-8")
     calls = []
 
     def fake_run_command(command, **kwargs):
@@ -127,4 +129,7 @@ def test_release_risk_check_runs_numeric_and_process_scripts(tmp_path, monkeypat
     assert called_scripts == {
         "check_numeric_invariants.py",
         "check_process_invariants.py",
+        "check_chaos_fuzzing.py",
+        "auto_rollback_guard.py",
     }
+

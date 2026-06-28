@@ -296,12 +296,15 @@ def check_change_contract(root: Path) -> bool:
 
 
 def check_release_risk_invariants(root: Path) -> bool:
-    safe_print(f"{BOLD}[2/8] [RISK] Numeric and process invariant checks...{RESET}")
+    safe_print(f"{BOLD}[2/8] [RISK] Numeric, process, chaos fuzzing & rollback invariant checks...{RESET}")
     python_exe = backend_python(root)
     checks = (
         root / "scripts" / "check_numeric_invariants.py",
         root / "scripts" / "check_process_invariants.py",
+        root / "scripts" / "check_chaos_fuzzing.py",
+        root / "scripts" / "auto_rollback_guard.py",
     )
+
 
     success = True
     for script_path in checks:
