@@ -440,3 +440,19 @@ async def refresh_after_hours_candidate_cache(
         return cached
     finally:
         release_after_hours_refresh()
+
+
+def trigger_after_hours_refresh():
+    """스케줄러 또는 비동기 외부 스레드에서 에프터장 캐시 갱신을 동기식으로 호출합니다."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    if loop.is_running():
+        asyncio.create_task(refresh_after_hours_candidate_cache(refresh_reserved=True))
+    else:
+        loop.run_until_complete(refresh_after_hours_candidate_cache(refresh_reserved=True))
+

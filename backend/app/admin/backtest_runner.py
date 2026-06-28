@@ -856,3 +856,35 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
         logger.warning(f"Failed to save tournament cache: {e}")
         
     return _apply_strategy_display_names(results)
+
+
+if __name__ == "__main__":
+    import argparse
+    from datetime import date, timedelta
+
+    parser = argparse.ArgumentParser(description="StockAuto 백테스트 토너먼트 독립 포그라운드 런너")
+    parser.add_argument("--start-date", type=str, help="시작일 (YYYY-MM-DD)")
+    parser.add_argument("--end-date", type=str, help="종료일 (YYYY-MM-DD)")
+    args = parser.parse_args()
+
+    today = date.today()
+    end_str = args.end_date or today.isoformat()
+
+    if args.start_date:
+        start_dates = [args.start_date]
+    else:
+        # 3대 주요 표준 분석 기간 자동 연속 캐싱 (1개월, 3개월, 1년)
+        start_dates = [
+            (today - timedelta(days=90)).isoformat(),   # 3개월 (디폴트)
+            (today - timedelta(days=30)).isoformat(),   # 1개월
+            (today - timedelta(days=365)).isoformat(),  # 1년
+        ]
+
+    for s_date in start_dates:
+        print(f"[Tournament Runner] Executing tournament for range: {s_date} ~ {end_str}")
+        try:
+            asyncio.run(_run_dynamic_tournament_internal(s_date, end_str))
+            print(f"[Tournament Runner] Finished range: {s_date} ~ {end_str}")
+        except Exception as err:
+            print(f"[Tournament Runner] Error running tournament for {s_date}: {err}")
+
