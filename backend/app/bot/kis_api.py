@@ -555,3 +555,90 @@ class KISClient:
         except Exception as e:
             print(f"[KIS API] Error checking overseas balance: {e}")
             return []
+
+    def modify_overseas_order(
+        self,
+        ticker: str,
+        original_order_no: str,
+        quantity: int,
+        price: float,
+        rvse_cncl_dvsn_cd: str = "01",
+        qty_all_ord_yn: str = "Y",
+    ):
+        """
+        해외주식 정정/취소 주문 (TR_ID: TTTT1004U / VTTT1004U)
+        """
+        token = self.get_access_token()
+        if not token:
+            return None
+
+        account_prefix = self.account_no.split("-")[0] if "-" in self.account_no else self.account_no[:8]
+        account_suffix = self.account_no.split("-")[1] if "-" in self.account_no else self.account_no[8:]
+
+        body = {
+            "CANO": account_prefix,
+            "ACNT_PRDT_CD": account_suffix,
+            "OVRS_EXCG_CD": self._get_exchange_code(ticker),
+            "PDNO": ticker,
+            "ORG_ODNO": original_order_no,
+            "RVSE_CNCL_DVSN_CD": rvse_cncl_dvsn_cd,
+            "ORD_QTY": str(quantity),
+            "OVRS_ORD_UNPR": f"{price:.2f}",
+            "QTY_ALL_ORD_YN": qty_all_ord_yn,
+        }
+
+        tr_id = "TTTT1004U" if self.is_real else "VTTT1004U"
+        headers = self._get_default_headers(tr_id, self.get_hashkey(body))
+
+        url = f"{self.base_url}/uapi/overseas-stock/v1/trading/order-rvsecncl"
+        try:
+            res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
+            data = res.json()
+            if data.get("rt_cd") != "0":
+                print(f"[KIS API] Order Revision/Cancellation Rejected: {data.get('msg1')} ({data.get('msg_cd')})")
+            return data
+        except Exception as e:
+            print(f"[KIS API] Order Revision/Cancellation Exception: {e}")
+            return None
+
+    def get_overseas_quote(self, ticker: str) -> dict:
+        """
+        해외주식 현재가/호가 조회 (TR_ID: HHDFS76201100)
+        """
+        token = self.get_access_token()
+        if not token:
+            return {}
+
+        exchange_code = self._get_exchange_code(ticker)
+        headers = self._get_default_headers("HHDFS76201100")
+        params = {
+            "AUTH": "",
+            "EXCD": exchange_code,
+            "SYMB": ticker,
+        }
+        url = f"{self.base_url}/uapi/overseas-stock/v1/quotations/price"
+        try:
+            res = requests.get(url, headers=headers, params=params, timeout=10)
+            if res.status_code == 200:
+                data = res.json()
+                output = data.get("output", {})
+                if not output:
+                    return {}
+                ask_price = output.get("askp1") or output.get("askp") or output.get("last") or output.get("price")
+                bid_price = output.get("bidp1") or output.get("bidp") or output.get("last") or output.get("price")
+
+                ask_val = float(ask_price) if ask_price else None
+                bid_val = float(bid_price) if bid_price else None
+
+                return {
+                    "ask": ask_val,
+                    "bid": bid_val,
+                    "last": float(output.get("last") or output.get("price") or 0.0),
+                    "raw": output
+                }
+            else:
+                print(f"[KIS API] Quote inquiry failed: {res.text}")
+                return {}
+        except Exception as e:
+            print(f"[KIS API] Error inquiring quote: {e}")
+            return {}

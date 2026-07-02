@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from app.core.database import SessionLocal
+from app.core.database import get_db
 from app.core import models
 from app.core.dependencies import get_current_user, get_current_admin_user
 from app.core.models import User
@@ -9,13 +9,6 @@ from app.translations.translator import Translator
 
 from app.core.response import SuccessResponseRoute
 router = APIRouter(route_class=SuccessResponseRoute)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 class TranslationCreate(BaseModel):
     ticker: str

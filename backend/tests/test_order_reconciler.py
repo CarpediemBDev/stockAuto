@@ -114,7 +114,7 @@ async def test_partial_buy_is_applied_idempotently_and_preserves_running_prefere
     assert final_holding.ticker == "AAPL"
     assert final_holding.strategy_type == "episodic_pivot"
     assert final_holding.quantity == 5
-    assert final_holding.avg_price == pytest.approx(100.6)
+    assert float(final_holding.avg_price) == pytest.approx(100.6)
     assert final_settings.is_running is True
     assert messages
     check_db.close()

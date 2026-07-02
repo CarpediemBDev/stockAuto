@@ -10,12 +10,14 @@ import {
   ShieldAlert,
   Loader2,
   HelpCircle,
-  Trophy
+  Trophy,
+  SlidersHorizontal
 } from "lucide-react";
 import { TranslationManager } from "@/components/admin/TranslationManager";
 import { UserManagement } from "@/components/admin/UserManagement";
 import { SystemHealth } from "@/components/admin/SystemHealth";
 import { BacktestTournament } from "@/components/admin/BacktestTournament";
+import { SystemSettings } from "@/components/admin/SystemSettings";
 
 export default function AdminPage() {
   const router = useRouter();
@@ -34,11 +36,12 @@ export default function AdminPage() {
   }, [isInitialized, isAuthenticated, isAdmin, router]);
 
   const menuItems = [
-    { id: "users", label: "👥 전체 사용자 관리", icon: Users, enabled: true },
-    { id: "translation", label: "🌐 다국어 번역 관리", icon: Globe, enabled: true },
-    { id: "system", label: "📡 시스템 헬스 모니터링", icon: ShieldAlert, enabled: true },
-    { id: "backtest", label: "🏆 백테스트 아레나 (토너먼트)", icon: Trophy, enabled: true },
-    { id: "access_logs", label: "🔑 보안 접속 로그", icon: Key, enabled: false },
+    { id: "users", label: "전체 사용자 관리", icon: Users, enabled: true },
+    { id: "translation", label: "다국어 번역 관리", icon: Globe, enabled: true },
+    { id: "runtime_settings", label: "전역 런타임 설정", icon: SlidersHorizontal, enabled: true },
+    { id: "system", label: "시스템 헬스 모니터링", icon: ShieldAlert, enabled: true },
+    { id: "backtest", label: "백테스트 아레나 (토너먼트)", icon: Trophy, enabled: true },
+    { id: "access_logs", label: "보안 접속 로그", icon: Key, enabled: false },
   ];
 
   if (!isInitialized || !isAuthenticated || !isAdmin) {
@@ -55,7 +58,7 @@ export default function AdminPage() {
 
         <div className="mb-8 border-b border-zinc-800 pb-5">
           <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-zinc-200 via-slate-100 to-zinc-400 bg-clip-text text-transparent">
-            ⚙️ 마스터 관리자 패널
+            마스터 관리자 패널
           </h1>
           <p className="mt-2 text-sm text-zinc-400">
             StockAuto 트레이딩 시스템 및 플랫폼의 기준 정보와 글로벌 상태를 관리하는 마스터 어드민 패널입니다.
@@ -115,10 +118,11 @@ export default function AdminPage() {
           <div className="lg:col-span-3 space-y-6">
             {activeTab === "translation" && <TranslationManager />}
             {activeTab === "users" && <UserManagement />}
+            {activeTab === "runtime_settings" && <SystemSettings />}
             {activeTab === "system" && <SystemHealth />}
             {activeTab === "backtest" && <BacktestTournament />}
 
-            {activeTab !== "translation" && activeTab !== "users" && activeTab !== "system" && activeTab !== "backtest" && (
+            {activeTab !== "translation" && activeTab !== "users" && activeTab !== "runtime_settings" && activeTab !== "system" && activeTab !== "backtest" && (
               <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-12 text-center shadow-xl">
                 <Loader2 size={48} className="mx-auto text-zinc-600 mb-4 animate-pulse" />
                 <h3 className="text-lg font-bold text-slate-300">메뉴 오픈 예정</h3>

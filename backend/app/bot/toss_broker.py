@@ -1,7 +1,42 @@
 from app.bot.base_broker import BaseBroker
 from app.bot.toss_api import TossClient
-import time
 import uuid
+
+
+def _parse_float(value, default=0.0):
+    try:
+        return float(value or default)
+    except (ValueError, TypeError):
+        return default
+
+
+def _normalize_order_status(raw_status: str | None) -> str:
+    status = (raw_status or "PENDING").upper()
+    if status in {"RECEIVED", "OPEN", "SUBMITTED", "PENDING", "PENDING_CANCEL", "PENDING_REPLACE"}:
+        return "PENDING"
+    if status == "FILLED":
+        return "FILLED"
+    if status in {"PARTIAL", "PARTIAL_FILLED"}:
+        return "PARTIAL"
+    if status == "CANCELED":
+        return "CANCELED"
+    if status in {"REJECTED", "CANCEL_REJECTED", "REPLACE_REJECTED"}:
+        return "REJECTED"
+    if status == "REPLACED":
+        return "PENDING"
+    return "ERROR"
+
+
+def _order_datetime_parts(value: str | None, fallback_date: str) -> tuple[str, str]:
+    if not value:
+        return fallback_date, "000000"
+    date_part = value[:10] if len(value) >= 10 else fallback_date
+    time_part = "000000"
+    if "T" in value:
+        raw_time = value.split("T", 1)[1][:8]
+        time_part = raw_time.replace(":", "")
+    return date_part, time_part
+
 
 class TossBroker(BaseBroker):
     def __init__(self, db_settings=None, db_credential=None):
@@ -24,19 +59,13 @@ class TossBroker(BaseBroker):
 
         holdings_list = []
         for asset in assets:
-            # 수량과 금액 파싱 가드 장착
-            def parse_float(val, default=0.0):
-                try:
-                    return float(val or default)
-                except (ValueError, TypeError):
-                    return default
-
-            qty = int(parse_float(asset.get("quantity")))
+            qty = int(_parse_float(asset.get("quantity")))
             if qty <= 0:
                 continue
 
             ticker = asset.get("symbol")
-            avg_price = parse_float(asset.get("purchasePrice"))
+            avg_price = _parse_float(asset.get("averagePurchasePrice") or asset.get("purchasePrice"))
+            current_price = _parse_float(asset.get("lastPrice"))
             ticker_name = asset.get("name") or ticker
 
             # StockAuto 공통 보유 종목 스키마 반환
@@ -44,7 +73,9 @@ class TossBroker(BaseBroker):
                 "ticker": ticker,
                 "ticker_name": ticker_name,
                 "quantity": qty,
-                "avg_price": avg_price
+                "avg_price": avg_price,
+                "current_price": current_price,
+                "provider": "TOSS"
             })
 
         return holdings_list
@@ -97,31 +128,11 @@ class TossBroker(BaseBroker):
                 "message": "토스 주문 상태 조회 실패"
             }
 
-        # 상태 정규화
-        raw_status = (order_detail.get("status") or "OPEN").upper()
-        if raw_status in ["RECEIVED", "OPEN", "SUBMITTED", "PENDING"]:
-            status = "PENDING"
-        elif raw_status == "FILLED":
-            status = "FILLED"
-        elif raw_status == "PARTIAL":
-            status = "PARTIAL"
-        elif raw_status == "CANCELED":
-            status = "CANCELED"
-        elif raw_status == "REJECTED":
-            status = "REJECTED"
-        else:
-            status = "ERROR"
-
-        # 수량 및 가격 정보 파싱
-        def parse_val(val, default=0.0):
-            try:
-                return float(val or default)
-            except (ValueError, TypeError):
-                return default
-
-        ordered_qty = int(parse_val(order_detail.get("quantity")))
-        filled_qty = int(parse_val(order_detail.get("filledQuantity")))
-        filled_price = parse_val(order_detail.get("filledPrice"))
+        status = _normalize_order_status(order_detail.get("status"))
+        execution = order_detail.get("execution") or {}
+        ordered_qty = int(_parse_float(order_detail.get("quantity")))
+        filled_qty = int(_parse_float(execution.get("filledQuantity") or order_detail.get("filledQuantity")))
+        filled_price = _parse_float(execution.get("averageFilledPrice") or order_detail.get("filledPrice"))
 
         return {
             "status": status,
@@ -135,7 +146,15 @@ class TossBroker(BaseBroker):
         """
         토스증권 주문 이력을 조회하고 공통 포맷으로 가공합니다.
         """
-        orders = self.client.get_order_history(status=None)
+        orders = []
+        for status_filter in ("OPEN", "CLOSED"):
+            status_orders = self.client.get_order_history(
+                status=status_filter,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if status_orders:
+                orders.extend(status_orders)
         if not orders:
             return []
 
@@ -145,34 +164,21 @@ class TossBroker(BaseBroker):
             if not order_id:
                 continue
 
-            raw_status = (o.get("status") or "OPEN").upper()
-            if raw_status in ["RECEIVED", "OPEN"]:
+            status = _normalize_order_status(o.get("status"))
+            if status == "PENDING":
                 status = "UNFILLED"
-            elif raw_status == "FILLED":
-                status = "FILLED"
-            elif raw_status == "PARTIAL":
-                status = "PARTIAL"
-            elif raw_status == "CANCELED":
-                status = "CANCELED"
-            else:
-                status = "REJECTED"
-
-            def parse_val(val, default=0.0):
-                try:
-                    return float(val or default)
-                except (ValueError, TypeError):
-                    return default
-
-            ordered_qty = int(parse_val(o.get("quantity")))
-            filled_qty = int(parse_val(o.get("filledQuantity")))
-            filled_price = parse_val(o.get("filledPrice"))
-            order_price = parse_val(o.get("price"))
+            execution = o.get("execution") or {}
+            ordered_qty = int(_parse_float(o.get("quantity")))
+            filled_qty = int(_parse_float(execution.get("filledQuantity") or o.get("filledQuantity")))
+            filled_price = _parse_float(execution.get("averageFilledPrice") or o.get("filledPrice"))
+            order_price = _parse_float(o.get("price"))
+            order_date, order_time = _order_datetime_parts(o.get("orderedAt"), start_date)
 
             history_list.append({
                 "order_no": order_id,
                 "original_order_no": "",
-                "order_date": start_date,  # 토스 API에서 일자 정보를 얻지 못하면 기본값
-                "order_time": "000000",
+                "order_date": order_date,
+                "order_time": order_time,
                 "side": (o.get("side") or "BUY").upper(),
                 "ticker": o.get("symbol"),
                 "ticker_name": o.get("symbol"),

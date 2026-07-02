@@ -390,7 +390,7 @@ graph TD
 
 * **`BaseBroker` (추상 인터페이스)**: 미래에셋, 토스, 키움 등 어떤 증권사 API든 꽂아 쓸 수 있게 약속된 잔고/보유종목 조회 함수 규격을 구축했습니다.
 * **`KISBroker` (한투 연동용)**: 한투 API 실전 및 모의투자 API 연동을 담당합니다.
-* **`TossBroker` (토스 연동용)**: 토스증권 API 클라이언트 구현은 보존하되, 현재 StockAuto에서는 검증 완료 전까지 `SIMULATED`만 사용자 설정에서 허용합니다.
+* **`TossBroker` (토스 연동용)**: 토스증권 API 클라이언트는 공식 OpenAPI 1.1.5의 `/api/v1/holdings`, `/api/v1/buying-power`, `/api/v1/orders` 계약에 맞춰 보존합니다. 개인 설정 화면에서 토스 인증키를 암호화 저장할 수 있지만, 현재 StockAuto에서는 검증 완료 전까지 토스 거래 실행 모드를 `SIMULATED`로만 제한합니다.
 * **`SimulatedBroker` (가상 시뮬레이터용)**: yfinance 실시간 시세 기반의 가상 매매 및 잔고 관리 역할을 수행합니다.
 
 ### 2. UI/UX 동적 렌더링 구분 (Broker Badge Styling)
@@ -429,7 +429,8 @@ graph TD
        },
    }
    ```
-3. 개인 투자 설정 화면은 `get_broker_catalog()`의 `supported_modes`를 기준으로 미지원 조합을 비활성화합니다. 백엔드 저장 API와 브로커 팩토리도 같은 검사를 수행하므로, UI 우회 요청도 실행 단계에서 차단됩니다.
+3. 개인 투자 설정 화면은 `get_broker_catalog()`의 `supported_modes`를 기준으로 미지원 실행 조합을 비활성화합니다. 다만 토스처럼 실행 보류 중인 브로커도 `KEY_ONLY` 모드로 인증키를 먼저 암호화 저장할 수 있습니다. 저장된 키는 `verification_status=stored`로 표시되며, MOCK/REAL 자동매매 전환에는 사용할 수 없습니다.
+4. 백엔드 설정 저장 API와 브로커 팩토리는 실제 거래 모드 전환 시 같은 capability 검사를 수행합니다. UI 우회 요청으로 토스 MOCK/REAL 전환을 시도해도 실행 단계 전에 차단됩니다.
 
 
 ## 📊 종목 발굴부터 주문까지의 전체 데이터 흐름 (시세-주문 협동)

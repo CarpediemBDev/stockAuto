@@ -98,6 +98,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             "alembic_version",
             "strategies",
             "account_equity_snapshots",
+            "system_settings",
         }
 
         user_settings_columns = {column["name"] for column in inspector.get_columns("user_settings")}
@@ -111,6 +112,7 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             column["name"]
             for column in inspector.get_columns("account_equity_snapshots")
         }
+        system_setting_columns = {column["name"] for column in inspector.get_columns("system_settings")}
         assert "strategy_type" in user_settings_columns
         assert "role" in user_columns
         assert "token_version" in user_columns
@@ -165,6 +167,18 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             "trade_mode",
             "captured_at",
         } <= equity_snapshot_columns
+        assert {
+            "key",
+            "value",
+            "value_type",
+            "category",
+            "description",
+            "is_runtime",
+            "is_public",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        } <= system_setting_columns
 
         for table_name in ("user_settings", "holdings", "trade_logs", "broker_orders"):
             foreign_keys = inspector.get_foreign_keys(table_name)
@@ -185,7 +199,11 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             strategy_name = connection.exec_driver_sql(
                 "SELECT name_ko FROM strategies WHERE strategy_type = 'multi_slot'"
             ).scalar_one()
+            gemini_enabled = connection.exec_driver_sql(
+                "SELECT value FROM system_settings WHERE key = 'enable_gemini_news_analysis'"
+            ).scalar_one()
             assert strategy_count == 85
+            assert gemini_enabled == "false"
             assert strategy_name == "격리형 2슬롯 (EP 50% : RS 50%)"
     finally:
         engine.dispose()

@@ -110,6 +110,7 @@ export default function PersonalSettingsPage() {
   // Per-broker form state
   const [forms, setForms] = useState<Record<string, CredentialForm>>({});
   const [localVerified, setLocalVerified] = useState<Record<string, boolean>>({});
+  const [credentialBroker, setCredentialBroker] = useState<string>("");
 
   const [username, setUsername] = useState<string>("");
   const [subTab, setSubTab] = useState<SubTab>("environment");
@@ -160,6 +161,11 @@ export default function PersonalSettingsPage() {
     setLocalVerified(Object.fromEntries(
       availableBrokers.map((broker) => [broker.id, false])
     ));
+    setCredentialBroker((current) => (
+      availableBrokers.some((broker) => broker.id === current)
+        ? current
+        : brokerProvider || availableBrokers[0]?.id || ""
+    ));
   }, []);
 
   const { isLoading: isSettingsLoading, mutate: mutateSettings } = useSWR<Partial<UserSettings>>(
@@ -186,7 +192,13 @@ export default function PersonalSettingsPage() {
   const activeBrokerOption = useMemo(() => {
     return dbSettings.available_brokers.find((broker) => broker.id === activeBroker);
   }, [dbSettings.available_brokers, activeBroker]);
+  const credentialBrokerOption = useMemo(() => {
+    return dbSettings.available_brokers.find((broker) => broker.id === credentialBroker);
+  }, [dbSettings.available_brokers, credentialBroker]);
   const activeCred = useMemo(() => {
+    return dbSettings.credentials.find((c) => c.broker_name === credentialBroker);
+  }, [dbSettings.credentials, credentialBroker]);
+  const executionCred = useMemo(() => {
     return dbSettings.credentials.find((c) => c.broker_name === activeBroker);
   }, [dbSettings.credentials, activeBroker]);
 
@@ -196,7 +208,19 @@ export default function PersonalSettingsPage() {
   const requiresBrokerCredentials = Boolean(activeTradeMode?.requires_credentials);
   const selectedModeUnsupported = !supportsTradeMode(activeBrokerOption, dbSettings.trade_mode);
   const selectedModeUnsupportedMessage = unsupportedTradeModeMessage(activeBrokerOption, dbSettings.trade_mode);
+  const credentialModeUnsupported = !supportsTradeMode(credentialBrokerOption, dbSettings.trade_mode);
+  const credentialSaveMode = requiresBrokerCredentials && !credentialModeUnsupported
+    ? dbSettings.trade_mode
+    : "KEY_ONLY";
   const isVerifiedForSelectedMode = useMemo(() => {
+    if (!executionCred) return false;
+    return (
+      executionCred.has_credentials &&
+      executionCred.verification_status === "verified" &&
+      executionCred.verified_trade_mode === dbSettings.trade_mode
+    );
+  }, [executionCred, dbSettings.trade_mode]);
+  const isCredentialVerifiedForSelectedMode = useMemo(() => {
     if (!activeCred) return false;
     return (
       activeCred.has_credentials &&
@@ -208,22 +232,17 @@ export default function PersonalSettingsPage() {
   const credentialStatusLabel = useMemo(() => {
     if (!activeCred) return "미저장";
     if (activeCred.verification_status === "crypto_error") return "복호화 오류";
-    if (isVerifiedForSelectedMode) return "검증 완료";
+    if (isCredentialVerifiedForSelectedMode) return "검증 완료";
+    if (activeCred.verification_status === "stored") return "키 저장됨";
     if (activeCred.has_credentials) return "재검증 필요";
     return "미저장";
-  }, [activeCred, isVerifiedForSelectedMode]);
+  }, [activeCred, isCredentialVerifiedForSelectedMode]);
 
   const handleVerifyCredential = async (provider: string) => {
     const broker = dbSettings.available_brokers.find((item) => item.id === provider);
-    if (!supportsTradeMode(broker, dbSettings.trade_mode)) {
-      toast.error(unsupportedTradeModeMessage(broker, dbSettings.trade_mode));
-      return;
-    }
-
-    if (!requiresBrokerCredentials) {
-      toast.info(`${dbSettings.trade_mode} 모드는 ${provider} 인증정보가 필요하지 않습니다.`);
-      return;
-    }
+    const modeForCredential = requiresBrokerCredentials && supportsTradeMode(broker, dbSettings.trade_mode)
+      ? dbSettings.trade_mode
+      : "KEY_ONLY";
 
     const form = forms[provider];
     if (!form) {
@@ -238,16 +257,20 @@ export default function PersonalSettingsPage() {
     setIsCredentialSaving(true);
     try {
       const res = await adminAPI.verifyAndSaveCredentials({
-        trade_mode: dbSettings.trade_mode,
+        trade_mode: modeForCredential,
         broker_name: provider,
         app_key: form.app_key,
         app_secret: form.app_secret,
         account_no: form.account_no,
       });
       if (res.data?.success) {
-        setLocalVerified(prev => ({ ...prev, [provider]: true }));
         applySettings(res.data.settings);
-        toast.success(`${provider} 검증 및 저장이 완료되었습니다.`);
+        setLocalVerified(prev => ({ ...prev, [provider]: true }));
+        toast.success(
+          modeForCredential === "KEY_ONLY"
+            ? `${provider} 인증키가 저장되었습니다. 거래 실행 전 별도 검증이 필요합니다.`
+            : `${provider} 검증 및 저장이 완료되었습니다.`
+        );
       } else {
         toast.error(res.data?.message || `${provider} 인증정보 검증에 실패했습니다.`);
       }
@@ -406,7 +429,15 @@ export default function PersonalSettingsPage() {
     );
   }
 
-  const activeForm = forms[activeBroker] || EMPTY_FORM;
+  const activeForm = forms[credentialBroker] || EMPTY_FORM;
+  const credentialActionLabel = (() => {
+    if (localVerified[credentialBroker]) {
+      return credentialSaveMode === "KEY_ONLY" ? "저장됨" : "검증 완료됨";
+    }
+    return credentialSaveMode === "KEY_ONLY"
+      ? `${credentialBroker} 키 저장`
+      : `${credentialBroker} 검증 및 저장`;
+  })();
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white font-sans">
@@ -506,62 +537,75 @@ export default function PersonalSettingsPage() {
                     </h2>
                   </div>
 
-                  {!requiresBrokerCredentials ? (
-                    <div className="p-4 rounded-lg border border-blue-500/20 bg-blue-500/5 flex items-center gap-3">
-                      <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0" />
-                      <p className="text-[11px] text-zinc-400 leading-relaxed">
-                        SIMULATED 모드에서는 증권사 인증정보를 사용하지 않습니다.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-300">
-                      <div>
-                        <label className="block text-xs font-semibold text-zinc-400 mb-1.5">Provider</label>
-                        <div className="flex gap-2">
-                          {dbSettings.available_brokers.length === 0 ? (
-                            <div className="w-full py-3 rounded-lg border border-red-500/20 bg-red-500/5 text-red-400/80 text-xs text-center">
-                              사용 가능한 증권사 정보를 불러오지 못했습니다.
-                            </div>
-                          ) : (
-                            dbSettings.available_brokers.map((broker) => {
-                              const brokerUnsupported = !supportsTradeMode(broker, dbSettings.trade_mode);
-                              return (
-                                <button
-                                  key={broker.id}
-                                  type="button"
-                                  disabled={brokerUnsupported}
-                                  title={brokerUnsupported ? unsupportedTradeModeMessage(broker, dbSettings.trade_mode) : undefined}
-                                  onClick={() => setDbSettings(prev => ({ ...prev, broker_provider: broker.id }))}
-                                  className={`flex-1 py-3 rounded-lg border text-xs font-bold transition-all ${
-                                    brokerUnsupported ? "cursor-not-allowed opacity-45" : "cursor-pointer"
-                                  } ${
-                                    dbSettings.broker_provider === broker.id
-                                      ? broker.tone === "amber"
-                                        ? "border-amber-500 bg-amber-500/10 text-amber-400"
-                                        : "border-blue-500 bg-blue-500/10 text-blue-400"
-                                      : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-800"
-                                  }`}
-                                >
-                                  {broker.label} ({broker.id})
-                                  {brokerUnsupported && (
-                                    <span className="ml-1 text-[10px] text-red-400">미지원</span>
-                                  )}
-                                </button>
-                              );
-                            })
-                          )}
-                        </div>
+                  <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-300">
+                    <div>
+                      <label className="block text-xs font-semibold text-zinc-400 mb-1.5">Provider</label>
+                      <div className="flex gap-2">
+                        {dbSettings.available_brokers.length === 0 ? (
+                          <div className="w-full py-3 rounded-lg border border-red-500/20 bg-red-500/5 text-red-400/80 text-xs text-center">
+                            사용 가능한 증권사 정보를 불러오지 못했습니다.
+                          </div>
+                        ) : (
+                          dbSettings.available_brokers.map((broker) => {
+                            const brokerUnsupported = !supportsTradeMode(broker, dbSettings.trade_mode);
+                            const isCredentialActive = credentialBroker === broker.id;
+                            return (
+                              <button
+                                key={broker.id}
+                                type="button"
+                                title={brokerUnsupported ? unsupportedTradeModeMessage(broker, dbSettings.trade_mode) : undefined}
+                                onClick={() => {
+                                  setCredentialBroker(broker.id);
+                                  if (!brokerUnsupported) {
+                                    setDbSettings(prev => ({ ...prev, broker_provider: broker.id }));
+                                  }
+                                }}
+                                className={`flex-1 py-3 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
+                                  isCredentialActive
+                                    ? broker.tone === "amber"
+                                      ? "border-amber-500 bg-amber-500/10 text-amber-400"
+                                      : "border-blue-500 bg-blue-500/10 text-blue-400"
+                                    : "border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-800"
+                                }`}
+                              >
+                                {broker.label} ({broker.id})
+                                {brokerUnsupported && (
+                                  <span className="ml-1 text-[10px] text-red-400">키만</span>
+                                )}
+                              </button>
+                            );
+                          })
+                        )}
                       </div>
+                    </div>
 
-                      {selectedModeUnsupported ? (
-                        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 flex items-start gap-3">
-                          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                          <p className="text-xs font-semibold text-red-300 leading-relaxed">
-                            {selectedModeUnsupportedMessage}
-                          </p>
-                        </div>
-                      ) : (
-                        <>
+                    {!requiresBrokerCredentials && (
+                      <div className="p-4 rounded-lg border border-blue-500/20 bg-blue-500/5 flex items-center gap-3">
+                        <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0" />
+                        <p className="text-[11px] text-zinc-400 leading-relaxed">
+                          SIMULATED 모드에서는 인증키를 저장만 하며 자동매매에는 사용하지 않습니다.
+                        </p>
+                      </div>
+                    )}
+
+                    {credentialModeUnsupported && requiresBrokerCredentials && (
+                      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 flex items-start gap-3">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <p className="text-xs font-semibold text-amber-200 leading-relaxed">
+                          {unsupportedTradeModeMessage(credentialBrokerOption, dbSettings.trade_mode)} 인증키는 저장만 가능하며 거래 실행 전 별도 지원 검증이 필요합니다.
+                        </p>
+                      </div>
+                    )}
+
+                    {selectedModeUnsupported && (
+                      <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 flex items-start gap-3">
+                        <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                        <p className="text-xs font-semibold text-red-300 leading-relaxed">
+                          {selectedModeUnsupportedMessage}
+                        </p>
+                      </div>
+                    )}
+
                       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                         <div className="rounded-lg border border-zinc-900 bg-zinc-900/20 p-3">
                           <p className="text-[10px] text-zinc-500 mb-1">저장 상태</p>
@@ -571,7 +615,7 @@ export default function PersonalSettingsPage() {
                         </div>
                         <div className="rounded-lg border border-zinc-900 bg-zinc-900/20 p-3">
                           <p className="text-[10px] text-zinc-500 mb-1">검증 상태</p>
-                          <p className={`text-xs font-bold ${isVerifiedForSelectedMode ? "text-emerald-400" : "text-amber-400"}`}>
+                          <p className={`text-xs font-bold ${isCredentialVerifiedForSelectedMode ? "text-emerald-400" : "text-amber-400"}`}>
                             {credentialStatusLabel}
                           </p>
                         </div>
@@ -597,9 +641,13 @@ export default function PersonalSettingsPage() {
                         <div className="flex flex-col gap-1 border-b border-zinc-800/50 pb-3">
                           <h3 className="text-xs font-extrabold text-zinc-200 flex items-center gap-2">
                             <Key className="w-4 h-4 text-emerald-400" />
-                            {activeBroker} 인증키 전용 관리
+                            {credentialBroker} 인증키 전용 관리
                           </h3>
-                          <p className="text-[10px] text-zinc-500">인증키는 서버를 통해 실시간 검증을 거친 후 암호화되어 분리 저장됩니다.</p>
+                          <p className="text-[10px] text-zinc-500">
+                            {credentialSaveMode === "KEY_ONLY"
+                              ? "인증키는 암호화 저장되며 거래 실행 전 별도 통신 검증이 필요합니다."
+                              : "인증키는 서버를 통해 실시간 검증을 거친 후 암호화되어 분리 저장됩니다."}
+                          </p>
                         </div>
                         <div className="grid grid-cols-1 gap-3">
                         <div>
@@ -608,8 +656,8 @@ export default function PersonalSettingsPage() {
                             type="text"
                             value={activeForm.app_key}
                             onChange={(e) => { 
-                              setForms((prev) => ({ ...prev, [activeBroker]: { ...prev[activeBroker], app_key: e.target.value } })); 
-                              setLocalVerified((prev) => ({ ...prev, [activeBroker]: false })); 
+                              setForms((prev) => ({ ...prev, [credentialBroker]: { ...(prev[credentialBroker] || EMPTY_FORM), app_key: e.target.value } }));
+                              setLocalVerified((prev) => ({ ...prev, [credentialBroker]: false }));
                             }}
                             placeholder={activeCred?.has_credentials ? "•••••••••••••••• (새로 입력 시 덮어쓰기)" : "Enter APP KEY"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
@@ -623,8 +671,8 @@ export default function PersonalSettingsPage() {
                             type="password"
                             value={activeForm.app_secret}
                             onChange={(e) => { 
-                              setForms((prev) => ({ ...prev, [activeBroker]: { ...prev[activeBroker], app_secret: e.target.value } })); 
-                              setLocalVerified((prev) => ({ ...prev, [activeBroker]: false })); 
+                              setForms((prev) => ({ ...prev, [credentialBroker]: { ...(prev[credentialBroker] || EMPTY_FORM), app_secret: e.target.value } }));
+                              setLocalVerified((prev) => ({ ...prev, [credentialBroker]: false }));
                             }}
                             placeholder={activeCred?.has_credentials ? "•••••••••••••••• (새로 입력 시 덮어쓰기)" : "Enter APP SECRET"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
@@ -638,8 +686,8 @@ export default function PersonalSettingsPage() {
                             type="text"
                             value={activeForm.account_no}
                             onChange={(e) => { 
-                              setForms((prev) => ({ ...prev, [activeBroker]: { ...prev[activeBroker], account_no: e.target.value } })); 
-                              setLocalVerified((prev) => ({ ...prev, [activeBroker]: false })); 
+                              setForms((prev) => ({ ...prev, [credentialBroker]: { ...(prev[credentialBroker] || EMPTY_FORM), account_no: e.target.value } }));
+                              setLocalVerified((prev) => ({ ...prev, [credentialBroker]: false }));
                             }}
                             placeholder={activeCred?.has_credentials ? `${activeCred.account_no_masked || "••••••••"} (새로 입력 시 덮어쓰기)` : "Enter Account No"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
@@ -652,7 +700,7 @@ export default function PersonalSettingsPage() {
                         {activeCred?.has_credentials && (
                           <button
                             type="button"
-                            onClick={() => handleDeleteCredentials(activeBroker)}
+                            onClick={() => handleDeleteCredentials(credentialBroker)}
                             disabled={isCredentialDeleting || isCredentialSaving}
                             className="border border-red-500/40 text-red-300 hover:bg-red-500/10 disabled:opacity-50 px-4 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
                           >
@@ -665,23 +713,20 @@ export default function PersonalSettingsPage() {
                           </button>
                         )}
                         <button
-                          onClick={() => handleVerifyCredential(activeBroker)}
-                          disabled={isCredentialSaving || isSaving}
+                          onClick={() => handleVerifyCredential(credentialBroker)}
+                          disabled={isCredentialSaving || isSaving || !credentialBroker}
                           className={`px-4 py-2.5 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer shadow-md ${
-                            localVerified[activeBroker] 
+                            localVerified[credentialBroker]
                               ? "bg-zinc-800 text-emerald-400 border border-emerald-500/30" 
                               : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30 disabled:opacity-50"
                           }`}
                         >
                           {isCredentialSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
-                          {localVerified[activeBroker] ? "검증 완료됨" : `${activeBroker} 검증 및 저장`}
+                          {credentialActionLabel}
                         </button>
                       </div>
                       </div>
-                        </>
-                      )}
-                    </div>
-                  )}
+                  </div>
                 </div>
 
                 <div className="flex justify-end items-center pt-6 border-t border-zinc-900">

@@ -297,3 +297,60 @@ class KISBroker(BaseBroker):
                 "fill_confirmed": False,
                 "message": f"KIS sell order acknowledgement unknown: {str(e)}"
             }
+
+    def modify_order(
+        self,
+        ticker: str,
+        original_order_no: str,
+        quantity: int,
+        price: float,
+        qty_all_ord_yn: str = "Y",
+    ) -> dict:
+        """
+        KIS 해외주식 정정 주문.
+        """
+        try:
+            res = self.client.modify_overseas_order(
+                ticker=ticker,
+                original_order_no=original_order_no,
+                quantity=quantity,
+                price=price,
+                rvse_cncl_dvsn_cd="01", # 정정
+                qty_all_ord_yn=qty_all_ord_yn,
+            )
+            if res and res.get("rt_cd") == "0":
+                new_order_no = res.get("output", {}).get("ODNO", "")
+                return {
+                    "success": True,
+                    "order_submitted": True,
+                    "order_no": new_order_no,
+                    "message": f"KIS order modified successfully. New Order No: {new_order_no}"
+                }
+            else:
+                msg = res.get("msg1", "Unknown error") if res else "No response"
+                return {
+                    "success": False,
+                    "order_submitted": False,
+                    "message": f"KIS order modification failed: {msg}"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "order_submitted": False,
+                "message": f"KIS order modification exception: {str(e)}"
+            }
+
+    def get_best_ask_bid(self, ticker: str) -> dict:
+        """
+        해외주식 최우선 호가 조회
+        """
+        try:
+            quote = self.client.get_overseas_quote(ticker)
+            return {
+                "ask": quote.get("ask"),
+                "bid": quote.get("bid"),
+                "last": quote.get("last")
+            }
+        except Exception as e:
+            logger.error(f"[KISBroker] Failed to fetch best ask/bid for {ticker}: {e}")
+            return {}

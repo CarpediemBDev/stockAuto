@@ -1,7 +1,8 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, Index, UniqueConstraint, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, Index, UniqueConstraint, Text, Numeric
 from sqlalchemy.orm import relationship
 from datetime import UTC, datetime
 from app.core.database import Base
+from app.core.credentials import EncryptedString
 
 from sqlalchemy import TypeDecorator
 from datetime import timezone
@@ -59,6 +60,23 @@ class User(Base):
     broker_orders = relationship("BrokerOrder", back_populates="user", cascade="all, delete-orphan")
     equity_snapshots = relationship("AccountEquitySnapshot", back_populates="user", cascade="all, delete-orphan")
 
+class SystemSetting(Base):
+    """Service-wide runtime settings. Secrets must not be stored here."""
+    __tablename__ = "system_settings"
+
+    key = Column(String, primary_key=True, index=True)
+    value = Column(Text, nullable=False)
+    value_type = Column(String, nullable=False)
+    category = Column(String, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    is_runtime = Column(Boolean, default=True, nullable=False)
+    is_public = Column(Boolean, default=False, nullable=False)
+    updated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(AwareDateTime, default=utc_now_aware)
+    updated_at = Column(AwareDateTime, default=utc_now_aware, onupdate=utc_now_aware)
+
+    updated_by_user = relationship("User", foreign_keys=[updated_by])
+
 class RefreshToken(Base):
     """안전한 토큰 갱신 및 다중 기기 강제 로그아웃을 위한 세션 테이블"""
     __tablename__ = "refresh_tokens"
@@ -107,11 +125,11 @@ class BrokerCredential(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("user_settings.user_id", ondelete="CASCADE"), nullable=False)
     broker_name = Column(String, nullable=False) # e.g., "KIS", "TOSS"
-    
-    app_key = Column(String, nullable=True)
-    app_secret = Column(String, nullable=True)
-    account_no = Column(String, nullable=True)
-    
+
+    app_key = Column(EncryptedString, nullable=True)
+    app_secret = Column(EncryptedString, nullable=True)
+    account_no = Column(EncryptedString, nullable=True)
+
     verification_status = Column(String, default="unverified", nullable=False)
     verified_trade_mode = Column(String, nullable=True)
     verified_at = Column(AwareDateTime, nullable=True)
@@ -131,13 +149,13 @@ class TradeLog(Base):
     ticker = Column(String, index=True)
     ticker_name = Column(String)
     trade_type = Column(String) # 'BUY' or 'SELL'
-    price = Column(Float)
+    price = Column(Numeric(precision=20, scale=4, asdecimal=True))
     quantity = Column(Integer)
     order_no = Column(String, nullable=True)
     regime_mode = Column(String, nullable=True)     # ⭐ v2.0 장세 레짐 (BULLISH, BEARISH, NEUTRAL)
     signal_score = Column(Integer, nullable=True)   # ⭐ v2.0 매수 당시의 스캔 점수
-    realized_pnl = Column(Float, nullable=True)     # ⭐ v2.0 Phase 22 매도 시 실현 손익 (수익금)
-    return_rate = Column(Float, nullable=True)      # ⭐ v2.0 Phase 22 매도 시 수익률 (%)
+    realized_pnl = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)     # ⭐ v2.0 Phase 22 매도 시 실현 손익 (수익금)
+    return_rate = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)      # ⭐ v2.0 Phase 22 매도 시 수익률 (%)
     strategy_type = Column(String, default="regime_switching", nullable=False)
     executed_at = Column(AwareDateTime, default=utc_now_aware)
 
@@ -152,9 +170,9 @@ class Holding(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     ticker = Column(String, index=True)
     ticker_name = Column(String)
-    avg_price = Column(Float)   # 평단가
+    avg_price = Column(Numeric(precision=20, scale=4, asdecimal=True))   # 평단가
     quantity = Column(Integer)  # 보유수량
-    highest_price = Column(Float) # 구매 후 최고가 (트레일링 스탑 기준점)
+    highest_price = Column(Numeric(precision=20, scale=4, asdecimal=True)) # 구매 후 최고가 (트레일링 스탑 기준점)
     regime_mode = Column(String, nullable=True)     # ⭐ v2.0 진입 당시 장세 레짐
     buy_stage = Column(Integer, default=1)          # ⭐ v2.0 후지모토 시게루식 피라미딩 단계 (1, 2, 3단계)
     strategy_type = Column(String, default="regime_switching", nullable=False)
@@ -188,8 +206,8 @@ class BrokerOrder(Base):
     requested_qty = Column(Integer, nullable=False)
     broker_filled_qty = Column(Integer, nullable=False, default=0)
     applied_filled_qty = Column(Integer, nullable=False, default=0)
-    submitted_price = Column(Float, nullable=False)
-    filled_price = Column(Float, nullable=True)
+    submitted_price = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=False)
+    filled_price = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)
     buy_stage = Column(Integer, nullable=True)
     regime_mode = Column(String, nullable=True)
     signal_score = Column(Integer, nullable=True)
@@ -219,11 +237,11 @@ class AccountEquitySnapshot(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    total_asset = Column(Float, nullable=False)
-    cash_balance = Column(Float, nullable=True)
-    stock_balance = Column(Float, nullable=True)
-    profit_rate = Column(Float, nullable=True)
-    fx_rate = Column(Float, nullable=True)
+    total_asset = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=False)
+    cash_balance = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)
+    stock_balance = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)
+    profit_rate = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)
+    fx_rate = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)
     trade_mode = Column(String, nullable=False)
     captured_at = Column(AwareDateTime, default=utc_now_aware, nullable=False, index=True)
 
@@ -286,9 +304,9 @@ class MarketOverviewSnapshot(Base):
         comment="시장 상태 동기화 상태: fresh, stale, failed, skipped",
     )
     nasdaq_symbol = Column(String, nullable=False, default="^IXIC", comment="NASDAQ 종합지수 Yahoo Finance 티커")
-    nasdaq_current = Column(Float, nullable=True, comment="NASDAQ 종합지수 현재값")
-    nasdaq_change = Column(Float, nullable=True, comment="NASDAQ 종합지수 전일 대비 등락폭")
-    nasdaq_change_pct = Column(Float, nullable=True, comment="NASDAQ 종합지수 전일 대비 등락률")
+    nasdaq_current = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True, comment="NASDAQ 종합지수 현재값")
+    nasdaq_change = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True, comment="NASDAQ 종합지수 전일 대비 등락폭")
+    nasdaq_change_pct = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True, comment="NASDAQ 종합지수 전일 대비 등락률")
     nasdaq_sync_status = Column(
         String,
         nullable=False,
@@ -296,9 +314,9 @@ class MarketOverviewSnapshot(Base):
         comment="NASDAQ 데이터 동기화 상태: fresh, stale, failed, skipped",
     )
     exchange_rate_symbol = Column(String, nullable=False, default="USDKRW=X", comment="USD/KRW Yahoo Finance 티커")
-    exchange_rate_current = Column(Float, nullable=True, comment="USD/KRW 현재 환율")
-    exchange_rate_change = Column(Float, nullable=True, comment="USD/KRW 전일 대비 변화폭")
-    exchange_rate_change_pct = Column(Float, nullable=True, comment="USD/KRW 전일 대비 변화율")
+    exchange_rate_current = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True, comment="USD/KRW 현재 환율")
+    exchange_rate_change = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True, comment="USD/KRW 전일 대비 변화폭")
+    exchange_rate_change_pct = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True, comment="USD/KRW 전일 대비 변화율")
     exchange_rate_sync_status = Column(
         String,
         nullable=False,
@@ -338,3 +356,23 @@ class SwingPredictionSnapshot(Base):
         comment="스윙 예측 동기화 상태: fresh, stale, refreshing, failed, empty",
     )
     created_at = Column(AwareDateTime, default=utc_now_aware, index=True, comment="스냅샷 생성 시각")
+
+class UnfilledOrder(Base):
+    """미체결 가상 지정가 주문"""
+    __tablename__ = "unfilled_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    ticker = Column(String, nullable=False, index=True)
+    ticker_name = Column(String, nullable=True)
+    trade_type = Column(String, nullable=False) # "BUY" or "SELL"
+    price = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    strategy_type = Column(String, nullable=False)
+    buy_stage = Column(Integer, nullable=True)
+    regime_mode = Column(String, nullable=True)
+    signal_score = Column(Integer, nullable=True)
+    order_no = Column(String, nullable=False, unique=True, index=True)
+    created_at = Column(AwareDateTime, default=utc_now_aware)
+
+    user = relationship("User")

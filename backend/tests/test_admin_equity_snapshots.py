@@ -10,11 +10,14 @@ from app.core.models import AccountEquitySnapshot, Strategy, User, UserSettings
 
 
 class FakeBroker:
-    def __init__(self, balance=None, error=None):
+    def __init__(self, balance=None, error=None, on_balance=None):
         self.balance = balance
         self.error = error
+        self.on_balance = on_balance
 
     def get_account_balance(self):
+        if self.on_balance:
+            self.on_balance()
         if self.error:
             raise self.error
         return self.balance
@@ -51,6 +54,19 @@ def test_admin_equity_curve_uses_persisted_balance_snapshots(tmp_path, monkeypat
         db.commit()
         db.refresh(admin)
 
+        session_closed_before_broker = False
+        original_close = db.close
+
+        def tracking_close():
+            nonlocal session_closed_before_broker
+            session_closed_before_broker = True
+            original_close()
+
+        monkeypatch.setattr(db, "close", tracking_close)
+
+        def assert_session_closed_before_broker():
+            assert session_closed_before_broker is True
+
         monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
         monkeypatch.setattr(
             scheduler,
@@ -62,7 +78,8 @@ def test_admin_equity_curve_uses_persisted_balance_snapshots(tmp_path, monkeypat
                     "stock_balance": 3_250_000,
                     "profit_rate": 2.5,
                     "fx_rate": 1350.0,
-                }
+                },
+                on_balance=assert_session_closed_before_broker,
             ),
         )
 

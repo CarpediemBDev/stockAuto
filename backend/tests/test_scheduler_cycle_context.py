@@ -7,6 +7,28 @@ import app.bot.scheduler as scheduler
 from app.core.models import Holding, UserSettings, WatchList
 
 
+class FakeIloc:
+    def __init__(self, values):
+        self._values = values
+
+    def __getitem__(self, index):
+        return self._values[index]
+
+
+class FakeSeries:
+    def __init__(self, values):
+        self.iloc = FakeIloc(values)
+
+
+class FakeFrame:
+    empty = False
+    columns = {"Close"}
+
+    def __getitem__(self, key):
+        assert key == "Close"
+        return FakeSeries([111.25])
+
+
 class FakeQuery:
     def __init__(self, rows):
         self._rows = rows
@@ -63,6 +85,7 @@ async def test_async_trading_loop_injects_cycle_context_once(monkeypatch):
 
     async def fake_check_market_sentiment():
         nonlocal sentiment_calls
+        assert fake_db.closed is True
         sentiment_calls += 1
         return "BULLISH"
 
@@ -72,6 +95,7 @@ async def test_async_trading_loop_injects_cycle_context_once(monkeypatch):
         return 1517.56
 
     async def fake_run_user_trading_flow(user_id, signal_map, all_signals, exchange_rate, sentiment, session):
+        assert fake_db.closed is True
         flow_calls.append(
             {
                 "user_id": user_id,
@@ -153,6 +177,71 @@ def test_start_scheduler_registers_swing_prediction_jobs(monkeypatch):
     assert job_by_id["orphan_order_discovery_job"]["minutes"] == 1
     assert job_by_id["orphan_order_discovery_job"]["max_instances"] == 1
     assert job_by_id["orphan_order_discovery_job"]["func"] is scheduler.discover_orphan_orders_wrapper
+
+
+@pytest.mark.asyncio
+async def test_execute_and_poll_order_uses_close_column_for_kis_modify(monkeypatch):
+    class KISBroker:
+        def __init__(self):
+            self.modified_price = None
+
+        def buy_order(self, ticker, quantity, price, skip_poll=False):
+            assert skip_poll is True
+            return {
+                "status": "PENDING",
+                "success": True,
+                "order_no": "ORDER-1",
+                "filled_qty": 0,
+                "filled_price": 0.0,
+            }
+
+        def check_order_status(self, order_no):
+            if order_no == "ORDER-2":
+                return {
+                    "status": "FILLED",
+                    "filled_qty": 10,
+                    "filled_price": 111.25,
+                }
+            return {
+                "status": "PENDING",
+                "filled_qty": 0,
+                "filled_price": 0.0,
+            }
+
+        def modify_order(self, ticker, original_order_no, quantity, price):
+            self.modified_price = price
+            return {
+                "success": True,
+                "order_no": "ORDER-2",
+            }
+
+    async def fake_sleep(_seconds):
+        return None
+
+    async def fake_safe_broker_call(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    def fake_fetch_ohlcv(_ticker, _interval, _period):
+        return FakeFrame()
+
+    import app.scanner.data_provider as data_provider
+
+    broker = KISBroker()
+    monkeypatch.setattr(scheduler.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(scheduler, "safe_broker_call", fake_safe_broker_call)
+    monkeypatch.setattr(data_provider, "fetch_ohlcv", fake_fetch_ohlcv)
+
+    result = await scheduler.execute_and_poll_order(
+        broker,
+        broker.buy_order,
+        "AAPL",
+        10,
+        100.0,
+    )
+
+    assert broker.modified_price == 111.25
+    assert result["status"] == "FILLED"
+    assert result["filled_price"] == 111.25
 
 
 @pytest.mark.asyncio

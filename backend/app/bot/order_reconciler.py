@@ -5,7 +5,13 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.bot.broker_factory import get_broker_client
-from app.bot.trade_calculations import calculate_realized_pnl, fee_rate_for_trade_mode
+from decimal import Decimal, ROUND_HALF_UP
+from app.bot.trade_calculations import (
+    calculate_realized_pnl,
+    fee_rate_for_trade_mode,
+    to_decimal,
+    calculate_avg_price,
+)
 from app.core.database import SessionLocal
 from app.core.locks import acquire_symbol_order_lock, RedisLockUnavailable
 from app.core.logging import logger
@@ -33,11 +39,11 @@ ALERT_COOLDOWN = timedelta(minutes=30)
 class FillApplication:
     order: BrokerOrder
     applied_qty: int = 0
-    filled_price: float = 0.0
+    filled_price: float | Decimal = 0.0
     created_holding: bool = False
     remaining_qty: int | None = None
-    realized_pnl: float | None = None
-    return_rate: float | None = None
+    realized_pnl: float | Decimal | None = None
+    return_rate: float | Decimal | None = None
     error: str | None = None
 
     @property
@@ -63,118 +69,6 @@ def _normalize_status(raw_status: str | None) -> str:
         return status
     return "ERROR"
 
-
-def _mark_integrity_error(order: BrokerOrder, message: str) -> FillApplication:
-    order.status = "ERROR"
-    order.last_error = message
-    order.resolved_at = None
-    return FillApplication(order=order, error=message)
-
-
-
-
-def _apply_buy_delta(db: Session, order: BrokerOrder, delta: int, filled_price: float) -> tuple[bool, int]:
-    """
-    매수 주문에 대한 체결 수량(delta)을 Holding 및 TradeLog에 반영합니다.
-    새로운 Holding이 생성되었는지 여부와 최종 수량을 반환합니다.
-    """
-    holding = db.query(Holding).filter(
-        Holding.user_id == order.user_id,
-        Holding.ticker == order.ticker,
-        Holding.strategy_type == order.strategy_type,
-    ).first()
-
-    db.add(TradeLog(
-        user_id=order.user_id,
-        ticker=order.ticker,
-        strategy_type=order.strategy_type,
-        ticker_name=order.ticker_name or (holding.ticker_name if holding else order.ticker),
-        trade_type="BUY",
-        price=filled_price,
-        quantity=delta,
-        order_no=order.broker_order_no,
-        regime_mode=order.regime_mode,
-        signal_score=order.signal_score,
-        realized_pnl=0.0,
-        return_rate=0.0,
-    ))
-
-    if holding:
-        old_qty = holding.quantity
-        new_qty = old_qty + delta
-        holding.avg_price = round(
-            ((holding.avg_price * old_qty) + (filled_price * delta)) / new_qty,
-            4,
-        )
-        holding.quantity = new_qty
-        holding.buy_stage = order.buy_stage or holding.buy_stage
-        holding.highest_price = max(holding.highest_price or filled_price, filled_price)
-        return False, new_qty
-
-    db.add(Holding(
-        user_id=order.user_id,
-        ticker=order.ticker,
-        strategy_type=order.strategy_type,
-        ticker_name=order.ticker_name,
-        avg_price=filled_price,
-        quantity=delta,
-        highest_price=filled_price,
-        regime_mode=order.regime_mode,
-        buy_stage=order.buy_stage or 1,
-    ))
-    return True, delta
-
-
-def _apply_sell_delta(db: Session, order: BrokerOrder, delta: int, filled_price: float) -> tuple[int, float, float]:
-    """
-    매도 주문에 대한 체결 수량(delta)을 Holding 및 TradeLog에 반영하고,
-    실현 손익 및 수익률을 계산합니다.
-    반환값: (잔여수량, 실현손익, 수익률)
-    """
-    holding = db.query(Holding).filter(
-        Holding.user_id == order.user_id,
-        Holding.ticker == order.ticker,
-        Holding.strategy_type == order.strategy_type,
-    ).first()
-    if not holding:
-        raise ValueError(f"Holding {order.ticker} ({order.strategy_type}) does not exist for sell reconciliation.")
-    if delta > holding.quantity:
-        raise ValueError(
-            f"Sell fill delta {delta} exceeds DB holding quantity {holding.quantity} "
-            f"for {order.ticker} ({order.strategy_type})."
-        )
-
-    pnl = calculate_realized_pnl(
-        avg_price=holding.avg_price,
-        filled_price=filled_price,
-        quantity=delta,
-        fee_rate=fee_rate_for_trade_mode(order.trade_mode),
-    )
-
-    db.add(TradeLog(
-        user_id=order.user_id,
-        ticker=order.ticker,
-        strategy_type=order.strategy_type,
-        ticker_name=order.ticker_name or holding.ticker_name,
-        trade_type="SELL",
-        price=filled_price,
-        quantity=delta,
-        order_no=order.broker_order_no,
-        regime_mode=order.regime_mode,
-        signal_score=order.signal_score,
-        realized_pnl=round(pnl.realized_pnl, 2),
-        return_rate=round(pnl.return_rate, 2),
-    ))
-
-    remaining_qty = holding.quantity - delta
-    if remaining_qty == 0:
-        db.delete(holding)
-    else:
-        holding.quantity = remaining_qty
-
-    return remaining_qty, round(pnl.realized_pnl, 2), round(pnl.return_rate, 2)
-
-
 def apply_broker_report(db: Session, order: BrokerOrder, report: dict) -> FillApplication:
     """
     브로커의 주문 상태 리포트를 분석하여 BrokerOrder 상태를 갱신하고,
@@ -190,7 +84,7 @@ def apply_broker_report(db: Session, order: BrokerOrder, report: dict) -> FillAp
 
     try:
         broker_filled_qty = int(report.get("filled_qty") or 0)
-        cumulative_filled_price = float(report.get("filled_price") or order.filled_price or 0.0)
+        cumulative_filled_price = to_decimal(report.get("filled_price") or order.filled_price or 0.0)
     except (TypeError, ValueError):
         return _mark_integrity_error(order, f"Invalid broker fill report: {report}")
 
@@ -217,9 +111,9 @@ def apply_broker_report(db: Session, order: BrokerOrder, report: dict) -> FillAp
     incremental_filled_price = cumulative_filled_price
     if delta > 0 and order.applied_filled_qty > 0 and order.filled_price:
         incremental_filled_price = (
-            (broker_filled_qty * cumulative_filled_price)
-            - (order.applied_filled_qty * order.filled_price)
-        ) / delta
+            (to_decimal(broker_filled_qty) * cumulative_filled_price)
+            - (to_decimal(order.applied_filled_qty) * to_decimal(order.filled_price))
+        ) / to_decimal(delta)
 
     application = FillApplication(
         order=order,
@@ -270,6 +164,118 @@ def apply_broker_report(db: Session, order: BrokerOrder, report: dict) -> FillAp
         order.resolved_at = None
 
     return application
+
+
+
+def _mark_integrity_error(order: BrokerOrder, message: str) -> FillApplication:
+    order.status = "ERROR"
+    order.last_error = message
+    order.resolved_at = None
+    return FillApplication(order=order, error=message)
+
+
+def _apply_buy_delta(db: Session, order: BrokerOrder, delta: int, filled_price: float | Decimal) -> tuple[bool, int]:
+    """
+    매수 주문에 대한 체결 수량(delta)을 Holding 및 TradeLog에 반영합니다.
+    새로운 Holding이 생성되었는지 여부와 최종 수량을 반환합니다.
+    """
+    dec_filled_price = to_decimal(filled_price)
+    holding = db.query(Holding).filter(
+        Holding.user_id == order.user_id,
+        Holding.ticker == order.ticker,
+        Holding.strategy_type == order.strategy_type,
+    ).first()
+
+    db.add(TradeLog(
+        user_id=order.user_id,
+        ticker=order.ticker,
+        strategy_type=order.strategy_type,
+        ticker_name=order.ticker_name or (holding.ticker_name if holding else order.ticker),
+        trade_type="BUY",
+        price=dec_filled_price,
+        quantity=delta,
+        order_no=order.broker_order_no,
+        regime_mode=order.regime_mode,
+        signal_score=order.signal_score,
+        realized_pnl=Decimal('0.0000'),
+        return_rate=Decimal('0.0000'),
+    ))
+
+    if holding:
+        old_qty = holding.quantity
+        new_qty = old_qty + delta
+        holding.avg_price = calculate_avg_price(holding.avg_price, old_qty, dec_filled_price, delta)
+        holding.quantity = new_qty
+        holding.buy_stage = order.buy_stage or holding.buy_stage
+        holding.highest_price = max(to_decimal(holding.highest_price or dec_filled_price), dec_filled_price)
+        return False, new_qty
+
+    db.add(Holding(
+        user_id=order.user_id,
+        ticker=order.ticker,
+        strategy_type=order.strategy_type,
+        ticker_name=order.ticker_name,
+        avg_price=dec_filled_price,
+        quantity=delta,
+        highest_price=dec_filled_price,
+        regime_mode=order.regime_mode,
+        buy_stage=order.buy_stage or 1,
+    ))
+    return True, delta
+
+
+def _apply_sell_delta(db: Session, order: BrokerOrder, delta: int, filled_price: float | Decimal) -> tuple[int, Decimal, Decimal]:
+    """
+    매도 주문에 대한 체결 수량(delta)을 Holding 및 TradeLog에 반영하고,
+    실현 손익 및 수익률을 계산합니다.
+    반환값: (잔여수량, 실현손익, 수익률)
+    """
+    holding = db.query(Holding).filter(
+        Holding.user_id == order.user_id,
+        Holding.ticker == order.ticker,
+        Holding.strategy_type == order.strategy_type,
+    ).first()
+    if not holding:
+        raise ValueError(f"Holding {order.ticker} ({order.strategy_type}) does not exist for sell reconciliation.")
+    if delta > holding.quantity:
+        raise ValueError(
+            f"Sell fill delta {delta} exceeds DB holding quantity {holding.quantity} "
+            f"for {order.ticker} ({order.strategy_type})."
+        )
+
+    dec_filled_price = to_decimal(filled_price)
+    pnl = calculate_realized_pnl(
+        avg_price=holding.avg_price,
+        filled_price=dec_filled_price,
+        quantity=delta,
+        fee_rate=fee_rate_for_trade_mode(order.trade_mode),
+    )
+
+    quantized_pnl = pnl.realized_pnl.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+    quantized_return = pnl.return_rate.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+
+    db.add(TradeLog(
+        user_id=order.user_id,
+        ticker=order.ticker,
+        strategy_type=order.strategy_type,
+        ticker_name=order.ticker_name or holding.ticker_name,
+        trade_type="SELL",
+        price=dec_filled_price,
+        quantity=delta,
+        order_no=order.broker_order_no,
+        regime_mode=order.regime_mode,
+        signal_score=order.signal_score,
+        realized_pnl=quantized_pnl,
+        return_rate=quantized_return,
+    ))
+
+    remaining_qty = holding.quantity - delta
+    if remaining_qty == 0:
+        db.delete(holding)
+    else:
+        holding.quantity = remaining_qty
+
+    return remaining_qty, quantized_pnl, quantized_return
 
 
 def create_order_intent(
