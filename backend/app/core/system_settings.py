@@ -36,7 +36,10 @@ SYSTEM_SETTING_SPECS: dict[str, SystemSettingSpec] = {
 }
 
 _CACHE_TTL_SECONDS = 30.0
-_cache: dict[str, tuple[float, Any]] = {}
+_CACHE_VERSION_CHECK_SECONDS = 1.0
+_MISSING_ROW_VERSION = "__missing__"
+_ERROR_ROW_VERSION = "__error__"
+_cache: dict[str, tuple[float, float, Any, str]] = {}
 
 
 class SystemSettingError(ValueError):
@@ -45,6 +48,17 @@ class SystemSettingError(ValueError):
 
 def clear_system_settings_cache() -> None:
     _cache.clear()
+
+
+def _row_version(row: SystemSetting | None) -> str:
+    if row is None:
+        return _MISSING_ROW_VERSION
+    version = row.updated_at or row.created_at
+    if version is None:
+        return ""
+    if hasattr(version, "isoformat"):
+        return version.isoformat()
+    return str(version)
 
 
 def _coerce_bool(value: Any) -> bool:
@@ -141,13 +155,28 @@ def get_system_setting(key: str) -> Any:
 
     now = time.time()
     cached = _cache.get(key)
-    if cached and now - cached[0] < _CACHE_TTL_SECONDS:
-        return cached[1]
+    if cached:
+        loaded_at, checked_at, cached_value, _cached_version = cached
+        if (
+            now - loaded_at < _CACHE_TTL_SECONDS
+            and now - checked_at < _CACHE_VERSION_CHECK_SECONDS
+        ):
+            return cached_value
 
     value = spec.default
+    version = _MISSING_ROW_VERSION
     db = SessionLocal()
     try:
         row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        version = _row_version(row)
+        if cached:
+            loaded_at, _checked_at, cached_value, cached_version = cached
+            if (
+                cached_version == version
+                and now - loaded_at < _CACHE_TTL_SECONDS
+            ):
+                _cache[key] = (loaded_at, now, cached_value, cached_version)
+                return cached_value
         if row is not None:
             value = _parse_value(row.value, row.value_type)
     except (SQLAlchemyError, SystemSettingError) as exc:
@@ -157,10 +186,11 @@ def get_system_setting(key: str) -> Any:
             exc,
         )
         value = spec.default
+        version = _ERROR_ROW_VERSION
     finally:
         db.close()
 
-    _cache[key] = (now, value)
+    _cache[key] = (now, now, value, version)
     return value
 
 

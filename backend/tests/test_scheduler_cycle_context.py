@@ -240,8 +240,30 @@ async def test_execute_and_poll_order_uses_close_column_for_kis_modify(monkeypat
     )
 
     assert broker.modified_price == 111.25
+    assert result["order_no"] == "ORDER-2"
+    assert result["original_order_no"] == "ORDER-1"
     assert result["status"] == "FILLED"
     assert result["filled_price"] == 111.25
+
+
+@pytest.mark.asyncio
+async def test_schedule_background_task_logs_unhandled_exception(monkeypatch):
+    logged = []
+
+    def fake_exception(message, *args, **_kwargs):
+        logged.append((message, args))
+
+    async def boom():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(scheduler.logger, "exception", fake_exception)
+
+    task = scheduler._schedule_background_task(boom(), "boom-task")
+    while not task.done():
+        await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert logged == [("[Scheduler] Background task %s failed.", ("boom-task",))]
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from unittest.mock import AsyncMock, patch
 import app.bot.scheduler as scheduler
+from app.bot.trade_calculations import calculate_realized_pnl
 
 @pytest.mark.asyncio
 async def test_breach_count_cache_3tuple_pop():
@@ -209,3 +210,25 @@ def test_record_successful_buy_updates_decimal_existing_holding(monkeypatch):
     assert created is False
     assert existing_holding.avg_price == Decimal("100.6667")
     assert existing_holding.highest_price == Decimal("102.0")
+
+
+def test_realized_pnl_return_rate_uses_net_cost_basis():
+    pnl = calculate_realized_pnl(
+        avg_price=Decimal("100.0000"),
+        filled_price=Decimal("110.0000"),
+        quantity=10,
+        fee_rate=Decimal("0.0015"),
+        sec_fee_rate=Decimal("0.0000278"),
+    )
+    buy_total_cost = pnl.buy_gross + pnl.buy_fee
+    expected_cost_rate = (
+        (pnl.realized_pnl / buy_total_cost) * Decimal("100.0")
+    ).quantize(Decimal("0.0001"))
+    expected_gross_rate = (
+        (pnl.realized_pnl / pnl.buy_gross) * Decimal("100.0")
+    ).quantize(Decimal("0.0001"))
+
+    assert pnl.return_rate == expected_cost_rate
+    assert pnl.return_rate_on_cost == expected_cost_rate
+    assert pnl.return_rate_on_gross == expected_gross_rate
+    assert pnl.return_rate < pnl.return_rate_on_gross

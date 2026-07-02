@@ -491,11 +491,45 @@ class LocalSimulatedBroker(BaseBroker):
         regime_mode: str | None = None,
         signal_score: int | None = None,
     ) -> dict:
+        def reject_sell(message: str) -> dict:
+            return {
+                "success": False,
+                "order_submitted": False,
+                "status": "REJECTED",
+                "fill_confirmed": False,
+                "order_no": "",
+                "filled_qty": 0,
+                "filled_price": 0.0,
+                "message": message,
+            }
+
+        if quantity <= 0:
+            return reject_sell(f"Simulated sell rejected: invalid quantity {quantity} for {ticker}")
+
         live_price = self._get_live_price(ticker)
         dec_price = to_decimal(price)
         dec_live_price = to_decimal(live_price) if live_price is not None else dec_price
 
         if live_price is not None and dec_live_price >= dec_price:
+            if self.user_id is None:
+                return reject_sell(f"Simulated sell rejected: missing user context for {ticker}")
+
+            db = SessionLocal()
+            try:
+                holding = db.query(Holding).filter(
+                    Holding.user_id == self.user_id,
+                    Holding.ticker == ticker,
+                    Holding.strategy_type == strategy_type,
+                ).first()
+                available_qty = int(holding.quantity or 0) if holding else 0
+                if quantity > available_qty:
+                    return reject_sell(
+                        f"Simulated sell rejected: requested {quantity} shares of {ticker}, "
+                        f"available {available_qty}"
+                    )
+            finally:
+                db.close()
+
             fill_price = dec_live_price
             order_no = f"SIM-SELL-{datetime.now().strftime('%Y%m%d%H%M%S')}"
             return {

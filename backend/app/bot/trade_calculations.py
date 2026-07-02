@@ -13,6 +13,8 @@ class RealizedPnL:
     net_revenue: Decimal
     realized_pnl: Decimal
     return_rate: Decimal
+    return_rate_on_cost: Decimal
+    return_rate_on_gross: Decimal
 
 
 def to_decimal(val) -> Decimal:
@@ -66,10 +68,16 @@ def calculate_realized_pnl(
     net_revenue = (sell_gross - sell_fee - sec_fee).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
     realized_pnl = (net_revenue - (buy_gross + buy_fee)).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
 
-    if buy_gross > 0:
-        return_rate = ((realized_pnl / buy_gross) * Decimal('100.0')).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+    buy_total_cost = (buy_gross + buy_fee).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+    if buy_total_cost > 0:
+        return_rate_on_cost = ((realized_pnl / buy_total_cost) * Decimal('100.0')).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
     else:
-        return_rate = Decimal('0.0000')
+        return_rate_on_cost = Decimal('0.0000')
+
+    if buy_gross > 0:
+        return_rate_on_gross = ((realized_pnl / buy_gross) * Decimal('100.0')).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+    else:
+        return_rate_on_gross = Decimal('0.0000')
 
     return RealizedPnL(
         buy_gross=buy_gross,
@@ -79,7 +87,9 @@ def calculate_realized_pnl(
         sec_fee=sec_fee,
         net_revenue=net_revenue,
         realized_pnl=realized_pnl,
-        return_rate=return_rate,
+        return_rate=return_rate_on_cost,
+        return_rate_on_cost=return_rate_on_cost,
+        return_rate_on_gross=return_rate_on_gross,
     )
 
 

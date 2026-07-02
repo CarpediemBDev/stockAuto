@@ -107,6 +107,22 @@ async def safe_broker_call(func, *args, **kwargs):
         await asyncio.sleep(0.04)
         return await asyncio.to_thread(func, *args, **kwargs)
 
+
+def _schedule_background_task(coro, task_name: str) -> asyncio.Task:
+    task = asyncio.ensure_future(coro)
+
+    def _log_task_result(done: asyncio.Task) -> None:
+        try:
+            done.result()
+        except asyncio.CancelledError:
+            logger.info("[Scheduler] Background task %s was cancelled.", task_name)
+        except Exception:
+            logger.exception("[Scheduler] Background task %s failed.", task_name)
+
+    task.add_done_callback(_log_task_result)
+    return task
+
+
 async def execute_and_poll_order(broker, func, *args, lease=None, **kwargs):
     """
     주문을 비동기로 발송하고 즉시 반환(skip_poll=True)받은 뒤,
@@ -118,6 +134,7 @@ async def execute_and_poll_order(broker, func, *args, lease=None, **kwargs):
 
     if res.get("status") == "PENDING" and res.get("order_no"):
         order_no = res["order_no"]
+        original_order_no = order_no
         quantity = kwargs.get("quantity") or (args[1] if len(args) > 1 else 0)
         price = kwargs.get("price") or (args[2] if len(args) > 2 else 0.0)
         ticker = args[0] if len(args) > 0 else ""
@@ -192,6 +209,9 @@ async def execute_and_poll_order(broker, func, *args, lease=None, **kwargs):
                         original_filled_val = filled_qty * filled_price
 
                         order_no = modify_res["order_no"]
+                        res["original_order_no"] = original_order_no
+                        res["order_no"] = order_no
+                        res["modified_order_no"] = order_no
                         order_modified = True
                         attempt = 1
                         max_attempts = 15
@@ -793,7 +813,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     realized_pnl = application.realized_pnl or 0.0
                     calc_return_rate = application.return_rate or 0.0
                     remaining_qty = application.remaining_qty or 0
-                    BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
+                    BREACH_COUNT_CACHE.pop((user_id, h.ticker, h.strategy_type), None)
                     fill_label = "sold" if remaining_qty == 0 else f"partially sold ({filled_qty} filled, {remaining_qty} remaining)"
                     _log(f"SUCCESS: {h.ticker} {fill_label} via {sell_reason} | Order: {res['order_no']}", "INFO")
 
@@ -1529,7 +1549,7 @@ def scanner_cache_wrapper():
         # 💡 이미 실행 중인 이벤트 루프가 있는 경우 (FastAPI/uvicorn 내부 등)
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.ensure_future(refresh_scanner_cache())
+            _schedule_background_task(refresh_scanner_cache(), "scanner_cache")
         else:
             loop.run_until_complete(refresh_scanner_cache())
 
@@ -1613,7 +1633,7 @@ def trading_loop_wrapper():
         # 💡 이미 실행 중인 이벤트 루프가 있는 경우 (FastAPI/uvicorn 내부 등)
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.ensure_future(async_trading_loop())
+            _schedule_background_task(async_trading_loop(), "trading_loop")
         else:
             loop.run_until_complete(async_trading_loop())
 
@@ -1624,7 +1644,7 @@ def reconcile_open_orders_wrapper():
     except RuntimeError:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.ensure_future(reconcile_open_orders_once())
+            _schedule_background_task(reconcile_open_orders_once(), "broker_order_reconciliation")
         else:
             loop.run_until_complete(reconcile_open_orders_once())
 
@@ -1748,7 +1768,7 @@ def admin_balance_cache_wrapper():
     except RuntimeError:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.ensure_future(admin_balance_cache_sync())
+            _schedule_background_task(admin_balance_cache_sync(), "admin_balance_cache")
         else:
             loop.run_until_complete(admin_balance_cache_sync())
 

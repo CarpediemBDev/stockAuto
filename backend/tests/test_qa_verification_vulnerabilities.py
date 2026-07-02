@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 import app.bot.simulated_broker as simulated_broker
 from app.bot.simulated_broker import LocalSimulatedBroker
 from app.core.database import Base
-from app.core.models import UnfilledOrder, User
+from app.core.models import Holding, UnfilledOrder, User
 import app.scanner.data_provider as data_provider
 
 
@@ -196,3 +196,43 @@ def test_simulated_broker_limit_order_fake_execution(isolated_simulated_broker_d
         assert all(order.user_id == user_id for order in orders)
     finally:
         db.close()
+
+
+def test_simulated_broker_immediate_sell_rejects_insufficient_holding(isolated_simulated_broker_db):
+    session_factory, user_id = isolated_simulated_broker_db
+    broker = LocalSimulatedBroker(db_settings=SimpleNamespace(user_id=user_id))
+
+    with patch.object(broker, "_get_live_price", return_value=120.0):
+        no_holding = broker.sell_order(ticker="AAPL", quantity=1, price=100.0)
+
+    assert no_holding["success"] is False
+    assert no_holding["status"] == "REJECTED"
+    assert no_holding["filled_qty"] == 0
+
+    db = session_factory()
+    try:
+        db.add(
+            Holding(
+                user_id=user_id,
+                ticker="AAPL",
+                ticker_name="Apple",
+                avg_price=Decimal("100.0000"),
+                quantity=1,
+                highest_price=Decimal("120.0000"),
+                strategy_type="regime_switching",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with patch.object(broker, "_get_live_price", return_value=120.0):
+        too_many = broker.sell_order(ticker="AAPL", quantity=2, price=100.0)
+        valid = broker.sell_order(ticker="AAPL", quantity=1, price=100.0)
+
+    assert too_many["success"] is False
+    assert too_many["status"] == "REJECTED"
+    assert too_many["filled_qty"] == 0
+    assert valid["success"] is True
+    assert valid["status"] == "FILLED"
+    assert valid["filled_qty"] == 1
