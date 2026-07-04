@@ -1,6 +1,6 @@
 # StockAuto UX/UI 디자인 가이드라인 (Design Guidelines)
 
-본 문서는 **StockAuto 자동 매매 봇 프로젝트**의 프론트엔드(Next.js 15/16 + React 19 + Tailwind CSS) 대시보드 화면을 위한 **UX/UI 디자인 가이드라인**입니다. Vercel 및 Linear 스타일의 미니멀리즘과 세련된 다크 모드, 고기능 차트 인터랙션, 그리고 거래 안전장치를 보장하는 상태 제어 흐름을 명세합니다.
+본 문서는 **StockAuto 자동 매매 봇 프로젝트**의 프론트엔드(Next.js 16 + React 19 + Tailwind CSS) 대시보드 화면을 위한 **UX/UI 디자인 가이드라인**입니다. Vercel 및 Linear 스타일의 미니멀리즘과 세련된 다크 모드, 고기능 차트 인터랙션, 그리고 거래 안전장치를 보장하는 상태 제어 흐름을 명세합니다.
 
 ---
 

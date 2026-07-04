@@ -159,7 +159,7 @@ StockAuto의 `database.py` 정책에 따라 운영 환경(`APP_ENV="prod"`)에�
 
 ### 3.1. 컴포넌트별 리소스 다이어트
 
-1.  **Frontend (Next.js 15 Standalone Mode)**
+1.  **Frontend (Next.js 16 Standalone Mode)**
     *   Next.js의 기본 Node dev/prod 서버는 백그라운드에서 메모리를 300MB ~ 500MB 이상 잡아먹는 주범입니다.
     *   `next.config.js`에 `output: 'standalone'` 옵션을 적용하여 프론트엔드 배포판을 프로덕션 구동에 필수적인 순수 코드와 최소 의존성만 포함하는 독립 파일로 빌드합니다. 이를 통해 RAM 사용량을 **60MB ~ 80MB 수준**으로 급감시킵니다.
 2.  **Backend (FastAPI + Uvicorn Single-Worker)**

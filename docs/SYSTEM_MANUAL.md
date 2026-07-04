@@ -30,7 +30,7 @@ graph TD
 
 
 
-    subgraph Frontend ["🖥️ 프론트엔드 (Next.js 15 / React 19)"]
+    subgraph Frontend ["🖥️ 프론트엔드 (Next.js 16 / React 19)"]
 
         UI["대시보드 UI (Dashboard)"]
 
