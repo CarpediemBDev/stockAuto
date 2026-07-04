@@ -82,3 +82,24 @@ def mask_credential(value: Optional[str], visible_prefix: int = 4, visible_suffi
     if len(decrypted) <= visible_prefix + visible_suffix:
         return "*" * len(decrypted)
     return f"{decrypted[:visible_prefix]}...{decrypted[-visible_suffix:]}"
+
+
+from sqlalchemy import TypeDecorator, String
+
+class EncryptedString(TypeDecorator):
+    """
+    SQLAlchemy TypeDecorator that transparently encrypts strings on insert/update
+    and decrypts them on select.
+    """
+    impl = String
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None:
+            return encrypt_credential(value)
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is not None:
+            return decrypt_credential(value)
+        return value

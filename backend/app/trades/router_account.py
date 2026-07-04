@@ -368,7 +368,18 @@ async def force_liquidate(
                     raise ValueError(
                         f"Invalid liquidation fill quantity for {holding.ticker}: {filled_qty}"
                     )
-                order_no = result.get("order_no", "LIQUIDATE_MANUAL")
+                order_no = result.get("order_no", f"LIQ-{uuid4().hex[:8]}")
+                
+                from sqlalchemy import update
+                update_stmt = (
+                    update(Holding)
+                    .where(Holding.id == holding.id, Holding.quantity >= filled_qty)
+                    .values(quantity=Holding.quantity - filled_qty)
+                )
+                res = db.execute(update_stmt)
+                if res.rowcount == 0:
+                    raise ValueError(f"Concurrency error: Failed to liquidate {holding.ticker} (insufficient quantity)")
+
                 pnl = calculate_realized_pnl(
                     avg_price=holding.avg_price,
                     filled_price=filled_price,
@@ -390,14 +401,17 @@ async def force_liquidate(
                     realized_pnl=round(pnl.realized_pnl, 2),
                     return_rate=round(pnl.return_rate, 2),
                 ))
-                if filled_qty == holding.quantity:
-                    db.delete(holding)
-                else:
-                    holding.quantity -= filled_qty
-                db.commit()
                 liquidated_tickers.append(holding.ticker)
             finally:
                 await symbol_lease.release()
+
+        if not is_kis_order:
+            db.commit()
+            
+            empty_holdings = db.query(Holding).filter(Holding.user_id == current_user.id, Holding.quantity <= 0).all()
+            for eh in empty_holdings:
+                db.delete(eh)
+            db.commit()
 
         return {
             "message": (

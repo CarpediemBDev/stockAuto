@@ -33,25 +33,10 @@ def test_broker_catalog_is_derived_from_runtime_registry():
         ]
 
 
-def test_toss_catalog_exposes_only_supported_simulated_mode():
+def test_catalog_exposes_supported_modes():
     catalog = {item["id"]: item for item in get_broker_catalog()}
 
     assert catalog["KIS"]["supported_modes"] == list(VALID_TRADE_MODES)
-    assert catalog["TOSS"]["supported_modes"] == ["SIMULATED"]
+    assert catalog["TOSS"]["supported_modes"] == list(VALID_TRADE_MODES)
 
 
-def test_toss_mock_and_real_modes_are_rejected_before_broker_creation():
-    ensure_broker_supports_trade_mode("TOSS", "SIMULATED")
-
-    for mode in ("MOCK", "REAL"):
-        with pytest.raises(ValueError, match=f"TOSS 증권사는 {mode} 모드를 지원하지 않습니다."):
-            ensure_broker_supports_trade_mode("TOSS", mode)
-
-        with pytest.raises(ValueError, match=f"TOSS 증권사는 {mode} 모드를 지원하지 않습니다."):
-            get_broker_client(
-                SimpleNamespace(
-                    trade_mode=mode,
-                    broker_provider="TOSS",
-                    credentials=[],
-                )
-            )

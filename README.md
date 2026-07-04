@@ -12,7 +12,7 @@
 - **🚨 실시간 스마트 익절 & 트레일링 스탑**: 최고가 대비 하락 추적식 자동 스탑 및 RSI 과매수 다이버전스 + MACD 데드크로스 조기 스마트 익절 (`detect_smart_exit_signal`).
 - **🔐 JWT 멀티유저 인증 & 데이터 격리**: 회원가입/로그인 보안 시스템 및 유저별 독립 트레이딩 모드, 개인 증권사 API Key 연동 및 철저한 멀티테넌시 데이터 격리.
 - **💼 3-Mode 플렉시블 트레이딩 엔진**: 서버 재부팅 없이 실시간 핫 리로딩되는 `SIMULATED` (가상투자) / `MOCK` (모의 OpenAPI) / `REAL` (실전 OpenAPI) 3단 브로커 팩토리 아키텍처.
-- **🎨 프리미엄 UI/UX 대시보드**: Next.js 15 App Router와 React 19 기반 최적화, Vercel/Linear 스타일 세련된 세그먼트/사이드바 설정 및 그라데이션 SVG 자산 추이 차트.
+- **🎨 프리미엄 UI/UX 대시보드**: Next.js 16 App Router와 React 19 기반 최적화, Vercel/Linear 스타일 세련된 세그먼트/사이드바 설정 및 그라데이션 SVG 자산 추이 차트.
 - **🤖 텔레그램 트레이딩 브릿지**: 단일 백그라운드 롱 폴링 데몬으로 리소스를 절약하며 간편 딥링크(/start 연동), 실시간 계좌 및 포트폴리오 자산 조회(`/status`), 명령어 제어(`/run`, `/stop`) 제공.
 - **💾 Alembic 자동 마이그레이션**: Spring Boot 스타일 프로그램 기반 자동 기동식 마이그레이션을 탑재하여 유실 없는 테이블 스키마 핫 패치 및 무결성 부트스트래핑 보장.
 - **🔥 AI 뉴스 감성 및 호악재 판독**: 실시간 해외 뉴스를 비동기 병렬 대량 수집하고 AI 감성 분석 모델을 연동하여 상승 명분(Catalyst)을 선제 발굴.
@@ -29,7 +29,7 @@
 
 ### 프론트엔드 (Frontend)
 
-- **Next.js 15 (App Router)**: 최신 웹 아키텍처
+- **Next.js 16 (App Router)**: 최신 웹 아키텍처
 - **Tailwind CSS**: 프리미엄 UI 디자인
 - **Lucide React**: 벡터 아이콘 시스템
 
@@ -109,6 +109,14 @@
    npm run build-prod
    npm run start-prod
    ```
+
+## 📚 문서 안내 (Documentation Map)
+
+프로젝트 문서는 목적별로 분리되어 있습니다. 필요한 곳부터 진입하세요:
+
+- **[`docs/README.md`](docs/README.md)** — 📖 **문서 인덱스(SSOT 지도)**. 전체 기술 문서가 각각 어떤 주제를 소유하는지 한눈에 매핑. *어디에 뭐가 있는지 모르겠으면 여기부터.*
+- **[`frontend/README.md`](frontend/README.md)** — 🎨 **프론트엔드 대시보드 실행 가이드**. Next.js 로컬 구동, API 프록시/쿠키 동작 등 프론트 전용 안내.
+- **[`AGENTS.md`](AGENTS.md)** — 👑 AI/개발자 작업 절대 수칙 및 콜드 스타트 읽기 순서.
 
 ## 🤖 AI 협업 가이드 (AI Collaboration)
 

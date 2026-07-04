@@ -40,7 +40,7 @@ def _matches_intent(order: BrokerOrder, broker_order: dict) -> bool:
         return False
 
     broker_price = float(broker_order.get("order_price") or 0.0)
-    if abs(broker_price - order.submitted_price) > PRICE_TOLERANCE:
+    if abs(broker_price - float(order.submitted_price)) > PRICE_TOLERANCE:
         return False
 
     broker_exchange = str(broker_order.get("exchange_code") or "").upper()

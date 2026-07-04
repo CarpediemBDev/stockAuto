@@ -1,6 +1,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.bot.broker_factory import get_broker_client
-from app.core.database import SessionLocal, micro_session
+from app.core.database import SessionLocal
+from sqlalchemy.orm import selectinload
 from app.watchlist.services import load_watchlist_tickers_by_user, load_all_watchlist_tickers_by_user
 from app.core.locks import (
     RedisLockUnavailable,
@@ -9,6 +10,7 @@ from app.core.locks import (
 )
 from app.core.models import TradeLog, Holding, ActionLog, UserSettings, WatchList, User, AccountEquitySnapshot
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 import asyncio
@@ -39,9 +41,14 @@ from app.bot.order_reconciler import (
     reconcile_open_orders_once,
 )
 from app.bot.trade_calculations import (
+    calculate_avg_price,
     calculate_buy_total,
+    calculate_profit_rate,
     calculate_realized_pnl,
+    check_stop_loss_breach,
+    check_trailing_stop_breach,
     fee_rate_for_trade_mode,
+    to_decimal,
 )
 from app.bot.order_discovery import discover_orphan_orders_once
 import time
@@ -61,6 +68,7 @@ LOG_COOLDOWN_SECONDS = 1800.0
 # 💡 동적 손절선 및 트레일링 스탑 이탈 연속 횟수 추적 캐시 (Whipsaw 방지용 연속 2회 확정 가드)
 # 키: (user_id, ticker) -> 값: int (연속 이탈 횟수)
 BREACH_COUNT_CACHE = {}
+_breach_count_lock = threading.Lock()
 
 _scanner_refresh_lock = threading.Lock()
 _scanner_refresh_in_progress = False
@@ -99,7 +107,35 @@ async def safe_broker_call(func, *args, **kwargs):
         await asyncio.sleep(0.04)
         return await asyncio.to_thread(func, *args, **kwargs)
 
-async def execute_and_poll_order(broker, func, *args, **kwargs):
+
+def _schedule_background_task(coro, task_name: str):
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+
+    def _log_task_result(done) -> None:
+        try:
+            done.result()
+        except asyncio.CancelledError:
+            logger.info("[Scheduler] Background task %s was cancelled.", task_name)
+        except Exception:
+            logger.exception("[Scheduler] Background task %s failed.", task_name)
+
+    if loop.is_running():
+        # 메인 루프 스레드 외의 동기 스레드에서 안전하게 전송
+        fut = asyncio.run_coroutine_threadsafe(coro, loop)
+        fut.add_done_callback(_log_task_result)
+        return fut
+    else:
+        # 루프가 돌고 있지 않은 독립 스레드인 경우
+        task = asyncio.ensure_future(coro, loop=loop)
+        task.add_done_callback(_log_task_result)
+        return task
+
+
+
+async def execute_and_poll_order(broker, func, *args, lease=None, **kwargs):
     """
     주문을 비동기로 발송하고 즉시 반환(skip_poll=True)받은 뒤,
     비동기 타이머(await asyncio.sleep)를 활용하여 체결 상태를 폴링합니다.
@@ -110,33 +146,125 @@ async def execute_and_poll_order(broker, func, *args, **kwargs):
 
     if res.get("status") == "PENDING" and res.get("order_no"):
         order_no = res["order_no"]
-        quantity = kwargs.get("quantity")
-        price = kwargs.get("price")
+        original_order_no = order_no
+        quantity = kwargs.get("quantity") or (args[1] if len(args) > 1 else 0)
+        price = kwargs.get("price") or (args[2] if len(args) > 2 else 0.0)
+        ticker = args[0] if len(args) > 0 else ""
+        side = "BUY" if "buy" in func.__name__.lower() else "SELL"
 
-        # 최대 5회 x 2초 = 10초 대기 (비동기로 대기)
-        for attempt in range(1, 6):
+        is_kis = type(broker).__name__ == "KISBroker"
+
+        filled_qty = 0
+        filled_price = 0.0
+        fill_confirmed = False
+
+        # KIS의 경우 30초(15회 x 2초) 동안 폴링 후 미체결 시 호가 정정
+        max_attempts = 15 if is_kis else 5
+
+        original_filled_qty = 0
+        original_filled_val = 0.0
+        order_modified = False
+
+        attempt = 1
+        while attempt <= max_attempts:
+            if lease and getattr(lease, "lost_ownership", False):
+                logger.error(f"[Order Guard] Lock lease {lease.key} ownership lost (CRITICAL_LOST) during order polling. Aborting.")
+                res["status"] = "ERROR"
+                res["message"] = "Lock lease ownership lost (CRITICAL_LOST) during order polling"
+                res["success"] = False
+                break
+
             await asyncio.sleep(2.0)
             status_res = await safe_broker_call(broker.check_order_status, order_no)
-
             status_code = status_res.get("status")
+            curr_filled = status_res.get("filled_qty", 0)
+
             if status_code == "FILLED":
-                res["status"] = "FILLED"
-                res["filled_qty"] = status_res.get("filled_qty", quantity)
-                res["filled_price"] = status_res.get("filled_price", price)
-                res["success"] = True
-                res["fill_confirmed"] = True
+                filled_qty = curr_filled
+                filled_price = status_res.get("filled_price", price)
+                fill_confirmed = True
                 break
             elif status_code == "PARTIAL":
-                filled_qty = status_res.get("filled_qty", 0)
-                if filled_qty > 0:
-                    res["status"] = "PARTIAL"
-                    res["filled_qty"] = filled_qty
-                    res["filled_price"] = status_res.get("filled_price", price)
-                    res["success"] = True
-                    res["fill_confirmed"] = False
-                    break
+                filled_qty = curr_filled
+                filled_price = status_res.get("filled_price", price)
+                fill_confirmed = False
             elif status_code == "ERROR":
                 break
+
+            # KIS이고 30초가 지났으며 정정한 적이 없고 아직 미체결 잔여 수량이 남았을 때 호가 정정
+            if is_kis and attempt == max_attempts and not order_modified and filled_qty < quantity:
+                unfilled_qty = quantity - filled_qty
+                if unfilled_qty > 0:
+                    live_price = None
+                    try:
+                        from app.scanner.data_provider import fetch_ohlcv
+                        df = await asyncio.to_thread(fetch_ohlcv, ticker, "1m", "1d")
+                        if df is not None and not df.empty:
+                            close_column = "Close" if "Close" in df.columns else "close" if "close" in df.columns else None
+                            if close_column:
+                                live_price = float(df[close_column].iloc[-1])
+                    except Exception as exc:
+                        logger.warning(f"[Order Guard] Failed to fetch live price for KIS order modification: {exc}")
+
+                    target_price = live_price if live_price else price
+                    logger.info(f"[Order Guard] KIS order {order_no} ({side}) unfilled after 30s. Modifying remaining {unfilled_qty} shares to {target_price}")
+
+                    modify_res = await safe_broker_call(
+                        broker.modify_order,
+                        ticker=ticker,
+                        original_order_no=order_no,
+                        quantity=unfilled_qty,
+                        price=target_price,
+                    )
+                    if modify_res.get("success") and modify_res.get("order_no"):
+                        original_filled_qty = filled_qty
+                        original_filled_val = filled_qty * filled_price
+
+                        order_no = modify_res["order_no"]
+                        res["original_order_no"] = original_order_no
+                        res["order_no"] = order_no
+                        res["modified_order_no"] = order_no
+                        order_modified = True
+                        attempt = 1
+                        max_attempts = 15
+                        filled_qty = 0
+                        filled_price = 0.0
+                        continue
+
+            attempt += 1
+
+        if order_modified:
+            total_filled_qty = original_filled_qty + filled_qty
+            if total_filled_qty > 0:
+                avg_filled_price = (original_filled_val + (filled_qty * filled_price)) / total_filled_qty
+                res["filled_qty"] = total_filled_qty
+                res["filled_price"] = avg_filled_price
+                res["success"] = True
+                res["fill_confirmed"] = fill_confirmed
+                if total_filled_qty >= quantity:
+                    res["status"] = "FILLED"
+                    res["fill_confirmed"] = True
+                else:
+                    res["status"] = "PARTIAL"
+                    res["fill_confirmed"] = False
+            else:
+                res["filled_qty"] = 0
+                res["filled_price"] = 0.0
+                res["success"] = False
+                res["fill_confirmed"] = False
+                res["status"] = "PENDING"
+        else:
+            if filled_qty > 0:
+                res["filled_qty"] = filled_qty
+                res["filled_price"] = filled_price
+                res["success"] = True
+                res["fill_confirmed"] = fill_confirmed
+                if filled_qty >= quantity:
+                    res["status"] = "FILLED"
+                    res["fill_confirmed"] = True
+                else:
+                    res["status"] = "PARTIAL"
+                    res["fill_confirmed"] = False
     return res
 
 ET = ZoneInfo("America/New_York") # 미국 동부 표준시(ET)는 DST를 자동으로 반영합니다
@@ -252,11 +380,13 @@ def micro_session(ctx: TradingFlowContext):
     try:
         if not hasattr(db, "commit_count"):
             if hasattr(ctx, "db_settings") and ctx.db_settings:
-                db.add(ctx.db_settings)
+                ctx.db_settings = db.merge(ctx.db_settings)
             if hasattr(ctx, "holdings") and ctx.holdings:
-                for h in ctx.holdings:
-                    db.add(h)
+                ctx.holdings = [db.merge(h) for h in ctx.holdings]
         yield db
+    except Exception as e:
+        db.rollback()  # 💡 예외 발생 시 트랜잭션 롤백 및 커넥션 오염 방지
+        raise e
     finally:
         if hasattr(db, "expunge_all"):
             db.expunge_all()
@@ -538,17 +668,22 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                 _log(f"No technical data available for owned ticker {clean_ticker}. Skipping monitoring in this cycle.", "WARNING")
                 continue
 
-            current_price = current_data['price']
+            current_price_dec = to_decimal(current_data['price'])
+            current_price = float(current_price_dec)
             h.current_price = current_price
-            profit_rate = ((current_price - h.avg_price) / h.avg_price) * 100
+            profit_rate = calculate_profit_rate(current_price_dec, h.avg_price)
 
             current_score = strategy_instance.calculate_score(current_data['details'] or current_data, sentiment, is_entry=False)
             is_smart_exit = current_data.get('details', {}).get('is_smart_exit', False)
 
-            if current_price > h.highest_price:
-                h.highest_price = current_price
+            dec_highest_price = to_decimal(h.highest_price or current_price_dec)
+            if current_price_dec > dec_highest_price:
+                dec_highest_price = current_price_dec
+                h.highest_price = current_price_dec
                 _log(f"[{strategy_instance.name}] New Peak for {clean_ticker}: ${current_price}", "SIGNAL")
-                db.commit()
+                with micro_session(ctx) as db:
+                    db.merge(h)
+                    db.commit()
 
             atr = current_data.get('details', {}).get('atr', 0.0)
             stop_loss_pct = strategy_instance.get_stop_loss_pct(atr, current_price)
@@ -558,24 +693,26 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             is_breached = False
             breach_reason = ""
 
-            if profit_rate <= -stop_loss_pct:
+            if check_stop_loss_breach(profit_rate, stop_loss_pct):
                 is_breached = True
                 breach_reason = f"동적 손절선 이탈 (손절 기준 -{stop_loss_pct:.2f}% 돌파 | 현재 수익률: {profit_rate:.2f}%)"
-            elif current_price <= h.highest_price * (1 - trailing_stop_pct / 100) and h.highest_price > h.avg_price:
+            elif check_trailing_stop_breach(current_price_dec, dec_highest_price, trailing_stop_pct, h.avg_price):
                 is_breached = True
-                breach_reason = f"동적 트레일링 스탑 이탈 (최고가 ${h.highest_price:.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)"
+                breach_reason = f"동적 트레일링 스탑 이탈 (최고가 ${float(dec_highest_price):.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)"
 
             if is_breached:
                 cache_key = (user_id, h.ticker, h.strategy_type)
-                BREACH_COUNT_CACHE[cache_key] = BREACH_COUNT_CACHE.get(cache_key, 0) + 1
-                count = BREACH_COUNT_CACHE[cache_key]
+                with _breach_count_lock:
+                    BREACH_COUNT_CACHE[cache_key] = BREACH_COUNT_CACHE.get(cache_key, 0) + 1
+                    count = BREACH_COUNT_CACHE[cache_key]
 
                 if count >= 2:
                     sell_reason = breach_reason + " [2회 연속 이탈 확정]"
                 else:
                     _log(f"[Noise Buffer] {h.ticker} ({h.strategy_type}) first breach detected ({breach_reason}). Delaying sell for noise protection (Count: {count}/2).", "INFO")
             else:
-                BREACH_COUNT_CACHE.pop((user_id, h.ticker, h.strategy_type), None)
+                with _breach_count_lock:
+                    BREACH_COUNT_CACHE.pop((user_id, h.ticker, h.strategy_type), None)
 
             if not sell_reason and profit_rate >= strategy_instance.min_smart_exit_profit and is_smart_exit:
                 sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
@@ -623,12 +760,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
         try:
             symbol_lease = await acquire_symbol_order_lock(user_id, clean_ticker, request_id)
         except RedisLockUnavailable:
-            log_action(
-                db,
-                user_id,
-                f"SELL BLOCKED: Redis order lock is unavailable for {clean_ticker}.",
-                "ERROR",
-            )
+            _log(f"SELL BLOCKED: Redis order lock is unavailable for {clean_ticker}.", "ERROR")
             return
         if symbol_lease is None:
             _log(f"SELL SKIP: Another order is in progress for {clean_ticker}.", "WARNING")
@@ -663,6 +795,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     res = await execute_and_poll_order(
                         broker, broker.sell_order, clean_ticker, h.quantity,
                         price=current_price, session=ctx.session,
+                        lease=symbol_lease,
                         **({"client_order_id": order_intent.intent_id} if order_intent else {}),
                     )
                 else:
@@ -692,7 +825,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     realized_pnl = application.realized_pnl or 0.0
                     calc_return_rate = application.return_rate or 0.0
                     remaining_qty = application.remaining_qty or 0
-                    BREACH_COUNT_CACHE.pop((user_id, h.ticker), None)
+                    BREACH_COUNT_CACHE.pop((user_id, h.ticker, h.strategy_type), None)
                     fill_label = "sold" if remaining_qty == 0 else f"partially sold ({filled_qty} filled, {remaining_qty} remaining)"
                     _log(f"SUCCESS: {h.ticker} {fill_label} via {sell_reason} | Order: {res['order_no']}", "INFO")
 
@@ -807,8 +940,9 @@ def resolve_entry_stage(ctx: TradingFlowContext, strategy_instance, clean_ticker
             return None
 
         buy_stage = existing_holding.buy_stage
-        current_price = signal['price']
-        profit_rate = ((current_price - existing_holding.avg_price) / existing_holding.avg_price) * 100
+        current_price_dec = to_decimal(signal['price'])
+        current_price = float(current_price_dec)
+        profit_rate = calculate_profit_rate(current_price_dec, existing_holding.avg_price)
         pyramid_trigger_2 = strategy_instance.get_pyramid_trigger(2)
 
         if buy_stage == 1:
@@ -936,18 +1070,19 @@ def record_successful_buy(
     current_score: int,
 ) -> bool:
     with micro_session(ctx) as db:
+        dec_filled_price = to_decimal(filled_price)
         if existing_holding:
             existing_holding = db.merge(existing_holding)
             old_qty = existing_holding.quantity
             old_avg = existing_holding.avg_price
 
             new_qty = old_qty + filled_qty
-            new_avg = ((old_avg * old_qty) + (filled_price * filled_qty)) / new_qty
+            new_avg = calculate_avg_price(old_avg, old_qty, dec_filled_price, filled_qty)
 
-            existing_holding.avg_price = round(new_avg, 4)
+            existing_holding.avg_price = new_avg
             existing_holding.quantity = new_qty
             existing_holding.buy_stage = next_stage
-            existing_holding.highest_price = max(existing_holding.highest_price, filled_price)
+            existing_holding.highest_price = max(to_decimal(existing_holding.highest_price or dec_filled_price), dec_filled_price)
 
             db.add(TradeLog(
                 user_id=ctx.user_id,
@@ -955,17 +1090,17 @@ def record_successful_buy(
                 strategy_type=strategy_type,
                 ticker_name=signal['name'],
                 trade_type="BUY",
-                price=filled_price,
+                price=dec_filled_price,
                 quantity=filled_qty,
                 order_no=order_no,
                 regime_mode=ctx.sentiment,
                 signal_score=current_score,
-                realized_pnl=0.0,
-                return_rate=0.0
+                realized_pnl=Decimal('0.0000'),
+                return_rate=Decimal('0.0000')
             ))
 
             db.commit()
-            log_action(db, ctx.user_id, f"SUCCESS: {ticker} ({strategy_type}) Pyramiding Stage {next_stage} Add-on. New Avg: ${new_avg:.2f}", "INFO")
+            log_action(db, ctx.user_id, f"SUCCESS: {ticker} ({strategy_type}) Pyramiding Stage {next_stage} Add-on. New Avg: ${float(new_avg):.2f}", "INFO")
             return False
 
         db.add(Holding(
@@ -1144,7 +1279,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 final_qty,
                 fee_rate_for_trade_mode(ctx.db_settings.trade_mode),
             )
-            slot_cash_usd -= reserved_order_total
+            slot_cash_usd -= float(reserved_order_total)
             if not existing_holding:
                 slot_holdings_count += 1
 
@@ -1203,6 +1338,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                     res = await execute_and_poll_order(
                         ctx.broker, ctx.broker.buy_order, clean_ticker, final_qty,
                         price=current_price, session=ctx.session,
+                        lease=symbol_lease,
                         **({"client_order_id": order_intent.intent_id} if order_intent else {}),
                     )
                 else:
@@ -1426,7 +1562,7 @@ def scanner_cache_wrapper():
         # 💡 이미 실행 중인 이벤트 루프가 있는 경우 (FastAPI/uvicorn 내부 등)
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.ensure_future(refresh_scanner_cache())
+            _schedule_background_task(refresh_scanner_cache(), "scanner_cache")
         else:
             loop.run_until_complete(refresh_scanner_cache())
 
@@ -1441,13 +1577,21 @@ async def async_trading_loop():
             logger.info("[Scheduler] Previous loop still running. Skipping this cycle.")
             return
         is_processing = True
+
     db = SessionLocal()
     try:
         # 1. 자동매매 기동 중인 활성 유저 리스트 로드
         active_users = db.query(UserSettings).filter(UserSettings.is_running == True).all()
         if not active_users:
-            is_processing = False
             return
+
+        # SIMULATED 모드인 유저들의 미체결 지정가 주문(UnfilledOrder)을 주기적으로 평가/체결 처리합니다.
+        for u in active_users:
+            trade_mode = getattr(u, "trade_mode", "SIMULATED") or "SIMULATED"
+            if trade_mode.upper() == "SIMULATED":
+                from app.bot.simulated_broker import LocalSimulatedBroker
+                sim_broker = LocalSimulatedBroker(db_settings=u)
+                sim_broker.process_unfilled_orders(db)
 
         active_user_ids = [u.user_id for u in active_users]
         holding_user_ids = {
@@ -1466,22 +1610,27 @@ async def async_trading_loop():
                 return
         exchange_rate = FXRateCache.get_rate()
 
+        watchlists_by_user = load_watchlist_tickers_by_user(db, active_user_ids)
+
+        # Eagerly close db session before starting remote / async calls
+        db.close()
+        db = None
+
         sentiment = await check_market_sentiment()
         market_signals = latest_scanned_signals
-        watchlists_by_user = load_watchlist_tickers_by_user(db, active_user_ids)
 
         # 3. 각 활성 유저별 자동매매 시나리오 병렬 실행
         tasks = []
-        for user in active_users:
+        for user_id in active_user_ids:
             signal_map, all_signals = build_user_signal_context(
-                user.user_id,
+                user_id,
                 market_signals,
                 watchlists_by_user,
                 latest_watchlist_signals,
             )
             tasks.append(
                 run_user_trading_flow(
-                    user.user_id,
+                    user_id,
                     signal_map,
                     all_signals,
                     exchange_rate,
@@ -1491,12 +1640,15 @@ async def async_trading_loop():
             )
         await asyncio.gather(*tasks)
 
-    except Exception as e:
-        db.rollback()
+    except Exception:
         logger.exception("[Scheduler] CRITICAL ERROR in trading loop")
     finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
         is_processing = False
-        db.close()
 
 def trading_loop_wrapper():
     try:
@@ -1505,7 +1657,7 @@ def trading_loop_wrapper():
         # 💡 이미 실행 중인 이벤트 루프가 있는 경우 (FastAPI/uvicorn 내부 등)
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.ensure_future(async_trading_loop())
+            _schedule_background_task(async_trading_loop(), "trading_loop")
         else:
             loop.run_until_complete(async_trading_loop())
 
@@ -1516,7 +1668,7 @@ def reconcile_open_orders_wrapper():
     except RuntimeError:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.ensure_future(reconcile_open_orders_once())
+            _schedule_background_task(reconcile_open_orders_once(), "broker_order_reconciliation")
         else:
             loop.run_until_complete(reconcile_open_orders_once())
 
@@ -1526,18 +1678,22 @@ def discover_orphan_orders_wrapper():
 
 async def admin_balance_cache_sync():
     """
-    1분 단위로 모든 관리대상 유저의 잔고를 백그라운드에서 조회하여
-    AccountEquitySnapshot을 갱신합니다.
+    Refresh admin account-equity snapshots without holding a DB connection
+    during broker/network balance calls.
     """
+    targets = []
     db = SessionLocal()
     try:
-        users = db.query(User).all()
-        exchange_rate = FXRateCache.get_rate()
-
+        users = (
+            db.query(User)
+            .options(selectinload(User.settings).selectinload(UserSettings.credentials))
+            .all()
+        )
         for user in users:
             settings = user.settings
             if not settings:
                 continue
+
             is_simulated = settings.trade_mode == "SIMULATED"
             has_verified_cred = False
             if not is_simulated and settings.broker_provider:
@@ -1546,64 +1702,89 @@ async def admin_balance_cache_sync():
                         has_verified_cred = True
                         break
 
-            if is_simulated or has_verified_cred:
-                broker = get_broker_client(settings)
-                try:
-                    balance = await safe_broker_call(broker.get_account_balance)
-                    if not isinstance(balance, dict):
-                        continue
-                    total_asset = balance.get("total_asset")
-                    if total_asset is None or not math.isfinite(float(total_asset)):
-                        continue
-                    profit_rate = float(balance.get("profit_rate", 0.0))
+            if not (is_simulated or has_verified_cred):
+                continue
 
-                    captured_at = utc_now_aware()
-                    latest_snapshot = (
-                        db.query(AccountEquitySnapshot)
+            try:
+                broker = get_broker_client(settings)
+            except Exception as exc:
+                logger.warning(f"[Admin Cache Sync] Broker creation failed for user {user.username}: {exc}")
+                continue
+
+            targets.append({
+                "user_id": user.id,
+                "username": user.username,
+                "trade_mode": settings.trade_mode,
+                "broker": broker,
+            })
+    except Exception:
+        logger.exception("[Admin Cache Sync] CRITICAL ERROR while loading users")
+        return
+    finally:
+        db.expunge_all()
+        db.close()
+
+    exchange_rate = FXRateCache.get_rate()
+
+    for target in targets:
+        try:
+            balance = await safe_broker_call(target["broker"].get_account_balance)
+            if not isinstance(balance, dict):
+                continue
+            total_asset = balance.get("total_asset")
+            if total_asset is None or not math.isfinite(float(total_asset)):
+                continue
+            profit_rate = float(balance.get("profit_rate", 0.0))
+
+            captured_at = utc_now_aware()
+            snapshot_db = SessionLocal()
+            try:
+                latest_snapshot = (
+                    snapshot_db.query(AccountEquitySnapshot)
+                    .filter(
+                        AccountEquitySnapshot.user_id == target["user_id"],
+                        AccountEquitySnapshot.trade_mode == target["trade_mode"],
+                    )
+                    .order_by(AccountEquitySnapshot.captured_at.desc())
+                    .first()
+                )
+                should_record = (
+                    latest_snapshot is None
+                    or (captured_at - latest_snapshot.captured_at).total_seconds() >= 60
+                )
+                if should_record:
+                    snapshot_db.add(AccountEquitySnapshot(
+                        user_id=target["user_id"],
+                        total_asset=float(total_asset),
+                        cash_balance=balance.get("cash_balance"),
+                        stock_balance=balance.get("stock_balance"),
+                        profit_rate=profit_rate,
+                        fx_rate=balance.get("fx_rate", exchange_rate),
+                        trade_mode=target["trade_mode"],
+                        captured_at=captured_at,
+                    ))
+                    snapshot_db.flush()
+
+                    expired_snapshots = (
+                        snapshot_db.query(AccountEquitySnapshot)
                         .filter(
-                            AccountEquitySnapshot.user_id == user.id,
-                            AccountEquitySnapshot.trade_mode == settings.trade_mode,
+                            AccountEquitySnapshot.user_id == target["user_id"],
+                            AccountEquitySnapshot.trade_mode == target["trade_mode"],
                         )
                         .order_by(AccountEquitySnapshot.captured_at.desc())
-                        .first()
+                        .offset(500)
+                        .all()
                     )
-                    should_record = (
-                        latest_snapshot is None
-                        or (captured_at - latest_snapshot.captured_at).total_seconds() >= 60
-                    )
-                    if should_record:
-                        db.add(AccountEquitySnapshot(
-                            user_id=user.id,
-                            total_asset=float(total_asset),
-                            cash_balance=balance.get("cash_balance"),
-                            stock_balance=balance.get("stock_balance"),
-                            profit_rate=profit_rate,
-                            fx_rate=balance.get("fx_rate", exchange_rate),
-                            trade_mode=settings.trade_mode,
-                            captured_at=captured_at,
-                        ))
-                        db.flush()
-
-                        expired_snapshots = (
-                            db.query(AccountEquitySnapshot)
-                            .filter(
-                                AccountEquitySnapshot.user_id == user.id,
-                                AccountEquitySnapshot.trade_mode == settings.trade_mode,
-                            )
-                            .order_by(AccountEquitySnapshot.captured_at.desc())
-                            .offset(500)
-                            .all()
-                        )
-                        for expired_snapshot in expired_snapshots:
-                            db.delete(expired_snapshot)
-                        db.commit()
-                except Exception as e:
-                    logger.warning(f"[Admin Cache Sync] Error for user {user.username}: {e}")
-                    db.rollback()
-    except Exception as e:
-        logger.exception("[Admin Cache Sync] CRITICAL ERROR")
-    finally:
-        db.close()
+                    for expired_snapshot in expired_snapshots:
+                        snapshot_db.delete(expired_snapshot)
+                    snapshot_db.commit()
+            except Exception:
+                snapshot_db.rollback()
+                raise
+            finally:
+                snapshot_db.close()
+        except Exception as exc:
+            logger.warning(f"[Admin Cache Sync] Error for user {target['username']}: {exc}")
 
 def admin_balance_cache_wrapper():
     try:
@@ -1611,7 +1792,7 @@ def admin_balance_cache_wrapper():
     except RuntimeError:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.ensure_future(admin_balance_cache_sync())
+            _schedule_background_task(admin_balance_cache_sync(), "admin_balance_cache")
         else:
             loop.run_until_complete(admin_balance_cache_sync())
 

@@ -25,6 +25,8 @@ BROKER_REGISTRY = {
         "client_class": TossClient,
         "broker_classes": {
             "SIMULATED": LocalSimulatedBroker,
+            "MOCK": TossBroker,
+            "REAL": TossBroker,
         },
     },
 }

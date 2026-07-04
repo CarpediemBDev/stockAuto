@@ -13,6 +13,24 @@ def run_migrations_programmatically():
     core_dir = os.path.dirname(os.path.abspath(__file__))
     app_dir = os.path.dirname(core_dir)
     backend_dir = os.path.dirname(app_dir)
+
+    from app.core.database import IS_SQLITE_DATABASE
+    if IS_SQLITE_DATABASE:
+        from app.core.locks import acquire_bootstrap_file_lock
+        from filelock import Timeout
+        lock = acquire_bootstrap_file_lock()
+        logger.info(f"[Migration] SQLite 파일 락 획득 시도 중...")
+        try:
+            with lock:
+                logger.info("[Migration] SQLite 파일 락 획득 성공. 마이그레이션을 실행합니다...")
+                _run_migrations_internal(backend_dir)
+        except Timeout:
+            logger.critical("[Migration] 60초 내에 SQLite 마이그레이션 파일 락을 획득하지 못해 대기 타임아웃되었습니다.")
+            raise RuntimeError("Database migration timeout: lock could not be acquired")
+    else:
+        _run_migrations_internal(backend_dir)
+
+def _run_migrations_internal(backend_dir: str):
     ini_path = os.path.join(backend_dir, "alembic.ini")
 
     # Alembic 설정 객체 로드
@@ -70,6 +88,7 @@ def run_migrations_programmatically():
     except Exception as e:
         logger.error(f"[Migration] 마이그레이션 중 오류 발생: {e}", exc_info=True)
         raise e
+
 
 def seed_competitive_users():
     """대결 참가용 5대 경쟁 어드민 유저 자동 Seeding"""

@@ -3,7 +3,7 @@ import asyncio
 import math
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -25,9 +25,16 @@ from app.core.models import (
     AccountEquitySnapshot,
     ActionLog,
     BrokerCredential,
+    SystemSetting,
     User,
     UserSettings,
     utc_now_aware,
+)
+from app.core.system_settings import (
+    SYSTEM_SETTING_SPECS,
+    SystemSettingError,
+    parse_system_setting_value,
+    upsert_system_setting_in_session,
 )
 
 from app.core.response import SuccessResponseRoute
@@ -38,6 +45,9 @@ class SettingsUpdateSchema(BaseModel):
     broker_provider: Optional[str] = None
     telegram_chat_id: Optional[str] = None
     telegram_enabled: Optional[bool] = False
+
+class SystemSettingUpdateSchema(BaseModel):
+    value: Any
 
 class CredentialSchema(BaseModel):
     trade_mode: str
@@ -54,6 +64,7 @@ EQUITY_SNAPSHOT_INTERVAL_SECONDS = 60
 EQUITY_SNAPSHOT_RETENTION_LIMIT = 500
 BACKTEST_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 BACKTEST_TICKER_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.-]{0,14}$")
+CREDENTIAL_KEY_ONLY_MODE = "KEY_ONLY"
 PLACEHOLDER_VALUES = {
     "YOUR_APP_KEY_HERE",
     "your_virtual_app_key_here",
@@ -74,6 +85,13 @@ def _normalize_trade_mode(mode: str) -> str:
             detail="지원하지 않는 트레이딩 모드입니다. SIMULATED, MOCK, REAL 중 하나를 선택하세요.",
         )
     return normalized
+
+
+def _normalize_credential_mode(mode: str) -> str:
+    normalized = (mode or "").upper().strip()
+    if normalized == CREDENTIAL_KEY_ONLY_MODE:
+        return CREDENTIAL_KEY_ONLY_MODE
+    return _normalize_trade_mode(normalized)
 
 
 def _normalize_broker_provider(provider: Optional[str]) -> str:
@@ -207,6 +225,34 @@ def _settings_response(db_settings: UserSettings) -> dict:
         "simulated_initial_cash_krw": app_settings.SIMULATED_INITIAL_CASH_KRW,
     }
 
+def _system_setting_response(key: str, row: Optional[SystemSetting] = None) -> dict:
+    spec = SYSTEM_SETTING_SPECS[key]
+    value = spec.default
+    updated_at = None
+    updated_by = None
+
+    if row is not None:
+        try:
+            value = parse_system_setting_value(row.value, row.value_type)
+        except SystemSettingError:
+            logger.warning("[Admin] Invalid system setting value for %s. Using default.", key)
+            value = spec.default
+        updated_at = row.updated_at.isoformat() if row.updated_at else None
+        updated_by = row.updated_by
+
+    return {
+        "key": key,
+        "value": value,
+        "default": spec.default,
+        "value_type": spec.value_type,
+        "category": spec.category,
+        "description": spec.description,
+        "is_runtime": spec.is_runtime,
+        "is_public": spec.is_public,
+        "updated_at": updated_at,
+        "updated_by": updated_by,
+    }
+
 def _ensure_db_settings(current_user: User, db: Session) -> UserSettings:
     db_settings = current_user.settings
     if not db_settings:
@@ -232,14 +278,9 @@ def _verify_credential_values(
     account_no: Optional[str],
     user_id: int,
 ) -> tuple[bool, str]:
-    mode = _normalize_trade_mode(trade_mode)
+    mode = _normalize_credential_mode(trade_mode)
     if mode == "SIMULATED":
         return True, f"SIMULATED 모드는 {broker_name} 통신 검증이 필요하지 않습니다."
-
-    try:
-        broker_name = ensure_broker_supports_trade_mode(broker_name, mode)
-    except ValueError as exc:
-        return False, str(exc)
 
     missing_fields = []
     if _is_missing_or_placeholder(app_key): missing_fields.append("APP KEY")
@@ -248,6 +289,18 @@ def _verify_credential_values(
 
     if missing_fields:
         return False, f"{broker_name} 연동 정보가 누락되었거나 기본값입니다: {', '.join(missing_fields)}"
+
+    if mode == CREDENTIAL_KEY_ONLY_MODE:
+        try:
+            broker_name = normalize_broker_provider(broker_name)
+        except ValueError as exc:
+            return False, str(exc)
+        return True, f"{broker_name} 인증키가 암호화 저장 대상으로 확인되었습니다. 거래 실행 전 별도 통신 검증이 필요합니다."
+
+    try:
+        broker_name = ensure_broker_supports_trade_mode(broker_name, mode)
+    except ValueError as exc:
+        return False, str(exc)
 
     class TempCred:
         def __init__(self):
@@ -333,6 +386,51 @@ def update_user_settings(
     db.refresh(db_settings)
     return _settings_response(db_settings)
 
+@router.get("/system-settings")
+def list_system_settings(
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    del current_user
+    registered_keys = list(SYSTEM_SETTING_SPECS.keys())
+    rows = (
+        db.query(SystemSetting)
+        .filter(SystemSetting.key.in_(registered_keys))
+        .all()
+    )
+    rows_by_key = {row.key: row for row in rows}
+    return {
+        "settings": [
+            _system_setting_response(key, rows_by_key.get(key))
+            for key in registered_keys
+        ]
+    }
+
+@router.patch("/system-settings/{key}")
+def update_system_setting(
+    key: str,
+    payload: SystemSettingUpdateSchema,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        row = upsert_system_setting_in_session(
+            db,
+            key=key,
+            value=payload.value,
+            updated_by=current_user.id,
+        )
+        db.commit()
+        db.refresh(row)
+        return _system_setting_response(key, row)
+    except SystemSettingError as exc:
+        if hasattr(db, "rollback"):
+            db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
 @router.post("/credentials/verify")
 def verify_credential(
     payload: CredentialSchema,
@@ -359,14 +457,15 @@ def save_credential(
             status_code=status.HTTP_409_CONFLICT,
             detail="미해결 주문 재조정 중에는 인증정보를 변경할 수 없습니다.",
         )
-    trade_mode = _normalize_trade_mode(payload.trade_mode)
+    trade_mode = _normalize_credential_mode(payload.trade_mode)
     if trade_mode == "SIMULATED":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="SIMULATED 모드는 인증정보 저장이 필요하지 않습니다.",
+            detail="SIMULATED 모드에서 인증정보를 미리 저장하려면 KEY_ONLY 모드를 사용하세요.",
         )
     broker_name = _normalize_broker_provider(payload.broker_name)
-    _ensure_broker_mode_supported(broker_name, trade_mode)
+    if trade_mode != CREDENTIAL_KEY_ONLY_MODE:
+        _ensure_broker_mode_supported(broker_name, trade_mode)
 
     success, message = _verify_credential_values(
         trade_mode,
@@ -386,15 +485,20 @@ def save_credential(
         db.add(cred)
 
     try:
-        cred.app_key = encrypt_credential(payload.app_key)
-        cred.app_secret = encrypt_credential(payload.app_secret)
-        cred.account_no = encrypt_credential(payload.account_no)
+        cred.app_key = payload.app_key
+        cred.app_secret = payload.app_secret
+        cred.account_no = payload.account_no
     except CredentialCryptoError:
         _raise_crypto_http_error()
 
-    cred.verification_status = "verified"
-    cred.verified_trade_mode = trade_mode
-    cred.verified_at = utc_now_aware()
+    if trade_mode == CREDENTIAL_KEY_ONLY_MODE:
+        cred.verification_status = "stored"
+        cred.verified_trade_mode = None
+        cred.verified_at = None
+    else:
+        cred.verification_status = "verified"
+        cred.verified_trade_mode = trade_mode
+        cred.verified_at = utc_now_aware()
 
     if not db_settings.broker_provider:
         db_settings.broker_provider = broker_name

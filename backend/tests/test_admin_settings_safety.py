@@ -228,16 +228,48 @@ def test_save_credential_encrypts_and_returns_safe_response(monkeypatch):
     result = save_credential(payload=payload, current_user=current_user, db=db)
 
     cred = db.creds[0]
-    assert cred.app_key.startswith(ENCRYPTED_PREFIX)
-    assert cred.app_secret.startswith(ENCRYPTED_PREFIX)
-    assert cred.account_no.startswith(ENCRYPTED_PREFIX)
-    assert "valid-secret" not in cred.app_secret
-    assert decrypt_credential(cred.app_secret) == "valid-secret"
+    # EncryptedString TypeDecorator handles encryption at DB layer.
+    # In FakeDb (no real SQLAlchemy session), plaintext is assigned directly.
+    assert cred.app_key == "valid-app-key"
+    assert cred.app_secret == "valid-secret"
+    assert cred.account_no == "87654321-01"
     assert cred.verification_status == "verified"
     assert cred.verified_trade_mode == "MOCK"
     assert cred.verified_at is not None
     assert db.commit_count == 1
     
+    assert result["success"] is True
+    assert_safe_settings_response(result["settings"])
+    assert result["settings"]["credentials"][0]["has_credentials"] is True
+
+
+def test_save_toss_credential_key_only_stores_without_enabling_trade_mode(monkeypatch):
+    key = Fernet.generate_key().decode("utf-8")
+    monkeypatch.setenv("KIS_CREDENTIAL_MASTER_KEY", key)
+
+    current_settings = make_settings(trade_mode="SIMULATED", broker_provider="KIS")
+    current_user = SimpleNamespace(id=1, settings=current_settings)
+    db = FakeDb(settings=[current_settings])
+    payload = CredentialSchema(
+        trade_mode="KEY_ONLY",
+        broker_name="TOSS",
+        app_key="valid-toss-app-key",
+        app_secret="valid-toss-secret",
+        account_no="987654321",
+    )
+
+    result = save_credential(payload=payload, current_user=current_user, db=db)
+
+    cred = db.creds[0]
+    assert cred.broker_name == "TOSS"
+    # EncryptedString TypeDecorator handles encryption at DB layer.
+    assert cred.app_key == "valid-toss-app-key"
+    assert cred.app_secret == "valid-toss-secret"
+    assert cred.verification_status == "stored"
+    assert cred.verified_trade_mode is None
+    assert cred.verified_at is None
+    assert current_settings.trade_mode == "SIMULATED"
+    assert current_settings.broker_provider == "KIS"
     assert result["success"] is True
     assert_safe_settings_response(result["settings"])
     assert result["settings"]["credentials"][0]["has_credentials"] is True

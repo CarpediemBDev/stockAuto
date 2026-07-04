@@ -1,8 +1,11 @@
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import requests
-import json
 from datetime import datetime, timedelta
 from app.core.credentials import decrypt_credential
 from app.core.exceptions import StockAutoException
+
+
+ZERO_DECIMAL = Decimal("0")
 
 class TossClient:
     def __init__(self, db_credential=None, trade_mode: str = "SIMULATED"):
@@ -28,14 +31,12 @@ class TossClient:
             None, ""
         }
         if (self.app_key in placeholder_keys or
-            self.app_secret in placeholder_keys or
-            not self.account_no or
-            self.account_no in ["00000000", "your_account_no_here", ""]):
+            self.app_secret in placeholder_keys):
             
             from app.core.exceptions import StockAutoException
             raise StockAutoException(
                 code="INVALID_TOSS_CREDENTIALS",
-                message="토스증권(TOSS) API 연동 키가 누락되었거나 유효하지 않습니다.",
+                message="토스증권(TOSS) API 연동 키(APP_KEY, APP_SECRET)가 누락되었거나 유효하지 않습니다.",
                 status_code=400
             )
 
@@ -44,6 +45,34 @@ class TossClient:
         self.token = None
         self.token_expired_at = None
         self.account_seq = None
+
+    @staticmethod
+    def _parse_decimal(value, default: Decimal = ZERO_DECIMAL) -> Decimal:
+        try:
+            if value is None or value == "":
+                return default
+            return Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return default
+
+    @staticmethod
+    def _to_int_amount(value: Decimal) -> int:
+        return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+    def _headers(self, token: str, account_seq: str | int | None = None, json_content: bool = False) -> dict:
+        headers = {"Authorization": f"Bearer {token}"}
+        if account_seq is not None:
+            headers["X-Tossinvest-Account"] = str(account_seq)
+        if json_content:
+            headers["Content-Type"] = "application/json"
+        return headers
+
+    def _currency_bucket_to_krw(self, bucket: dict | None, exchange_rate: float) -> Decimal:
+        if not isinstance(bucket, dict):
+            return ZERO_DECIMAL
+        krw = self._parse_decimal(bucket.get("krw"))
+        usd = self._parse_decimal(bucket.get("usd"))
+        return krw + (usd * self._parse_decimal(exchange_rate))
 
     def get_access_token(self) -> str | None:
         """
@@ -83,7 +112,7 @@ class TossClient:
             print(f"[Toss API] Exception during token request: {e}")
             return None
 
-    def get_account_sequence(self) -> str | None:
+    def get_account_sequence(self) -> str | int | None:
         """
         주문/조회 시 필수 헤더로 사용되는 사용자의 계좌 시퀀스(accountSeq)를 가져옵니다.
         """
@@ -95,9 +124,7 @@ class TossClient:
             return None
 
         url = f"{self.base_url}/api/v1/accounts"
-        headers = {
-            "Authorization": f"Bearer {token}"
-        }
+        headers = self._headers(token)
 
         try:
             res = requests.get(url, headers=headers, timeout=5)
@@ -123,7 +150,7 @@ class TossClient:
 
     def get_account_balance(self, exchange_rate: float | None = None) -> dict:
         """
-        토스증권 자산 API를 통해 전체 자산 요약을 획득하고 KIS 반환 형식과 규격을 맞춥니다.
+        토스증권 보유 주식/매수 가능 금액 API를 조합해 KIS 반환 형식과 규격을 맞춥니다.
         """
         token = self.get_access_token()
         account_seq = self.get_account_sequence()
@@ -138,57 +165,51 @@ class TossClient:
         if exchange_rate is None:
             exchange_rate = FXRateCache.get_rate()
 
-        url = f"{self.base_url}/api/v1/assets"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "X-Tossinvest-Account": account_seq
-        }
-
         try:
-            res = requests.get(url, headers=headers, timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                result = data.get("result", {})
-                summary = result.get("summary", {})
-                if (
-                    not isinstance(summary, dict)
-                    or "totalAssetAmount" not in summary
-                ):
-                    raise StockAutoException(
-                        code="TOSS_BALANCE_UNAVAILABLE",
-                        message="토스증권 자산 응답에 총자산 정보가 없습니다.",
-                        status_code=502,
-                    )
-                
-                # 금액 파싱 (문자열로 응답되므로 형변환 시 예외 가드 장착)
-                def parse_amount(val, default=0.0):
-                    try:
-                        return float(val or default)
-                    except (ValueError, TypeError):
-                        return default
-
-                total_asset = int(parse_amount(summary.get("totalAssetAmount")))
-                cash_balance = int(parse_amount(summary.get("cashBalance")))
-                evaluate_amount = int(parse_amount(summary.get("totalEvaluateAmount")))
-                profit_rate = parse_amount(summary.get("totalProfitLossRate"))
-                profit_loss = int(parse_amount(summary.get("totalProfitLossAmount")))
-
-                return {
-                    "total_asset": total_asset,
-                    "cash_balance": cash_balance,
-                    "stock_balance": evaluate_amount,
-                    "profit_rate": profit_rate,
-                    "profit_loss": profit_loss,
-                    "fx_rate": exchange_rate,
-                    "is_mock": not self.is_real,
-                    "provider": "TOSS"
-                }
-            else:
+            holdings = self.get_holdings_payload()
+            market_value = holdings.get("marketValue", {})
+            profit_loss_payload = holdings.get("profitLoss", {})
+            if (
+                "marketValue" not in holdings
+                or "profitLoss" not in holdings
+                or not isinstance(market_value, dict)
+                or not isinstance(profit_loss_payload, dict)
+            ):
                 raise StockAutoException(
                     code="TOSS_BALANCE_UNAVAILABLE",
-                    message=f"토스증권 자산 조회에 실패했습니다. HTTP {res.status_code}",
+                    message="토스증권 보유 주식 응답에 평가금액 정보가 없습니다.",
                     status_code=502,
                 )
+
+            stock_balance_decimal = self._currency_bucket_to_krw(
+                market_value.get("amount"),
+                exchange_rate,
+            )
+            profit_loss_decimal = self._currency_bucket_to_krw(
+                profit_loss_payload.get("amount"),
+                exchange_rate,
+            )
+            cash_balance_decimal = (
+                self.get_buying_power("KRW")
+                + (self.get_buying_power("USD") * self._parse_decimal(exchange_rate))
+            )
+            profit_rate_decimal = self._parse_decimal(profit_loss_payload.get("rate")) * Decimal("100")
+
+            cash_balance = self._to_int_amount(cash_balance_decimal)
+            stock_balance = self._to_int_amount(stock_balance_decimal)
+            total_asset = cash_balance + stock_balance
+            profit_loss = self._to_int_amount(profit_loss_decimal)
+
+            return {
+                "total_asset": total_asset,
+                "cash_balance": cash_balance,
+                "stock_balance": stock_balance,
+                "profit_rate": float(profit_rate_decimal),
+                "profit_loss": profit_loss,
+                "fx_rate": exchange_rate,
+                "is_mock": not self.is_real,
+                "provider": "TOSS"
+            }
         except StockAutoException:
             raise
         except Exception as e:
@@ -217,26 +238,25 @@ class TossClient:
             return {"rt_cd": "9", "msg1": "No valid token or account sequence", "msg_cd": "AUTH_ERROR"}
 
         url = f"{self.base_url}/api/v1/orders"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "X-Tossinvest-Account": account_seq,
-            "Content-Type": "application/json"
-        }
+        headers = self._headers(token, account_seq, json_content=True)
 
-        # 가격이 0 이하이거나 시장가 성격인 경우 MARKET, 지정가는 LIMIT
-        order_type = "MARKET" if price <= 0 else "LIMIT"
-        
         body = {
-            "symbol": ticker,
+            "symbol": ticker.upper(),
             "side": side.upper(),
-            "orderType": order_type,
-            "quantity": str(quantity)
+            "timeInForce": "DAY",
+            "quantity": str(quantity),
         }
-        if order_type == "LIMIT":
-            body["price"] = f"{price:.2f}"
+        
+        if price <= 0:
+            body["orderType"] = "MARKET"
+        else:
+            body["orderType"] = "LIMIT"
+            body["price"] = f"{self._parse_decimal(price):.2f}"
+        if client_order_id:
+            body["clientOrderId"] = client_order_id[:64]
 
         try:
-            res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
+            res = requests.post(url, headers=headers, json=body, timeout=10)
             data = res.json()
             # 표준 API envelope: {"code": "SUCCESS", "message": "...", "result": {"orderId": "..."}}
             # KISBroker는 rt_cd 가 "0"일 때 성공 처리하므로 토스 응답 코드를 KIS 호환 형태로 매핑해 줍니다.
@@ -279,10 +299,7 @@ class TossClient:
             return None
 
         url = f"{self.base_url}/api/v1/orders/{order_id}"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "X-Tossinvest-Account": account_seq
-        }
+        headers = self._headers(token, account_seq)
 
         try:
             res = requests.get(url, headers=headers, timeout=5)
@@ -295,7 +312,7 @@ class TossClient:
             print(f"[Toss API] Exception during order status query: {e}")
             return None
 
-    def get_order_history(self, status: str = "OPEN") -> list | None:
+    def get_order_history(self, status: str = "OPEN", start_date: str | None = None, end_date: str | None = None) -> list | None:
         """
         토스증권 주문 목록(이력) 조회 API
         """
@@ -305,18 +322,22 @@ class TossClient:
             return None
 
         url = f"{self.base_url}/api/v1/orders"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "X-Tossinvest-Account": account_seq
-        }
-        params = {}
-        if status:
-            params["status"] = status
+        headers = self._headers(token, account_seq)
+        params = {"status": status or "OPEN"}
+        if start_date:
+            params["from"] = start_date
+        if end_date:
+            params["to"] = end_date
 
         try:
             res = requests.get(url, headers=headers, params=params, timeout=5)
             if res.status_code == 200:
-                return res.json().get("result", [])
+                result = res.json().get("result", {})
+                if isinstance(result, dict):
+                    return result.get("orders", [])
+                if isinstance(result, list):
+                    return result
+                return []
             else:
                 print(f"[Toss API] Order history query failed (Status {res.status_code}): {res.text}")
                 return None
@@ -324,29 +345,86 @@ class TossClient:
             print(f"[Toss API] Exception during order history query: {e}")
             return None
 
-    def get_assets(self) -> list:
+    def get_holdings_payload(self) -> dict:
         """
-        토스증권 상세 보유 자산 리스트 조회 API
+        토스증권 공식 보유 주식 조회 API의 result 객체를 반환합니다.
         """
         token = self.get_access_token()
         account_seq = self.get_account_sequence()
         if not token or not account_seq:
-            return []
+            raise StockAutoException(
+                code="INVALID_TOSS_CREDENTIALS",
+                message="토스증권 API 토큰 또는 계좌 시퀀스를 발급받지 못했습니다.",
+                status_code=400,
+            )
 
-        url = f"{self.base_url}/api/v1/assets"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "X-Tossinvest-Account": account_seq
-        }
+        url = f"{self.base_url}/api/v1/holdings"
+        headers = self._headers(token, account_seq)
 
         try:
             res = requests.get(url, headers=headers, timeout=10)
             if res.status_code == 200:
                 data = res.json()
-                return data.get("result", {}).get("assets", [])
-            else:
-                print(f"[Toss API] Assets list query failed (Status {res.status_code}): {res.text}")
-                return []
+                result = data.get("result", {})
+                if isinstance(result, dict):
+                    return result
+                return {}
+            raise StockAutoException(
+                code="TOSS_BALANCE_UNAVAILABLE",
+                message=f"토스증권 보유 주식 조회에 실패했습니다. HTTP {res.status_code}",
+                status_code=502,
+            )
+        except StockAutoException:
+            raise
         except Exception as e:
-            print(f"[Toss API] Exception during assets list query: {e}")
-            return []
+            raise StockAutoException(
+                code="TOSS_BALANCE_UNAVAILABLE",
+                message="토스증권 보유 주식을 조회하지 못했습니다.",
+                status_code=502,
+            ) from e
+
+    def get_buying_power(self, currency: str) -> Decimal:
+        token = self.get_access_token()
+        account_seq = self.get_account_sequence()
+        if not token or not account_seq:
+            raise StockAutoException(
+                code="INVALID_TOSS_CREDENTIALS",
+                message="토스증권 API 토큰 또는 계좌 시퀀스를 발급받지 못했습니다.",
+                status_code=400,
+            )
+
+        normalized_currency = (currency or "").upper()
+        if normalized_currency not in {"KRW", "USD"}:
+            raise ValueError(f"Unsupported Toss buying power currency: {currency}")
+
+        url = f"{self.base_url}/api/v1/buying-power"
+        headers = self._headers(token, account_seq)
+        try:
+            res = requests.get(
+                url,
+                headers=headers,
+                params={"currency": normalized_currency},
+                timeout=10,
+            )
+            if res.status_code == 200:
+                result = res.json().get("result", {})
+                return self._parse_decimal(result.get("cashBuyingPower"))
+            raise StockAutoException(
+                code="TOSS_BALANCE_UNAVAILABLE",
+                message=f"토스증권 매수 가능 금액 조회에 실패했습니다. HTTP {res.status_code}",
+                status_code=502,
+            )
+        except StockAutoException:
+            raise
+        except Exception as e:
+            raise StockAutoException(
+                code="TOSS_BALANCE_UNAVAILABLE",
+                message="토스증권 매수 가능 금액을 조회하지 못했습니다.",
+                status_code=502,
+            ) from e
+
+    def get_assets(self) -> list:
+        """
+        기존 TossBroker 소비자를 위한 호환 래퍼입니다.
+        """
+        return self.get_holdings_payload().get("items", [])

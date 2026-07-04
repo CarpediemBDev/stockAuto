@@ -32,3 +32,25 @@
 - **격리성 유지 (Isolation):** 대규모 Bulk 처리 방식이 갖는 "연대 책임(한 유저의 에러로 전체 트랜잭션 롤백)" 리스크를 피하기 위해, 여전히 **1인 단위로 커넥션을 맺고 닫습니다.**
 - **Offline Lock:** Phase 2 진행 도중 유저가 UI에서 수동 개입하는 것을 막기 위해, 기존에 구현된 `RedisLock`(`acquire_user_operation_lock`)을 적극 활용하여 트랜잭션 무결성을 보장합니다.
 - **Lazy Loading 금지:** Phase 1에서 세션을 닫기 때문에, 필요한 연관 데이터(예: `User.settings`, `Holding.user`)는 반드시 조회 시점(Phase 1)에 Eager Loading(`joinedload` 등)으로 미리 모두 가져오거나, 세션 분리 전에 접근해 두어야 `DetachedInstanceError`가 발생하지 않습니다.
+
+## 4. 고성능 동시성 제어 3중 방어선 (Lock-Free 지향)
+
+위의 Micro-Session Pattern을 기반으로 트랜잭션을 분리했을 때 필연적으로 발생하는 **Lost Update (중복 차감)** 및 **Double Fill (중복 체결)** 이슈를 완벽히 막아내기 위해, 시스템을 느리게 만드는 수동 비관적 락(`FOR UPDATE`)이나 캐시 맹신 꼼수(`expire_on_commit=False`)를 배제하고 글로벌 금융 표준 방어선을 채택했습니다.
+
+### 방어선 1: 애플리케이션 분산 락 (Redis)
+*   **역할**: 가장 바깥쪽에서 동일 종목/동일 사용자의 동시 접근을 1차로 줄 세우는 방어막.
+*   **구현**: `acquire_symbol_order_lock()`, `acquire_user_operation_lock()`
+*   **한계 보완**: 서버 재시작, 파이썬 GC 정지 등에 의해 락이 풀리는 찰나의 순간을 막기 위해 아래의 DB 레벨 방어선(2, 3)을 반드시 병행합니다.
+
+### 방어선 2: DB 엔진의 원자적 업데이트 (Atomic In-place Update) + 멱등성 (Idempotency)
+*   **적용 영역**: 잔고(`Holding` 수량 증감), 주문 체결과 같은 **핵심 금융 연산 영역**.
+*   **원자적 연산 (Atomic Update)**:
+    파이썬이 값을 읽고 계산해서 다시 넣는(Read-Modify-Write) 비관적 방식을 버렸습니다. 대신 `UPDATE holdings SET quantity = quantity - X WHERE quantity >= X` 라는 단일 SQL 쿼리를 날려, **DB 엔진이 찰나의 순간(0.001초 미만)에 직접 락을 걸고 계산과 검증까지 끝내도록** 위임합니다.
+*   **멱등성 키 검증 (Idempotency Key)**:
+    증권사 주문 체결을 DB에 기록하기 전, 고유한 주문 번호(`order_no`)를 기반으로 `TradeLog`를 조회합니다. 네트워크 지연으로 인해 동일한 체결 요청이 2번 들어오더라도 여기서 100% 튕겨냅니다.
+
+### 방어선 3: 낙관적 락 (Optimistic Locking)
+*   **적용 영역**: 사용자 설정(`UserSettings`), 종목 뷰 상태 등 충돌이 잦지만 돈과 직결되지 않는 상태 관리 영역.
+*   **구현 원리**: `models.py`의 테이블에 `version_id_col`을 추가했습니다. 두 스레드가 동시에 읽고 쓸 때, 간발의 차이로 늦게 도착한 업데이트 쿼리는 `version_id`가 맞지 않아 `StaleDataError`를 내며 튕겨나갑니다. 대기(Wait) 시간 없이 가장 빠르고 쾌적하게 충돌을 방지합니다.
+
+이러한 **3단 콤보 하이브리드 방어선** 구축을 통해, 파이썬 서버의 네트워크 지연이 DB 락 병목으로 이어지는 참사를 원천 차단하고 향후 PostgreSQL 환경에서도 극강의 처리량을 보장합니다.

@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import httpx
+from concurrent.futures import ThreadPoolExecutor
 from app.core.config import settings
 from app.bot.broker_factory import get_broker_client
 from app.core.database import SessionLocal
@@ -11,6 +12,7 @@ from app.core.logging import logger
 # 글로벌 텔레그램 봇 단일 스레드 제어 변수
 _global_poll_thread = None
 _global_stop_event = None
+_telegram_executor = None
 
 def send_message_sync(user_id: int, text: str) -> bool:
     """
@@ -141,7 +143,11 @@ def _poll_global_updates_loop():
                             if not text:
                                 continue
 
-                            _process_global_message(msg_chat_id, text)
+                            # ThreadPoolExecutor에 메시지 처리 위임하여 롱폴링 루프 및 메인 스레드 대기 방지
+                            if _telegram_executor:
+                                _telegram_executor.submit(_process_global_message, msg_chat_id, text)
+                            else:
+                                _process_global_message(msg_chat_id, text)
                 elif res.status_code == 401 or res.status_code == 404:
                     logger.warning(f"[TelegramBot] Token invalid or unauthorized ({res.status_code}). Polling thread sleeping 30s...")
                     _global_stop_event.wait(30)
@@ -163,6 +169,8 @@ def _process_global_message(msg_chat_id: str, text: str):
         return
     cmd = parts[0].lower()
 
+    command_user_id = None
+    direct_message = None
     db = SessionLocal()
     try:
         # 1. 이미 이 챗 ID를 사용하는 유저가 있는지 조회
@@ -193,10 +201,10 @@ def _process_global_message(msg_chat_id: str, text: str):
                         f"• `/run` - 자율 트레이딩 자동매매 루프 가동\n"
                         f"• `/stop` - 자율 트레이딩 자동매매 루프 정지"
                     )
-                    _send_direct_message(msg_chat_id, msg)
+                    direct_message = msg
                     logger.info(f"[TelegramBot] Successfully linked Chat ID {msg_chat_id} to User: {user.username}")
                 else:
-                    _send_direct_message(msg_chat_id, "⚠️ 존재하지 않는 사용자명입니다. 웹의 연동 시작 링크를 통해 다시 접속해 주세요.")
+                    direct_message = "⚠️ 존재하지 않는 사용자명입니다. 웹의 연동 시작 링크를 통해 다시 접속해 주세요."
             else:
                 # 일반적인 /start 호출 등 가입되지 않은 경우 안내
                 msg = (
@@ -205,20 +213,25 @@ def _process_global_message(msg_chat_id: str, text: str):
                     "우리 주식 자동매매 웹 페이지의 **개인 투자 설정 ➔ Telegram Bridge** 탭에서 제공하는 "
                     "**[🔗 텔레그램 연동 시작]** 버튼을 클릭하여 간편하게 연동을 마무리해 주세요!"
                 )
-                _send_direct_message(msg_chat_id, msg)
+                direct_message = msg
             return
 
         # 2. 이미 연동된 유저의 경우 활성화 여부(telegram_enabled) 검증
         if not db_settings.telegram_enabled:
-            _send_direct_message(msg_chat_id, "⚠️ 텔레그램 알림 연동이 비활성화 상태입니다. 웹 페이지의 개인 투자 설정에서 활성화해 주세요.")
+            direct_message = "⚠️ 텔레그램 알림 연동이 비활성화 상태입니다. 웹 페이지의 개인 투자 설정에서 활성화해 주세요."
             return
 
-        _process_command(db_settings.user_id, text)
+        command_user_id = db_settings.user_id
 
     except Exception as e:
         logger.exception("[TelegramBot] Global message processing error")
     finally:
         db.close()
+        if direct_message is not None:
+            _send_direct_message(msg_chat_id, direct_message)
+
+    if command_user_id is not None:
+        _process_command(command_user_id, text)
 
 def _process_command(user_id: int, text: str):
     """
@@ -230,6 +243,17 @@ def _process_command(user_id: int, text: str):
     cmd = parts[0].lower()
 
     db = SessionLocal()
+
+    def close_db():
+        nonlocal db
+        if db is not None:
+            db.close()
+            db = None
+
+    def send_reply(message: str) -> bool:
+        close_db()
+        return send_message_sync(user_id, message)
+
     try:
         db_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
         if not db_settings:
@@ -243,33 +267,31 @@ def _process_command(user_id: int, text: str):
                 f"• `/run` - 자율 트레이딩 자동매매 루프 가동\n"
                 f"• `/stop` - 자율 트레이딩 자동매매 루프 정지"
             )
-            send_message_sync(user_id, msg)
+            send_reply(msg)
 
         elif cmd == "/run":
             if db_settings.is_running:
-                send_message_sync(user_id, "⚠️ *이미 자동매매 루프가 가동 중입니다.*")
+                send_reply("⚠️ *이미 자동매매 루프가 가동 중입니다.*")
             else:
                 from app.bot.order_reconciler import has_unresolved_orders
 
                 if has_unresolved_orders(db, user_id):
-                    send_message_sync(
-                        user_id,
-                        "⚠️ *미해결 증권사 주문이 있어 시작할 수 없습니다.*\n"
+                    send_reply("⚠️ *미해결 증권사 주문이 있어 시작할 수 없습니다.*\n"
                         "자동 재조정이 완료될 때까지 기다려 주세요.",
                     )
                 else:
                     db_settings.is_running = True
                     db.commit()
-                    send_message_sync(user_id, "🟢 *자율 트레이딩 자동매매 루프를 가동했습니다.*")
+                    send_reply("🟢 *자율 트레이딩 자동매매 루프를 가동했습니다.*")
 
         elif cmd == "/stop":
             if not db_settings.is_running:
                 db.commit()
-                send_message_sync(user_id, "⚠️ *이미 자동매매 루프가 정지되어 있습니다.*")
+                send_reply("⚠️ *이미 자동매매 루프가 정지되어 있습니다.*")
             else:
                 db_settings.is_running = False
                 db.commit()
-                send_message_sync(user_id, "🔴 *자율 트레이딩 자동매매 루프를 정지했습니다.*")
+                send_reply("🔴 *자율 트레이딩 자동매매 루프를 정지했습니다.*")
 
         elif cmd == "/status":
             mode = db_settings.trade_mode
@@ -277,6 +299,9 @@ def _process_command(user_id: int, text: str):
 
             # 사용자 맞춤형 브로커 인스턴스 획득
             broker = get_broker_client(db_settings)
+            status_text = "🟢 *가동 중*" if db_settings.is_running else "🔴 *정지됨*"
+            close_db()
+            fallback_warning = ""
             try:
                 balance = broker.get_account_balance()
                 total_asset = balance.get("total_asset", 0)
@@ -284,12 +309,32 @@ def _process_command(user_id: int, text: str):
                 stock_balance = balance.get("stock_balance", 0)
                 profit_rate = balance.get("profit_rate", 0.0)
             except Exception as e:
-                total_asset, cash_balance, stock_balance, profit_rate = 0, 0, 0, 0.0
-                logger.exception(f"[TelegramBot User {user_id}] Account balance fetch failed")
+                logger.exception(f"[TelegramBot User {user_id}] Account balance fetch failed. Using fallback snapshot.")
+                # 데이터베이스 내 가장 최신의 자산 스냅샷 정보를 조회하여 대체 제공
+                from app.core.models import AccountEquitySnapshot
+                snapshot_db = SessionLocal()
+                try:
+                    snapshot = snapshot_db.query(AccountEquitySnapshot).filter(
+                        AccountEquitySnapshot.user_id == user_id
+                    ).order_by(AccountEquitySnapshot.captured_at.desc()).first()
+                finally:
+                    snapshot_db.close()
+                if snapshot:
+                    total_asset = snapshot.total_asset
+                    cash_balance = snapshot.cash_balance or 0.0
+                    stock_balance = snapshot.stock_balance or 0.0
+                    profit_rate = snapshot.profit_rate or 0.0
+                    fallback_warning = "⚠️ KIS API 장애/지연 발생으로 최종 성공 자산 스냅샷 정보를 제공합니다."
+                else:
+                    total_asset, cash_balance, stock_balance, profit_rate = 0.0, 0.0, 0.0, 0.0
+                    fallback_warning = "⚠️ KIS API 장애/지연 발생 및 백업 스냅샷이 존재하지 않습니다."
 
             fx_rate = FXRateCache.get_rate()
-            holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
-            status_text = "🟢 *가동 중*" if db_settings.is_running else "🔴 *정지됨*"
+            holdings_db = SessionLocal()
+            try:
+                holdings = holdings_db.query(Holding).filter(Holding.user_id == user_id).all()
+            finally:
+                holdings_db.close()
 
             msg = (
                 f"🤖 *StockAuto 실시간 시스템 상태*\n"
@@ -304,6 +349,8 @@ def _process_command(user_id: int, text: str):
                 f"• *실시간 누적 수익률:* `{profit_rate:+.2f}%`\n\n"
                 f"📈 *보유 포트폴리오 (총 {len(holdings)}개)*\n"
             )
+            if fallback_warning:
+                msg = f"{fallback_warning}\n\n" + msg
 
             if not holdings:
                 msg += "• 보유 중인 해외주식이 없습니다."
@@ -313,16 +360,21 @@ def _process_command(user_id: int, text: str):
                         f"• *{h.ticker}* ({h.ticker_name})\n"
                         f"  └ 수량: `{h.quantity}주` | 평단: `${h.avg_price:,.2f}`\n"
                     )
-            send_message_sync(user_id, msg)
+            send_reply(msg)
 
         else:
-            send_message_sync(user_id, "❓ *알 수 없는 명령어입니다.*\n사용 가능한 명령어: `/status`, `/run`, `/stop`")
+            send_reply("❓ *알 수 없는 명령어입니다.*\n사용 가능한 명령어: `/status`, `/run`, `/stop`")
 
     except Exception as e:
         logger.exception(f"[TelegramBot User {user_id}] Command execution error")
-        send_message_sync(user_id, f"⚠️ *명령어 실행 중 오류 발생:* {str(e)}")
+        if db is not None:
+            try:
+                db.rollback()  # 💡 예외 발생 시 트랜잭션 롤백 및 커넥션 오염 방지
+            except Exception:
+                pass
+        send_reply(f"⚠️ *명령어 실행 중 오류 발생:* {str(e)}")
     finally:
-        db.close()
+        close_db()
 
 def send_daily_report_to_all_users_sync() -> dict:
     """
@@ -381,19 +433,15 @@ def send_daily_report_to_all_users_sync() -> dict:
 
 def send_daily_report_to_user_sync(user_id: int):
     """
-    특정 사용자에게만 당일 매매 성적을 텔레그램으로 발송합니다. (수동 트리거용)
+    특정 사용자에게 당일 매매 성적을 텔레그램으로 발송합니다.
     """
     from datetime import UTC, datetime, timedelta
     from app.core.models import TradeLog
 
     db = SessionLocal()
     try:
+        # 최근 24시간 거래 내역
         cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=24)
-
-        u = db.query(UserSettings).filter(UserSettings.user_id == user_id, UserSettings.telegram_enabled == True).first()
-        if not u:
-            return
-
         sells = db.query(TradeLog).filter(
             TradeLog.user_id == user_id,
             TradeLog.trade_type == "SELL",
@@ -432,7 +480,7 @@ def start_telegram_bot():
     """
     서버 구동 시 단일 글로벌 텔레그램 봇 폴링 스레드를 기동합니다.
     """
-    global _global_poll_thread, _global_stop_event
+    global _global_poll_thread, _global_stop_event, _telegram_executor
 
     token = settings.TELEGRAM_BOT_TOKEN
     if not token or token == "your_telegram_bot_token_here":
@@ -442,6 +490,7 @@ def start_telegram_bot():
     if _global_poll_thread and _global_poll_thread.is_alive():
         return
 
+    _telegram_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="TelegramExecutor")
     _global_stop_event = threading.Event()
     _global_poll_thread = threading.Thread(
         target=_poll_global_updates_loop,
@@ -455,9 +504,12 @@ def stop_telegram_bot():
     """
     서버 종료 시 가동 중인 글로벌 텔레그램 스레드를 정지시킵니다.
     """
-    global _global_poll_thread, _global_stop_event
+    global _global_poll_thread, _global_stop_event, _telegram_executor
     if _global_stop_event:
         _global_stop_event.set()
     if _global_poll_thread and _global_poll_thread.is_alive():
         _global_poll_thread.join(timeout=3)
         logger.info("[TelegramBot] Global Polling thread stopped successfully.")
+    if _telegram_executor:
+        _telegram_executor.shutdown(wait=False)
+        _telegram_executor = None

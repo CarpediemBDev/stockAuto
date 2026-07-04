@@ -1,11 +1,6 @@
-import os
-import tempfile
-from pathlib import Path
-
 from cryptography.fernet import Fernet
 
 from app.core.credentials import decrypt_credential, encrypt_credential
-from scripts.rotate_master_key import rotate_environment
 
 
 def test_multi_fernet_decryption_fallback(monkeypatch):

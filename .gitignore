@@ -24,6 +24,7 @@ backend/app/scanner/node_modules/
 frontend/.next/
 frontend/out/
 frontend/build/
+frontend/*.log
 frontend/.env*
 !frontend/.env.*.example
 
@@ -36,6 +37,7 @@ frontend/.env*
 
 # Gemini / Antigravity
 .gemini/
+.agents/
 **/__pycache__/
 
 

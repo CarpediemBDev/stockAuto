@@ -119,3 +119,18 @@ class BaseBroker(ABC):
     def get_order_metadata(self, ticker: str, session: str) -> dict:
         """주문 사전 원장에 저장할 거래소와 주문 구분 코드를 반환합니다."""
         pass
+
+    def modify_order(
+        self,
+        ticker: str,
+        original_order_no: str,
+        quantity: int,
+        price: float,
+        qty_all_ord_yn: str = "Y",
+    ) -> dict:
+        """주문을 정정합니다."""
+        raise NotImplementedError("This broker does not support order modification.")
+
+    def get_best_ask_bid(self, ticker: str) -> dict:
+        """최우선 매수/매도 호가를 조회합니다."""
+        raise NotImplementedError("This broker does not support best ask/bid lookup.")

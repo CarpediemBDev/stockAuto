@@ -73,13 +73,20 @@ export function useTimezone() {
     return opt;
   });
 
-  const resolvedTimezone = selectedTimezone.id === 'local'
-    ? {
-        ...selectedTimezone,
-        label: mounted ? `접속 기기 시간 (${browserAbbr})` : '접속 기기 시간',
-        abbr: browserAbbr,
-      }
-    : selectedTimezone;
+  // mounted가 false일 때는 무조건 첫 번째 기본 옵션(local)으로 고정하여 Hydration Mismatch를 차단
+  const resolvedTimezone = mounted
+    ? (selectedTimezone.id === 'local'
+      ? {
+          ...selectedTimezone,
+          label: `접속 기기 시간 (${browserAbbr})`,
+          abbr: browserAbbr,
+        }
+      : selectedTimezone)
+    : {
+        ...TIMEZONE_OPTIONS[0],
+        label: '접속 기기 시간',
+        abbr: 'LCL',
+      };
 
   return {
     selectedTimezone: resolvedTimezone,

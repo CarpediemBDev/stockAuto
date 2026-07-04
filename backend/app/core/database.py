@@ -1,7 +1,7 @@
 import os
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import QueuePool, NullPool
 from app.core.config import APP_ENV
 
 # app/core/database.py의 위치를 기준으로 backend 루트 디렉터리에 있는 stockauto.db 경로를 절대 경로로 도출합니다.
@@ -47,10 +47,7 @@ if IS_SQLITE_DATABASE:
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL,
         connect_args={"check_same_thread": False, "timeout": 15},
-        poolclass=QueuePool,
-        pool_size=50,
-        max_overflow=100,
-        pool_timeout=60,
+        poolclass=NullPool,
     )
     event.listen(engine, "connect", set_sqlite_pragma)
 else:
@@ -72,13 +69,3 @@ def get_db():
     finally:
         db.close()
 
-from contextlib import contextmanager
-
-@contextmanager
-def micro_session():
-    """스케줄러 등 백그라운드 작업에서 단발성 트랜잭션을 위한 컨텍스트 매니저."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()

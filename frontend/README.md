@@ -20,7 +20,7 @@ npm run local
 
 ## 🛠 주요 기술 스택
 
-- **Next.js 15 (App Router)**: 최신 웹 프레임워크 기술 적용
+- **Next.js 16 (App Router)**: 최신 웹 프레임워크 기술 적용
 - **Tailwind CSS**: 프리미엄 다크 모드 UI 구현
 - **Lucide React**: 현대적인 벡터 아이콘 시스템
 - **Framer Motion**: 부드러운 UI 애니메이션 및 전환 효과

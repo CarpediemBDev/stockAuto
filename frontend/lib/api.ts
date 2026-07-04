@@ -194,6 +194,7 @@ export const tradeAPI = {
 export const accountAPI = {
   getBalance: (config?: AxiosRequestConfig) => api.get('/account/balance', config),
   getHoldings: (config?: AxiosRequestConfig) => api.get('/account/holdings', config),
+  getHistory: (config?: AxiosRequestConfig) => api.get('/account/history', config),
   resetBalance: () => api.post('/account/reset-balance'),
   forceLiquidate: () => api.post('/account/force-liquidate'),
 };
@@ -234,6 +235,8 @@ export const reportAPI = {
 export const adminAPI = {
   getSettings: (config?: AxiosRequestConfig) => api.get('/admin', config),
   saveSettings: (payload: Record<string, unknown>) => api.post('/admin', payload),
+  getSystemSettings: (config?: AxiosRequestConfig) => api.get('/admin/system-settings', config),
+  updateSystemSetting: (key: string, payload: Record<string, unknown>) => api.patch(`/admin/system-settings/${key}`, payload),
   verifyAndSaveCredentials: (payload: Record<string, unknown>) => api.post('/admin/credentials/verify-and-save', payload),
   deleteCredential: (provider: string) => api.delete(`/admin/credentials/${provider}`),
   getUsers: (config?: AxiosRequestConfig) => api.get('/admin/users', config),

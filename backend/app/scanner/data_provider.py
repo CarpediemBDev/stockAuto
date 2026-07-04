@@ -82,25 +82,27 @@ def _run_yfinance_cached(cache: dict, cache_key, ttl: float, fetcher):
         _write_cache(cache, cache_key, value)
         return _clone_cached(value)
 
+
+
 async def fetch_ohlcv(
     ticker: str,
     interval: str = "1h",
     period: str = "5d",
     start=None,
     end=None,
-    prepost: bool = False,
+    prepost: bool = True,
 ) -> pd.DataFrame:
     """
     지정한 단일 종목의 OHLCV 데이터를 비동기로 안전하게 가져오고 MultiIndex 컬럼을 단일화합니다.
     (💡 10초 전역 캐싱 적용 - 중복 요출 원천 차단)
     """
-    cache_key = (ticker, interval, period, str(start), str(end), prepost)
+    cache_key = (ticker, interval, period, str(start), str(end), True)
     try:
         download_kwargs = {
             "interval": interval,
             "progress": False,
             "threads": False,
-            "prepost": prepost,
+            "prepost": True,
         }
         if start is not None or end is not None:
             download_kwargs.update({"start": start, "end": end})
@@ -143,7 +145,7 @@ async def fetch_bulk_ohlcv(
     group_by: str = "ticker",
     start=None,
     end=None,
-    prepost: bool = False,
+    prepost: bool = True,
 ) -> pd.DataFrame:
     """
     여러 종목의 OHLCV 데이터를 벌크(대량)로 다운로드합니다.
@@ -158,7 +160,7 @@ async def fetch_bulk_ohlcv(
         group_by,
         str(start),
         str(end),
-        prepost,
+        True,
     )
     try:
         download_kwargs = {
@@ -166,7 +168,7 @@ async def fetch_bulk_ohlcv(
             "group_by": group_by,
             "progress": False,
             "threads": False,
-            "prepost": prepost,
+            "prepost": True,
         }
         if start is not None or end is not None:
             download_kwargs.update({"start": start, "end": end})
@@ -246,7 +248,7 @@ def fetch_bulk_ohlcv_sync(tickers: list, interval: str, period: str, group_by: s
     """
     if not tickers:
         return pd.DataFrame()
-    cache_key = (tuple(sorted(tickers)), interval, period, group_by)
+    cache_key = (tuple(sorted(tickers)), interval, period, group_by, True)
     try:
         data = _run_yfinance_cached(
             _bulk_ohlcv_cache,
@@ -258,7 +260,8 @@ def fetch_bulk_ohlcv_sync(tickers: list, interval: str, period: str, group_by: s
                 interval=interval,
                 group_by=group_by,
                 progress=False,
-                threads=False
+                threads=False,
+                prepost=True
             )
         )
         return data
@@ -287,14 +290,14 @@ def fetch_ohlcv_sync(ticker: str, interval: str = "1h", period: str = "5d") -> p
     단일 종목의 OHLCV 데이터를 동기식으로 안전하게 가져오고 MultiIndex 컨럼을 단일화합니다. (동기 API/메서드용)
     (💡 10초 전역 캐싱 적용 - 비동기 fetch_ohlcv와 캐시 공유)
     """
-    cache_key = (ticker, interval, period)
+    cache_key = (ticker, interval, period, True)
     try:
         data = _run_yfinance_cached(
             _ohlcv_cache,
             cache_key,
             OHLCV_CACHE_TTL,
             lambda: _normalize_ohlcv(
-                yf.download(ticker, period=period, interval=interval, progress=False, threads=False)
+                yf.download(ticker, period=period, interval=interval, progress=False, threads=False, prepost=True)
             )
         )
         return data if not data.empty else pd.DataFrame()

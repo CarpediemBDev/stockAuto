@@ -67,35 +67,42 @@ export function BacktestTournament() {
   const [activeEndDate, setActiveEndDate] = useState("2025-12-31");
   const [selectedStrategy, setSelectedStrategy] = useState<StrategyResult | null>(null);
 
-  const fetcher = async ([, start, end]: [string, string, string]) => {
+  interface BacktestResponse {
+    status: 'processing' | 'done';
+    data: StrategyResult[];
+  }
+
+  const formatMoneyUSD = (amount: number | null | undefined): string => {
+    if (amount === null || amount === undefined || isNaN(Number(amount))) {
+      return "$0.00";
+    }
+    return `$${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
+  const fetcher = async ([, start, end]: [string, string, string]): Promise<BacktestResponse> => {
     const res = await adminAPI.getBacktestTournament({
       params: { start_date: start, end_date: end }
     });
     if (res.status === 202 || res.data?.status === 'processing') {
-      const err = new Error('processing');
-      err.name = 'ProcessingError';
-      throw err;
+      return { status: 'processing', data: [] };
     }
-    return res.data?.data || res.data || [];
+    const strategyData = res.data?.data || res.data || [];
+    return { status: 'done', data: Array.isArray(strategyData) ? strategyData : [] };
   };
 
-  const { data = [], error, isLoading } = useSWR<StrategyResult[]>(
+  const { data: resData, isLoading } = useSWR<BacktestResponse>(
     ['backtest', activeStartDate, activeEndDate],
     fetcher,
     {
-      refreshInterval: () => {
-        // We throw an error in fetcher when processing.
-        // We rely on errorRetryInterval to retry when an error is thrown.
-        return 0;
+      refreshInterval: (currentData) => {
+        return currentData?.status === 'processing' ? 15000 : 0;
       },
-      errorRetryInterval: 15000,
       revalidateOnFocus: false,
-      shouldRetryOnError: true,
-      errorRetryCount: 100, // Retry indefinitely until processing finishes
     }
   );
 
-  const isPolling = error && error.name === 'ProcessingError';
+  const isPolling = resData?.status === 'processing';
+  const data = resData?.data || [];
   const loading = isLoading || isPolling;
 
   const handleRunSimulation = () => {
@@ -159,19 +166,29 @@ export function BacktestTournament() {
   const getChartData = () => {
     if (!data || data.length === 0) return [];
     
-    // 첫 번째 성적 기준 타임라인 소싱
-    const baseCurve = data[0].equity_curve || [];
+    // 1. 모든 전략의 모든 타임스탬프 합집합을 구한 뒤 시간순 정렬
+    const allTimestamps = Array.from(
+      new Set(
+        data.flatMap(strat => (strat.equity_curve || []).map(entry => entry.timestamp))
+      )
+    ).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+
+    // 2. 정렬된 타임라인 기준으로 각 전략의 자산 값을 매핑 (데이터가 없을 경우 직전 자산 값으로 Forward-fill)
+    const lastSeenAssets: Record<string, number> = {};
     
-    return baseCurve.map((entry, index) => {
-      const dateOnly = entry.timestamp.split(' ')[0]; // YYYY-MM-DD
+    return allTimestamps.map((ts) => {
+      const dateOnly = ts.split(' ')[0];
       const chartItem: Record<string, string | number> = { timestamp: dateOnly };
       
       data.forEach((strat) => {
-        const curvePoint = strat.equity_curve?.[index] || strat.equity_curve?.[strat.equity_curve.length - 1];
-        if (curvePoint) {
-          chartItem[strat.name] = Math.round(curvePoint.total);
+        const point = (strat.equity_curve || []).find(entry => entry.timestamp === ts);
+        if (point) {
+          lastSeenAssets[strat.name] = Math.round(point.total);
         }
+        // 이 시점에 기록이 없으면 직전 기록을 사용하여 수평 유지 (결과 왜곡 방지)
+        chartItem[strat.name] = lastSeenAssets[strat.name] !== undefined ? lastSeenAssets[strat.name] : 0;
       });
+      
       return chartItem;
     });
   };
@@ -386,7 +403,7 @@ export function BacktestTournament() {
                                 {r.selection_score !== undefined ? r.selection_score.toFixed(2) : '-'}
                               </td>
                               <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-300">
-                                ${r.final_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {formatMoneyUSD(r.final_value)}
                               </td>
                               <td className="py-3.5 px-4">
                                 {getReturnBadge(r.total_return_rate)}
@@ -443,7 +460,7 @@ export function BacktestTournament() {
                           </span>
                           <span className={`text-base font-mono font-extrabold block
                             ${selectedStrategy.total_pnl > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            ${selectedStrategy.total_pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatMoneyUSD(selectedStrategy.total_pnl)}
                           </span>
                         </div>
                         <div className="bg-zinc-900/40 rounded-xl p-3.5 border border-zinc-800/40">
@@ -539,7 +556,7 @@ export function BacktestTournament() {
                                 ) : (
                                   <>
                                     <span className={isProfit ? 'text-emerald-400' : 'text-rose-400'}>
-                                      ${stat.pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      {formatMoneyUSD(stat.pnl)}
                                     </span>
                                     <div className="w-1.5 h-6 rounded bg-zinc-900 overflow-hidden shrink-0">
                                       <div 

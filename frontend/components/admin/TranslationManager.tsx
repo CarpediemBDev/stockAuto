@@ -91,18 +91,26 @@ export function TranslationManager() {
     }
   };
 
-  const handleDelete = async (id: number, ticker: string) => {
-    if (!confirm(`${ticker} 번역 매핑을 정말 삭제하시겠습니까?\n삭제 즉시 메모리 캐시에서도 분리됩니다.`)) {
-      return;
-    }
-
-    try {
-      await translationAPI.delete(id);
-      toast.success(`${ticker} 번역 매핑이 성공적으로 제거되었습니다.`);
-      setRefreshTrigger(prev => prev + 1);
-    } catch (error) {
-      toast.error(`삭제 실패: ${getErrorMessage(error)}`);
-    }
+  const handleDelete = (id: number, ticker: string) => {
+    toast(`"${ticker}" 번역 매핑을 정말 삭제하시겠습니까?`, {
+      description: "삭제 즉시 메모리 캐시에서도 분리됩니다.",
+      action: {
+        label: "삭제",
+        onClick: async () => {
+          try {
+            await translationAPI.delete(id);
+            toast.success(`${ticker} 번역 매핑이 제거되었습니다.`);
+            setRefreshTrigger(prev => prev + 1);
+          } catch (error) {
+            toast.error(`삭제 실패: ${getErrorMessage(error)}`);
+          }
+        }
+      },
+      cancel: {
+        label: "취소",
+        onClick: () => {}
+      }
+    });
   };
 
   const filteredTranslations = translations.filter(
