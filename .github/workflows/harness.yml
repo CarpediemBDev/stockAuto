@@ -15,6 +15,10 @@ jobs:
       # config.py의 settings = Settings()가 import 시점에 REDIS_URL을 요구한다.
       # 미제공 시 alembic(모델 import)과 backend pytest가 동시에 붕괴한다.
       REDIS_URL: redis://localhost:6379/0
+      # 아래 두 값은 CI 테스트 전용 throwaway이며 실제 자격증명이 아니다.
+      # credentials.py(Fernet 암복호 왕복 테스트)와 security.py(JWT)가 요구한다.
+      KIS_CREDENTIAL_MASTER_KEY: XxCUKEeJ32QDI0VCBbD1-JmcJ03cJ9zUuBGpiP2DiGs=
+      JWT_SECRET_KEY: ci-test-only-jwt-secret-not-for-production-use
 
     services:
       redis:
