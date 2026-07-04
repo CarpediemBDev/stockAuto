@@ -112,6 +112,9 @@ class UserSettings(Base):
     strategy_type = Column(String, default="regime_switching", nullable=False)
 
     updated_at = Column(AwareDateTime, default=utc_now_aware, onupdate=utc_now_aware)
+    version_id = Column(Integer, default=1, nullable=False)
+
+    __mapper_args__ = {"version_id_col": version_id}
 
     # Relationships
     user = relationship("User", back_populates="settings")
@@ -177,6 +180,9 @@ class Holding(Base):
     buy_stage = Column(Integer, default=1)          # ⭐ v2.0 후지모토 시게루식 피라미딩 단계 (1, 2, 3단계)
     strategy_type = Column(String, default="regime_switching", nullable=False)
     updated_at = Column(AwareDateTime, default=utc_now_aware, onupdate=utc_now_aware)
+    version_id = Column(Integer, default=1, nullable=False)
+
+    __mapper_args__ = {"version_id_col": version_id}
 
     # Relationships
     user = relationship("User", back_populates="holdings")

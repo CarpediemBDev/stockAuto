@@ -195,22 +195,6 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
 
   return (
     <>
-      {/* 뉴스 마퀴 CSS 주입 */}
-      <style>{`
-        @keyframes portfolioTicker {
-          0%   { transform: translateX(100%); }
-          100% { transform: translateX(-100%); }
-        }
-        .portfolio-news-ticker {
-          animation: portfolioTicker 18s linear infinite;
-          white-space: nowrap;
-          display: inline-block;
-        }
-        .portfolio-news-ticker:hover {
-          animation-play-state: paused;
-        }
-      `}</style>
-
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {holdings.map((h) => {
           const cleanTicker = h.ticker.replace(/^[A-Z0-9]+_/, "");
@@ -218,8 +202,8 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
           const strategyBadgeClass = "bg-blue-500/15 text-blue-400 border-blue-500/30";
 
           const currentPrice = h.current_price !== undefined ? h.current_price : h.avg_price * 1.02;
-          const profitRate = ((currentPrice - h.avg_price) / h.avg_price) * 100;
-          const dropFromPeak = ((currentPrice - h.highest_price) / h.highest_price) * 100;
+          const profitRate = h.avg_price > 0 ? ((currentPrice - h.avg_price) / h.avg_price) * 100 : 0;
+          const dropFromPeak = h.highest_price > 0 ? ((currentPrice - h.highest_price) / h.highest_price) * 100 : 0;
           const news = newsMap[cleanTicker];
 
           return (

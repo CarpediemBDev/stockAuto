@@ -289,6 +289,14 @@ class LocalSimulatedBroker(BaseBroker):
             if is_filled:
                 filled_price = order.price
                 if order.trade_type == "BUY":
+                    # [글로벌 아키텍처 2] 멱등성 키(Idempotency Key) 방어선: 이미 처리된 체결인지 고유 order_no로 확인
+                    existing_log = db.query(TradeLog).filter(TradeLog.order_no == order.order_no).first()
+                    if existing_log:
+                        print(f"[SimulatedBroker] BUY order {order.order_no} already processed (Idempotency Guard). Skipping.")
+                        db.delete(order)
+                        db.commit()
+                        continue
+
                     h = db.query(Holding).filter(
                         Holding.user_id == order.user_id,
                         Holding.ticker == order.ticker,
@@ -336,6 +344,16 @@ class LocalSimulatedBroker(BaseBroker):
                     ))
 
                 elif order.trade_type == "SELL":
+                    from sqlalchemy import update
+                    
+                    # [글로벌 아키텍처 2] 멱등성 키(Idempotency Key) 방어선: 이미 처리된 체결인지 고유 order_no로 확인
+                    existing_log = db.query(TradeLog).filter(TradeLog.order_no == order.order_no).first()
+                    if existing_log:
+                        print(f"[SimulatedBroker] SELL order {order.order_no} already processed (Idempotency Guard). Skipping.")
+                        db.delete(order)
+                        db.commit()
+                        continue
+
                     h = db.query(Holding).filter(
                         Holding.user_id == order.user_id,
                         Holding.ticker == order.ticker,
@@ -348,15 +366,28 @@ class LocalSimulatedBroker(BaseBroker):
                         db.commit()
                         continue
 
-                    if order.quantity > h.quantity:
-                        print(f"[SimulatedBroker] SELL unfilled order {order.order_no} quantity {order.quantity} exceeds Holding quantity {h.quantity} for {order.ticker}. Clamping to available.")
-                        if h.quantity <= 0:
-                            db.delete(order)
-                            db.commit()
-                            continue
-                        sell_qty = h.quantity
-                    else:
-                        sell_qty = order.quantity
+                    sell_qty = order.quantity if order.quantity <= h.quantity else h.quantity
+                    if sell_qty <= 0:
+                        db.delete(order)
+                        db.commit()
+                        continue
+
+                    # [글로벌 아키텍처 1] 파이썬 계산을 버리고 DB 레벨 Atomic In-place Update 실행
+                    update_stmt = (
+                        update(Holding)
+                        .where(
+                            Holding.id == h.id,
+                            Holding.quantity >= sell_qty  # 원자성: 잔고가 뺄셈하려는 수량보다 크거나 같을 때만 DB가 허가함
+                        )
+                        .values(quantity=Holding.quantity - sell_qty)
+                    )
+                    res = db.execute(update_stmt)
+                    
+                    # 만약 찰나의 순간 다른 스레드가 수량을 빼가서 조건에 안 맞게 되었다면(Rowcount 0), 롤백 후 다음 사이클로 넘김
+                    if res.rowcount == 0:
+                        print(f"[SimulatedBroker] Atomic Update Failed: Insufficient quantity for {order.ticker} during execution.")
+                        db.rollback()
+                        continue
 
                     fee_rate = fee_rate_for_trade_mode("SIMULATED")
                     pnl = calculate_realized_pnl(
@@ -381,10 +412,10 @@ class LocalSimulatedBroker(BaseBroker):
                         return_rate=pnl.return_rate
                     ))
 
-                    if sell_qty >= h.quantity:
+                    # Atomic 차감 후 남은 수량이 0 이하라면(즉 h.quantity - sell_qty == 0) 삭제
+                    # (여기서 h 객체는 DB와 분리되어 있으므로 수동 평가하거나 쿼리로 지움)
+                    if (h.quantity - sell_qty) <= 0:
                         db.delete(h)
-                    else:
-                        h.quantity -= sell_qty
 
                 db.delete(order)
                 db.commit()

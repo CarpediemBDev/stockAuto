@@ -181,3 +181,15 @@ npm run dev     # 개발 로컬 서버 구동
 npm run build   # 프로덕션 빌드 무결성 확인
 npm run lint    # ESLint 정적 분석 통과 검증
 ```
+
+---
+
+## 👥 9. 멀티 에이전트 협업 프로토콜 (Multi-Agent Collaboration Protocol)
+
+*   **자율적 분업 구조**: 대형 기능 구현, 복잡한 아키텍처 변경, 고도화된 검증이 필요한 경우, 메인 에이전트는 독립된 역할을 수행하는 서브에이전트를 동적으로 정의(`define_subagent`)하고 소환(`invoke_subagent`)하여 협업해야 합니다.
+*   **3대 협업 에이전트 핵심 역할 정의**:
+    1.  **Codebase Researcher (`research` - 읽기 전용)**: 구현 시작 전, 중복 비즈니스 로직(SSOT)의 검색 및 변경 영향도 지도를 작성하는 코드 분석 전문가.
+    2.  **Critical Auditor (`critical_auditor` - 읽기 전용)**: 구현 완료 후, 수동적 승인을 배제하고 소수점 오차, 비동기 레이스 컨디션 등 엣지 케이스를 최소 3개 이상 도출하는 까칠한 감사관.
+    3.  **QA & Harness (`qa_harness` - 읽기/쓰기/실행 권한)**: 로컬 컴파일, 정적 분석(ESLint/TypeScript), 카오스 퍼징 및 롤백 안전 검증 테스트의 자율 실행과 무결성을 확인하는 검증 전문가.
+*   **세부 명세 및 프롬프트 주입**: 서브에이전트를 생성할 때는 반드시 프로젝트 루트의 **`skills/multi-agent-collaboration/SKILL.md`**를 최우선으로 읽고, 정의된 시스템 프롬프트(System Prompt)와 도구 제약을 그대로 복사 및 주입하여 가동해야 합니다.
+

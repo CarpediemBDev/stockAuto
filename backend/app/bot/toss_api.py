@@ -31,14 +31,12 @@ class TossClient:
             None, ""
         }
         if (self.app_key in placeholder_keys or
-            self.app_secret in placeholder_keys or
-            not self.account_no or
-            self.account_no in ["00000000", "your_account_no_here", ""]):
+            self.app_secret in placeholder_keys):
             
             from app.core.exceptions import StockAutoException
             raise StockAutoException(
                 code="INVALID_TOSS_CREDENTIALS",
-                message="토스증권(TOSS) API 연동 키가 누락되었거나 유효하지 않습니다.",
+                message="토스증권(TOSS) API 연동 키(APP_KEY, APP_SECRET)가 누락되었거나 유효하지 않습니다.",
                 status_code=400
             )
 
@@ -242,21 +240,18 @@ class TossClient:
         url = f"{self.base_url}/api/v1/orders"
         headers = self._headers(token, account_seq, json_content=True)
 
-        if price <= 0:
-            return {
-                "rt_cd": "9",
-                "msg1": "토스증권 시장가 수량 주문은 아직 StockAuto에서 지원하지 않습니다.",
-                "msg_cd": "UNSUPPORTED_TOSS_MARKET_ORDER",
-            }
-        
         body = {
             "symbol": ticker.upper(),
             "side": side.upper(),
-            "orderType": "LIMIT",
             "timeInForce": "DAY",
             "quantity": str(quantity),
-            "price": f"{self._parse_decimal(price):.2f}",
         }
+        
+        if price <= 0:
+            body["orderType"] = "MARKET"
+        else:
+            body["orderType"] = "LIMIT"
+            body["price"] = f"{self._parse_decimal(price):.2f}"
         if client_order_id:
             body["clientOrderId"] = client_order_id[:64]
 

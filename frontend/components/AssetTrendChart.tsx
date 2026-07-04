@@ -5,7 +5,6 @@ import { TradeLog } from "./TradeLogs";
 import { accountAPI, isCancel } from "@/lib/api";
 import { reportHandledError } from "@/lib/utils";
 
-
 interface AssetTrendChartProps {
   displayCurrency: "KRW" | "USD";
   logs: TradeLog[];
@@ -16,19 +15,24 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [realTotalAsset, setRealTotalAsset] = useState<number | null>(null);
   const [fxRate, setFxRate] = useState<number>(1350);
+  const [historyData, setHistoryData] = useState<{ timestamp: string; total: number }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 1. 실시간 실제 계좌의 최신 자산 정보를 API로부터 가져옴 (실제 자산 추이의 기준 앵커 역할)
+  // 1. 실시간 실제 계좌 및 역사적 스냅샷 정보를 API로부터 조회
   useEffect(() => {
     let active = true;
     const fetchRealAsset = async () => {
       try {
         const res = await accountAPI.getBalance();
+        const historyRes = await accountAPI.getHistory();
         if (active) {
           setRealTotalAsset(res.data.total_asset);
           if (res.data.fx_rate && res.data.fx_rate > 0) {
             setFxRate(res.data.fx_rate);
+          }
+          if (Array.isArray(historyRes.data)) {
+            setHistoryData(historyRes.data);
           }
           setIsLoading(false);
         }
@@ -49,15 +53,14 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
 
   // 2. 실제 자산 연산 알고리즘 (방향 A - 100% 정밀 실제 데이터 연동)
   const chartData = useMemo(() => {
-    // 실시간 총 자산액이 아직 로딩되지 않았으면 빈 배열 반환
     if (realTotalAsset === null) return [];
 
     // 최신 환율 기준 실시간 총 자산 (달러 환산 기준점으로 통일 후 프론트에서 가변 포맷팅)
     const currentAssetUsd = realTotalAsset / fxRate;
 
-    // 만약 실제 거래 기록이 전혀 없는 신규 계좌일 경우:
-    // 현재 실제 자산 가치 그대로 수평선을 미려하게 그려 "거래 변동 없는 투명한 잔고"를 표현
-    if (!logs || logs.length === 0) {
+    // 만약 실제 스냅샷 이력이 전혀 없는 신규 계좌일 경우:
+    // 현재 실제 자산 가치 그대로 수평선을 그려 "거래 변동 없는 투명한 잔고"를 표현
+    if (!historyData || historyData.length === 0) {
       const today = new Date();
       return Array.from({ length: 7 }).map((_, i) => {
         const d = new Date(today);
@@ -71,44 +74,22 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
       });
     }
 
-    // 실제 거래 기록이 존재할 경우:
-    // 가장 최근 거래 시점부터 과거 시점까지 거래 변화를 역산(Back-calculation)하여 날짜별 자산 흐름을 재구성합니다.
-    const sortedLogs = [...logs].sort(
-      (a, b) => new Date(a.executed_at).getTime() - new Date(b.executed_at).getTime()
-    ); // 과거순 정렬
-
-    let runningAssetUsd = currentAssetUsd;
-    const historyPoints: { date: string; usd: number; isRealTx: boolean }[] = [];
-
-    // 최신 거래 포인트들을 생성
-    // 💡 역산의 진실: 매도(SELL) 시 자산이 늘어났으니 과거 시점은 그만큼 자산이 적었음. 매수(BUY) 시 자산 변화는 수수료 감안 미세가감.
-    for (let i = sortedLogs.length - 1; i >= 0; i--) {
-      const log = sortedLogs[i];
-      const logDate = new Date(log.executed_at);
+    // 스냅샷 데이터(total_asset은 KRW 단위로 백엔드에서 반환됨)를 USD로 가공하여 매핑
+    const historyPoints = historyData.map((s) => {
+      const logDate = new Date(s.timestamp);
       const dateStr = `${String(logDate.getMonth() + 1).padStart(2, "0")}-${String(logDate.getDate()).padStart(2, "0")}`;
-      
-      historyPoints.unshift({
+      return {
         date: dateStr,
-        usd: Math.round(runningAssetUsd),
+        usd: Math.round(s.total / fxRate),
         isRealTx: true,
-      });
-
-      // 자산 흐름 복원을 위한 역산 공식 적용
-      if (log.trade_type === "SELL") {
-        // 매도를 통해 가치 실현이 완료되었으므로, 과거에는 이 가치가 아직 실현되지 않은 상태
-        // (단순히 현금화된 주식금액 변화량을 모의 차감)
-        const diffUsd = log.price * log.quantity;
-        runningAssetUsd -= diffUsd * 0.05; // 실제 자산 평가 변동율을 보수적으로 역산
-      } else {
-        // 매수 시 주식 가치가 되었으므로 총자산의 근본 변화는 미미함 (수수료만큼만 미세 차이)
-        runningAssetUsd += log.price * log.quantity * 0.001; 
-      }
-    }
+      };
+    });
 
     // 포인트가 너무 적으면 앞쪽에 시작점 기반 수평 보조 포인트를 덧붙여 7개 이상의 흐름을 만들어냅니다.
     if (historyPoints.length < 7) {
       const needed = 7 - historyPoints.length;
-      const firstTxDate = new Date(sortedLogs[0].executed_at);
+      const firstTxDate = new Date(historyData[0].timestamp);
+      const startUsd = Math.round(historyData[0].total / fxRate);
 
       const fillPoints = Array.from({ length: needed }).map((_, i) => {
         const d = new Date(firstTxDate);
@@ -116,7 +97,7 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
         const dateStr = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
         return {
           date: dateStr,
-          usd: Math.round(runningAssetUsd),
+          usd: startUsd,
           isRealTx: false,
         };
       });
@@ -124,7 +105,7 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
     }
 
     return historyPoints.slice(-12); // 최근 최대 12개 변화량 렌더링
-  }, [logs, realTotalAsset, fxRate]);
+  }, [historyData, realTotalAsset, fxRate]);
 
   // 3. SVG 차트 좌표 계산
   const width = 800;

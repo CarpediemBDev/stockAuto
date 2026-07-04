@@ -94,21 +94,30 @@ export function UserManagement() {
     }
   };
 
-  const handleDeleteUser = async (userId: number, username: string) => {
-    if (!confirm(`🚨 경고: 정말로 [${username}] 사용자를 영구 삭제하시겠습니까?\n이 작업은 되돌릴 수 없으며, 모든 잔고 및 거래 내역이 삭제됩니다.`)) {
-      return;
-    }
-    setActionUserId(userId);
-    try {
-      await adminAPI.deleteUser(userId);
-      toast.success(`[${username}] 계정이 안전하게 영구 삭제되었습니다.`);
-      setSelectedUserId(null); // Close drawer on success
-      mutate();
-    } catch (error) {
-      toast.error(`사용자 삭제에 실패했습니다: ${getErrorMessage(error)}`);
-    } finally {
-      setActionUserId(null);
-    }
+  const handleDeleteUser = (userId: number, username: string) => {
+    toast(`정말로 [${username}] 사용자를 영구 삭제하시겠습니까?`, {
+      description: "🚨 경고: 이 작업은 되돌릴 수 없으며, 모든 잔고 및 거래 내역이 영구히 삭제됩니다.",
+      action: {
+        label: "영구 삭제",
+        onClick: async () => {
+          setActionUserId(userId);
+          try {
+            await adminAPI.deleteUser(userId);
+            toast.success(`[${username}] 계정이 안전하게 영구 삭제되었습니다.`);
+            setSelectedUserId(null); // Close drawer on success
+            mutate();
+          } catch (error) {
+            toast.error(`사용자 삭제에 실패했습니다: ${getErrorMessage(error)}`);
+          } finally {
+            setActionUserId(null);
+          }
+        }
+      },
+      cancel: {
+        label: "취소",
+        onClick: () => {}
+      }
+    });
   };
 
 

@@ -194,6 +194,7 @@ export const tradeAPI = {
 export const accountAPI = {
   getBalance: (config?: AxiosRequestConfig) => api.get('/account/balance', config),
   getHoldings: (config?: AxiosRequestConfig) => api.get('/account/holdings', config),
+  getHistory: (config?: AxiosRequestConfig) => api.get('/account/history', config),
   resetBalance: () => api.post('/account/reset-balance'),
   forceLiquidate: () => api.post('/account/force-liquidate'),
 };

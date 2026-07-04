@@ -162,45 +162,7 @@ export function OverseasScanner({
 
   return (
     <div className="bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-2xl shadow-xl flex flex-col h-full">
-      {/* 아코디언 및 미세 스펙트럼 슬라이드 애니메이션 인라인 주입 */}
-      <style>{`
-        @keyframes slideDown {
-          from { opacity: 0; transform: translateY(-10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-slide-down {
-          animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-        }
-        @keyframes newsTicker {
-          0%   { transform: translateX(100%); }
-          100% { transform: translateX(-100%); }
-        }
-        .animate-news-ticker {
-          animation: newsTicker 18s linear infinite;
-          white-space: nowrap;
-          display: inline-block;
-        }
-        .animate-news-ticker:hover {
-          animation-play-state: paused;
-        }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        .custom-scrollbar::-webkit-scrollbar {
-          height: 6px;
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: rgba(255, 255, 255, 0.02);
-          border-radius: 8px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.12);
-          border-radius: 8px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.22);
-        }
-      `}</style>
+
 
       {/* 헤더 */}
       <div className="flex items-center justify-between p-5 border-b border-zinc-800/80">

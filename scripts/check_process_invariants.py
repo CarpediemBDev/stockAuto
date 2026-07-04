@@ -83,8 +83,7 @@ def check_required_process_tests(root: Path, errors: list[str]) -> None:
             "broker mode catalog tests",
             (
                 "test_trade_mode_catalog_is_the_validation_source",
-                "test_toss_mock_and_real_modes_are_rejected_before_broker_creation",
-                'for mode in ("MOCK", "REAL")',
+                "test_catalog_exposes_supported_modes",
             ),
         ),
         (

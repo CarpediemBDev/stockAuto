@@ -249,8 +249,9 @@ export default function PersonalSettingsPage() {
       toast.error("선택한 증권사 입력 폼을 초기화하지 못했습니다.");
       return;
     }
-    if (!form.app_key.trim() || !form.app_secret.trim() || !form.account_no.trim()) {
-      toast.error("APP KEY, APP SECRET, ACCOUNT NO를 모두 입력하세요.");
+    const isToss = provider === "TOSS";
+    if (!form.app_key.trim() || !form.app_secret.trim() || (!isToss && !form.account_no.trim())) {
+      toast.error(isToss ? "APP KEY, APP SECRET을 모두 입력하세요." : "APP KEY, APP SECRET, ACCOUNT NO를 모두 입력하세요.");
       return;
     }
 
@@ -681,7 +682,9 @@ export default function PersonalSettingsPage() {
                         </div>
 
                         <div>
-                          <label className="block text-xs font-semibold text-zinc-400 mb-1.5">ACCOUNT NO</label>
+                          <label className="block text-xs font-semibold text-zinc-400 mb-1.5">
+                            {credentialBroker === "TOSS" ? "계좌 시퀀스 (Optional)" : "ACCOUNT NO"}
+                          </label>
                           <input
                             type="text"
                             value={activeForm.account_no}
@@ -689,7 +692,7 @@ export default function PersonalSettingsPage() {
                               setForms((prev) => ({ ...prev, [credentialBroker]: { ...(prev[credentialBroker] || EMPTY_FORM), account_no: e.target.value } }));
                               setLocalVerified((prev) => ({ ...prev, [credentialBroker]: false }));
                             }}
-                            placeholder={activeCred?.has_credentials ? `${activeCred.account_no_masked || "••••••••"} (새로 입력 시 덮어쓰기)` : "Enter Account No"}
+                            placeholder={activeCred?.has_credentials ? `${activeCred.account_no_masked || "••••••••"} (새로 입력 시 덮어쓰기)` : (credentialBroker === "TOSS" ? "비워두면 자동 연동됩니다" : "Enter Account No")}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="off"
                           />

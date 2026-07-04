@@ -1,6 +1,6 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.bot.broker_factory import get_broker_client
-from app.core.database import SessionLocal, micro_session
+from app.core.database import SessionLocal
 from sqlalchemy.orm import selectinload
 from app.watchlist.services import load_watchlist_tickers_by_user, load_all_watchlist_tickers_by_user
 from app.core.locks import (
@@ -108,10 +108,13 @@ async def safe_broker_call(func, *args, **kwargs):
         return await asyncio.to_thread(func, *args, **kwargs)
 
 
-def _schedule_background_task(coro, task_name: str) -> asyncio.Task:
-    task = asyncio.ensure_future(coro)
+def _schedule_background_task(coro, task_name: str):
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
 
-    def _log_task_result(done: asyncio.Task) -> None:
+    def _log_task_result(done) -> None:
         try:
             done.result()
         except asyncio.CancelledError:
@@ -119,8 +122,17 @@ def _schedule_background_task(coro, task_name: str) -> asyncio.Task:
         except Exception:
             logger.exception("[Scheduler] Background task %s failed.", task_name)
 
-    task.add_done_callback(_log_task_result)
-    return task
+    if loop.is_running():
+        # 메인 루프 스레드 외의 동기 스레드에서 안전하게 전송
+        fut = asyncio.run_coroutine_threadsafe(coro, loop)
+        fut.add_done_callback(_log_task_result)
+        return fut
+    else:
+        # 루프가 돌고 있지 않은 독립 스레드인 경우
+        task = asyncio.ensure_future(coro, loop=loop)
+        task.add_done_callback(_log_task_result)
+        return task
+
 
 
 async def execute_and_poll_order(broker, func, *args, lease=None, **kwargs):
@@ -368,11 +380,13 @@ def micro_session(ctx: TradingFlowContext):
     try:
         if not hasattr(db, "commit_count"):
             if hasattr(ctx, "db_settings") and ctx.db_settings:
-                db.add(ctx.db_settings)
+                ctx.db_settings = db.merge(ctx.db_settings)
             if hasattr(ctx, "holdings") and ctx.holdings:
-                for h in ctx.holdings:
-                    db.add(h)
+                ctx.holdings = [db.merge(h) for h in ctx.holdings]
         yield db
+    except Exception as e:
+        db.rollback()  # 💡 예외 발생 시 트랜잭션 롤백 및 커넥션 오염 방지
+        raise e
     finally:
         if hasattr(db, "expunge_all"):
             db.expunge_all()
@@ -667,7 +681,9 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                 dec_highest_price = current_price_dec
                 h.highest_price = current_price_dec
                 _log(f"[{strategy_instance.name}] New Peak for {clean_ticker}: ${current_price}", "SIGNAL")
-                db.commit()
+                with micro_session(ctx) as db:
+                    db.merge(h)
+                    db.commit()
 
             atr = current_data.get('details', {}).get('atr', 0.0)
             stop_loss_pct = strategy_instance.get_stop_loss_pct(atr, current_price)
@@ -744,12 +760,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
         try:
             symbol_lease = await acquire_symbol_order_lock(user_id, clean_ticker, request_id)
         except RedisLockUnavailable:
-            log_action(
-                db,
-                user_id,
-                f"SELL BLOCKED: Redis order lock is unavailable for {clean_ticker}.",
-                "ERROR",
-            )
+            _log(f"SELL BLOCKED: Redis order lock is unavailable for {clean_ticker}.", "ERROR")
             return
         if symbol_lease is None:
             _log(f"SELL SKIP: Another order is in progress for {clean_ticker}.", "WARNING")
@@ -784,6 +795,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     res = await execute_and_poll_order(
                         broker, broker.sell_order, clean_ticker, h.quantity,
                         price=current_price, session=ctx.session,
+                        lease=symbol_lease,
                         **({"client_order_id": order_intent.intent_id} if order_intent else {}),
                     )
                 else:
@@ -1326,6 +1338,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                     res = await execute_and_poll_order(
                         ctx.broker, ctx.broker.buy_order, clean_ticker, final_qty,
                         price=current_price, session=ctx.session,
+                        lease=symbol_lease,
                         **({"client_order_id": order_intent.intent_id} if order_intent else {}),
                     )
                 else:
@@ -1564,14 +1577,21 @@ async def async_trading_loop():
             logger.info("[Scheduler] Previous loop still running. Skipping this cycle.")
             return
         is_processing = True
+
     db = SessionLocal()
     try:
         # 1. 자동매매 기동 중인 활성 유저 리스트 로드
         active_users = db.query(UserSettings).filter(UserSettings.is_running == True).all()
         if not active_users:
-            is_processing = False
-            db.close()
             return
+
+        # SIMULATED 모드인 유저들의 미체결 지정가 주문(UnfilledOrder)을 주기적으로 평가/체결 처리합니다.
+        for u in active_users:
+            trade_mode = getattr(u, "trade_mode", "SIMULATED") or "SIMULATED"
+            if trade_mode.upper() == "SIMULATED":
+                from app.bot.simulated_broker import LocalSimulatedBroker
+                sim_broker = LocalSimulatedBroker(db_settings=u)
+                sim_broker.process_unfilled_orders(db)
 
         active_user_ids = [u.user_id for u in active_users]
         holding_user_ids = {
@@ -1587,8 +1607,6 @@ async def async_trading_loop():
             if not holding_user_ids:
                 if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, "scheduler_closed_no_holdings"):
                     logger.info("[Scheduler] Market is closed and no active users have holdings. Skipping all user flows.")
-                is_processing = False
-                db.close()
                 return
         exchange_rate = FXRateCache.get_rate()
 
@@ -1596,6 +1614,7 @@ async def async_trading_loop():
 
         # Eagerly close db session before starting remote / async calls
         db.close()
+        db = None
 
         sentiment = await check_market_sentiment()
         market_signals = latest_scanned_signals
@@ -1624,6 +1643,11 @@ async def async_trading_loop():
     except Exception:
         logger.exception("[Scheduler] CRITICAL ERROR in trading loop")
     finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
         is_processing = False
 
 def trading_loop_wrapper():

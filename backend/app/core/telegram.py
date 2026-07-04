@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import threading
 import httpx
 from concurrent.futures import ThreadPoolExecutor
@@ -367,6 +367,11 @@ def _process_command(user_id: int, text: str):
 
     except Exception as e:
         logger.exception(f"[TelegramBot User {user_id}] Command execution error")
+        if db is not None:
+            try:
+                db.rollback()  # 💡 예외 발생 시 트랜잭션 롤백 및 커넥션 오염 방지
+            except Exception:
+                pass
         send_reply(f"⚠️ *명령어 실행 중 오류 발생:* {str(e)}")
     finally:
         close_db()
@@ -428,19 +433,15 @@ def send_daily_report_to_all_users_sync() -> dict:
 
 def send_daily_report_to_user_sync(user_id: int):
     """
-    특정 사용자에게만 당일 매매 성적을 텔레그램으로 발송합니다. (수동 트리거용)
+    특정 사용자에게 당일 매매 성적을 텔레그램으로 발송합니다.
     """
     from datetime import UTC, datetime, timedelta
     from app.core.models import TradeLog
 
     db = SessionLocal()
     try:
+        # 최근 24시간 거래 내역
         cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=24)
-
-        u = db.query(UserSettings).filter(UserSettings.user_id == user_id, UserSettings.telegram_enabled == True).first()
-        if not u:
-            return
-
         sells = db.query(TradeLog).filter(
             TradeLog.user_id == user_id,
             TradeLog.trade_type == "SELL",
