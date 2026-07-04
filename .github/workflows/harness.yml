@@ -12,6 +12,20 @@ jobs:
     timeout-minutes: 20
     env:
       CHANGE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      # config.py의 settings = Settings()가 import 시점에 REDIS_URL을 요구한다.
+      # 미제공 시 alembic(모델 import)과 backend pytest가 동시에 붕괴한다.
+      REDIS_URL: redis://localhost:6379/0
+
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout
