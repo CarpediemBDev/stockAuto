@@ -121,14 +121,22 @@ def decode_changed_paths(result) -> list[str]:
 
 
 def get_changed_files(root: Path) -> list[str]:
-    """Return the relevant change set for pre-commit, CI, or manual runs."""
+    """Return the relevant change set for pre-commit, CI, or manual runs.
+
+    로컬(비 CI) 실행에서는 staged / unstaged / untracked를 모두 '합집합'으로
+    검사한다. 일부 파일만 staging 한 상태에서 계약 민감 파일(예: AGENTS.md)이
+    unstaged로 남아 검사에서 누락(가드 우회)되는 것을 막기 위한 fail-closed 설계다.
+    (기존에는 staged가 하나라도 있으면 unstaged/untracked를 무시하고 조기 반환했다.)
+    """
     staged = decode_changed_paths(
         run_command(["git", "diff", "--cached", "--name-only"], cwd=root)
     )
-    if staged:
-        return sorted(set(staged))
 
     if os.environ.get("CI"):
+        # CI는 커밋 범위(diff) 기준으로 검사한다. (원래 동작 보존)
+        if staged:
+            return sorted(set(staged))
+
         base_sha = os.environ.get("CHANGE_BASE_SHA", "").strip()
         if base_sha and set(base_sha) != {"0"}:
             ci_diff = decode_changed_paths(
@@ -148,6 +156,7 @@ def get_changed_files(root: Path) -> list[str]:
         )
         if head_diff:
             return sorted(set(head_diff))
+        # CI에서도 diff가 비면 아래 작업트리 합집합으로 폴백한다.
 
     unstaged = decode_changed_paths(
         run_command(["git", "diff", "--name-only"], cwd=root)
@@ -158,7 +167,8 @@ def get_changed_files(root: Path) -> list[str]:
             cwd=root,
         )
     )
-    return sorted(set(unstaged + untracked))
+    # 로컬(pre-commit·수동): staged까지 포함한 전체 작업트리를 검사한다.
+    return sorted(set(staged + unstaged + untracked))
 
 
 def is_contract_sensitive(path: str) -> bool:
@@ -217,6 +227,24 @@ def find_complete_contract_record(content: str) -> tuple[bool, list[str], str]:
     return False, best_missing, best_docs_value
 
 
+def contract_format_hint() -> str:
+    """계약 기록의 정확한 형식 예시를 SSOT 필드에서 자동 생성한다.
+
+    별표/볼드(`*   **필드**:`)로 쓰면 검사에서 인식되지 않으므로,
+    실패한 사람이 에러만 보고 즉시 올바른 형식으로 고칠 수 있게 예시를 노출한다.
+    """
+    lines = [
+        "✅ 올바른 형식 (별표/볼드 금지, 반드시 '- 필드: 내용' 하이픈 형태):",
+        f"      {CONTRACT_RECORD_HEADING}",
+    ]
+    for field in CONTRACT_RECORD_FIELDS:
+        lines.append(f"      - {field}: <내용>")
+    lines.append(
+        "      💡 'python scripts/new_task.py' 로 위 빈 양식을 오늘 현황판에 자동 생성할 수 있습니다."
+    )
+    return "\n".join(lines)
+
+
 def validate_change_contract(root: Path, changed_files: list[str]) -> list[str]:
     sensitive_files = sorted(path for path in changed_files if is_contract_sensitive(path))
     if not sensitive_files:
@@ -228,6 +256,7 @@ def validate_change_contract(root: Path, changed_files: list[str]) -> list[str]:
         return [
             "계약 영향 파일이 변경됐지만 docs/tasks/YYYY-MM-DD.md 변경이 없습니다.",
             f"영향 파일: {', '.join(sensitive_files)}",
+            contract_format_hint(),
         ]
 
     record_found = False
@@ -253,6 +282,7 @@ def validate_change_contract(root: Path, changed_files: list[str]) -> list[str]:
         )
         if missing_fields:
             errors.append(f"누락 항목: {', '.join(missing_fields)}")
+        errors.append(contract_format_hint())
         return errors
 
     long_lived_docs = [
