@@ -64,3 +64,59 @@ def test_strategy_assessment_excludes_proxy_and_small_samples():
     assert proxy["selection_score"] < direct["selection_score"]
     assert small_sample["selection_eligible"] is False
     assert "최소 기준 15회" in small_sample["selection_exclusion_reasons"][0]
+
+
+def test_strategy_assessment_excludes_unprofitable_high_frequency():
+    """거래 표본·데이터 출처가 정상이라도 손실/저효율 전략은 자동선정에서 제외한다.
+
+    트리아지에서 selection_eligible 게이트가 수익성을 안 봐서 -85% 전략도
+    통과하던 결함을 회귀로 고정한다.
+    """
+    losing = {
+        "total_return_rate": -85.0,
+        "qqq_bench_return_rate": 29.0,
+        "total_trades": 4033,
+        "profit_factor": 0.31,
+        "mdd": -85.0,
+        "sharpe_ratio": -1.5,
+        "sortino_ratio": -1.8,
+        "calmar_ratio": -0.9,
+        "observation_days": 250,
+    }
+    assessment = assess_strategy_report("supertrend", losing, minimum_trades=15)
+
+    assert assessment["selection_eligible"] is False
+    assert assessment["is_profitable"] is False
+    assert assessment["beats_benchmark"] is False
+    assert any(
+        "수익성 미달" in reason
+        for reason in assessment["selection_exclusion_reasons"]
+    )
+
+    # PF는 1을 넘지만 순수익이 음(手수료 잠식)인 경계도 제외되어야 한다.
+    flat_but_costly = {**losing, "total_return_rate": -0.5, "profit_factor": 1.05}
+    edge = assess_strategy_report("supertrend", flat_but_costly, minimum_trades=15)
+    assert edge["selection_eligible"] is False
+    assert edge["is_profitable"] is False
+
+
+def test_strategy_assessment_flags_benchmark_underperformance():
+    """수익은 나지만 벤치마크(QQQ)를 못 이기면 beats_benchmark=False로 표기.
+
+    다만 수익성 게이트는 통과하므로 selection_eligible은 유지된다
+    (강세장에서 선정기가 굶지 않도록 벤치마크초과는 하드 배제 아님)."""
+    profitable_laggard = {
+        "total_return_rate": 12.0,
+        "qqq_bench_return_rate": 29.0,
+        "total_trades": 100,
+        "profit_factor": 1.5,
+        "mdd": -6.0,
+        "sharpe_ratio": 1.1,
+        "sortino_ratio": 1.4,
+        "calmar_ratio": 1.0,
+        "observation_days": 250,
+    }
+    assessment = assess_strategy_report("ema_only", profitable_laggard, minimum_trades=15)
+    assert assessment["is_profitable"] is True
+    assert assessment["beats_benchmark"] is False
+    assert assessment["selection_eligible"] is True

@@ -413,6 +413,12 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
     winning_trades = [x for x in sell_trades if x["realized_pnl"] > 0]
     win_rate = (len(winning_trades) / len(sell_trades) * 100) if sell_trades else 0.0
     total_pnl = final_value - initial_cash
+
+    # 수익 팩터(PF) — 단일전략 리포트(backtest_engine.run)와 동일 산식.
+    # assess_strategy_report의 수익성 게이트가 PF를 요구하므로 멀티슬롯도 반드시 산출.
+    gross_profit = sum(x["realized_pnl"] for x in sell_trades if x["realized_pnl"] > 0)
+    gross_loss = abs(sum(x["realized_pnl"] for x in sell_trades if x["realized_pnl"] < 0))
+    profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (999.9 if gross_profit > 0 else 0.0)
     
     # 종목별 거래 횟수 통계
     stats = {}
@@ -444,6 +450,7 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
         "mdd": mdd,
         "total_trades": total_trades,
         "win_rate": win_rate,
+        "profit_factor": round(profit_factor, 2),
         "ticker_stats": stats,
         "equity_curve": chart_equity,
         **calculate_performance_metrics(equity_curve, initial_value=initial_cash),
@@ -653,11 +660,11 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
 
     # ------------------ [참가자 4: 격리형 3슬롯 (이전)] ------------------
     slots_config_3 = {
-        "episodic_pivot": {
+        "strategy_c": {
             "weight_bullish": 1.0,
             "weight_bearish": 0.30,
-            "prefix": "EP_",
-            "strategy_key": "episodic_pivot"
+            "prefix": "SC_",
+            "strategy_key": "strategy_c"
         },
         "asqs": {
             "weight_bullish": 1.0,
@@ -690,11 +697,11 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
 
     # ------------------ [참가자 5: 격리형 2슬롯 (현재)] ------------------
     slots_config_2 = {
-        "episodic_pivot": {
+        "strategy_c": {
             "weight_bullish": 1.0,
             "weight_bearish": 0.50,
-            "prefix": "EP_",
-            "strategy_key": "episodic_pivot"
+            "prefix": "SC_",
+            "strategy_key": "strategy_c"
         },
         "regime_switching": {
             "weight_bullish": 1.0,
@@ -719,14 +726,14 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
         "equity_curve": curve_2slot
     })
 
-    # ------------------ [참가자 6: 프리마켓 고점 돌파] ------------------
+    # ------------------ [참가자 6: 에피소딕피벗 C 공격형] ------------------
     sim_pb = BacktestSimulator(
         tickers=tickers_list,
         start_date=start_date,
         end_date=end_date,
         interval=interval,
         initial_cash=cash,
-        strategy_type="premarket_breakout"
+        strategy_type="strategy_c_aggressive"
     )
     sim_pb.processed_metrics = base_sim.processed_metrics
     sim_pb.qqq_metrics = base_sim.qqq_metrics
@@ -751,8 +758,8 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
     curve_pb = [{"timestamp": e["timestamp"].strftime('%Y-%m-%d %H:%M:%S') if hasattr(e["timestamp"], 'strftime') else str(e["timestamp"]), "total": e["total"]} for e in sim_pb.broker.equity_curve[::24]]
             
     results.append({
-        "strategy_type": "premarket_breakout",
-        "name": Translator.translate_strategy("premarket_breakout", "ko"),
+        "strategy_type": "strategy_c_aggressive",
+        "name": Translator.translate_strategy("strategy_c_aggressive", "ko"),
         "final_value": report_pb["final_value"],
         "total_pnl": report_pb["total_pnl"],
         "total_return_rate": report_pb["total_return_rate"],
@@ -763,14 +770,14 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
         "equity_curve": curve_pb
     })
 
-    # ------------------ [참가자 7: 추세 안정화 눌림목] ------------------
+    # ------------------ [참가자 7: 폭발형 C (Exploded)] ------------------
     sim_ts = BacktestSimulator(
         tickers=tickers_list,
         start_date=start_date,
         end_date=end_date,
         interval=interval,
         initial_cash=cash,
-        strategy_type="trend_stabilization"
+        strategy_type="exploded_c"
     )
     sim_ts.processed_metrics = base_sim.processed_metrics
     sim_ts.qqq_metrics = base_sim.qqq_metrics
@@ -795,8 +802,8 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
     curve_ts = [{"timestamp": e["timestamp"].strftime('%Y-%m-%d %H:%M:%S') if hasattr(e["timestamp"], 'strftime') else str(e["timestamp"]), "total": e["total"]} for e in sim_ts.broker.equity_curve[::24]]
             
     results.append({
-        "strategy_type": "trend_stabilization",
-        "name": Translator.translate_strategy("trend_stabilization", "ko"),
+        "strategy_type": "exploded_c",
+        "name": Translator.translate_strategy("exploded_c", "ko"),
         "final_value": report_ts["final_value"],
         "total_pnl": report_ts["total_pnl"],
         "total_return_rate": report_ts["total_return_rate"],
@@ -813,8 +820,8 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
         "regime_switching": report_master,
         "multi_slot_3": report_3slot,
         "multi_slot": report_2slot,
-        "premarket_breakout": report_pb,
-        "trend_stabilization": report_ts,
+        "strategy_c_aggressive": report_pb,
+        "exploded_c": report_ts,
     }
     qqq_initial = float(base_sim.qqq_metrics["Close"].iloc[0])
     qqq_final = float(base_sim.qqq_metrics["Close"].iloc[-1])
@@ -832,6 +839,9 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
             "mdd_recovered",
             "max_underwater_days",
             "observation_days",
+            # PF는 수익성 게이트(assess_strategy_report) 입력이라 반드시 전달.
+            # 누락 시 모든 참가자가 profit_factor=0.0 → selection_eligible=False로 오판정.
+            "profit_factor",
         ):
             result[metric_name] = source_report.get(metric_name, 0.0)
         result["qqq_bench_return_rate"] = round(qqq_return, 2)

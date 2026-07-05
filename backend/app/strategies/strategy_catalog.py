@@ -118,6 +118,31 @@ _STRATEGY_PROFILES = {
         selection_eligible=False,
         reason="청산 전략 명칭과 달리 현재 백테스트 브로커는 롱 주문만 지원합니다.",
     ),
+    "pre_gapper": StrategyDataProfile(
+        basis=StrategyDataBasis.OHLCV_PROXY,
+        selection_eligible=False,
+        reason="페니주(is_penny)와 프리마켓 갭 셋업 프록시(is_pre_gapper_setup)에 의존 — 비페니·정규장 유니버스에선 구조적으로 발화하지 않습니다.",
+    ),
+    "supernova": StrategyDataProfile(
+        basis=StrategyDataBasis.OHLCV_PROXY,
+        selection_eligible=False,
+        reason="페니주(is_penny)와 슈퍼노바 급등 셋업 프록시(is_supernova_setup)에 의존하는 저유동 소형주 전용 전략입니다.",
+    ),
+    "panic_dip_buy": StrategyDataProfile(
+        basis=StrategyDataBasis.OHLCV_PROXY,
+        selection_eligible=False,
+        reason="페니주(is_penny)와 패닉 급락 셋업 프록시(is_panic_drop)에 의존 — 비페니 유니버스에선 발화하지 않습니다.",
+    ),
+    "pump_run_pull": StrategyDataProfile(
+        basis=StrategyDataBasis.OHLCV_PROXY,
+        selection_eligible=False,
+        reason="페니주(is_penny)와 펌프-런-눌림 셋업 프록시(is_pump_run_pullback)에 의존하는 저유동 소형주 전용 전략입니다.",
+    ),
+    "vix_hedging": StrategyDataProfile(
+        basis=StrategyDataBasis.OHLCV_PROXY,
+        selection_eligible=False,
+        reason="개별 종목 OHLCV가 아닌 외부 VIX 변동성 지수 연계 플래그(is_vix_ok)에 진입을 의존합니다.",
+    ),
 }
 
 
