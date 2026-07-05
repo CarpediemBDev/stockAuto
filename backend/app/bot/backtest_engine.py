@@ -47,13 +47,17 @@ class BacktestBroker:
         """가상 매수 주문 집행 및 KIS 매수 수수료가 적용된 평단가 가중평균 시뮬레이션"""
         fee_rate = settings.SIMULATED_FEE_RATE
         _, _, total_cost = calculate_buy_total(price, quantity, fee_rate)
-        
+        # calculate_buy_total은 Decimal을 반환하지만 백테스트 브로커 잔고(self.cash)는 float 기반이므로
+        # 경계에서 float로 코어싱해 float↔Decimal 혼합 연산 크래시(TypeError)를 방지한다.
+        total_cost = float(total_cost)
+
         if self.cash < total_cost:
             # 잔고 안전장치: 남은 예수금 내에서 수수료까지 감안하여 최대한 매매 시도
-            max_qty = int(self.cash / (price * (1 + fee_rate)))
+            max_qty = int(self.cash / (price * (1 + float(fee_rate))))
             if max_qty >= 1:
                 quantity = max_qty
                 _, _, total_cost = calculate_buy_total(price, quantity, fee_rate)
+                total_cost = float(total_cost)
             else:
                 return {"success": False, "message": "Insufficient cash for backtest buy order."}
 
@@ -114,9 +118,9 @@ class BacktestBroker:
             quantity=sell_qty,
             fee_rate=settings.SIMULATED_FEE_RATE,
         )
-        
-        self.cash += pnl.net_revenue
-        
+        # RealizedPnL 필드는 Decimal이지만 백테스트 잔고/로그는 float 기반이므로 경계에서 코어싱한다.
+        self.cash += float(pnl.net_revenue)
+
         order_no = f"BT-SELL-{timestamp.strftime('%Y%m%d%H%M%S')}"
         self.trade_logs.append({
             "timestamp": timestamp,
@@ -127,8 +131,8 @@ class BacktestBroker:
             "quantity": sell_qty,
             "order_no": order_no,
             "buy_stage": h["buy_stage"],
-            "realized_pnl": round(pnl.realized_pnl, 2),
-            "return_rate": round(pnl.return_rate, 2),
+            "realized_pnl": round(float(pnl.realized_pnl), 2),
+            "return_rate": round(float(pnl.return_rate), 2),
             "reason": reason
         })
 
