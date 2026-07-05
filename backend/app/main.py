@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("Backend Lifespan Starting: Recovering unresolved broker orders...")
     discover_orphan_orders_once()
-    reconcile_open_orders_once()
+    await reconcile_open_orders_once()
 
     if await ping_redis():
         logger.info("Backend Lifespan: Redis order-lock service is ready")
