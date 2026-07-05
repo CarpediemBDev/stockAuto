@@ -182,6 +182,7 @@ def assess_strategy_report(
     strategy_type: str,
     report: dict[str, Any],
     minimum_trades: int = 15,
+    min_profit_factor: float = 1.0,
 ) -> dict[str, Any]:
     profile = get_strategy_data_profile(strategy_type)
     total_trades = int(report.get("total_trades", 0))
@@ -211,7 +212,17 @@ def assess_strategy_report(
         StrategyDataBasis.SYNTHETIC: 0.25,
     }[profile.basis]
     selection_score = score * basis_multiplier * (0.5 + 0.5 * sample_score)
-    eligible = profile.selection_eligible and total_trades >= minimum_trades
+
+    # 수익성 하드 게이트: 손실/저효율 전략은 거래 표본·데이터 출처가 정상이라도
+    # 자동선정 후보에서 제외한다. (트리아지 결과: 게이트가 수익성을 안 봐서
+    # -85% 전략도 selection_eligible=True로 통과하던 결함 차단)
+    is_profitable = total_return > 0.0 and profit_factor > min_profit_factor
+    beats_benchmark = total_return > benchmark_return
+    eligible = (
+        profile.selection_eligible
+        and total_trades >= minimum_trades
+        and is_profitable
+    )
 
     observation_days = int(report.get("observation_days", 0))
     if eligible and total_trades >= 30 and observation_days >= 120:
@@ -230,10 +241,17 @@ def assess_strategy_report(
         exclusion_reasons.append(
             f"청산 거래 {total_trades}회로 최소 기준 {minimum_trades}회에 미달합니다."
         )
+    if not is_profitable:
+        exclusion_reasons.append(
+            f"수익성 미달(총수익률 {total_return:.2f}%, PF {profit_factor:.2f}) — "
+            f"손실 또는 PF {min_profit_factor:.2f} 이하 전략은 자동선정에서 제외합니다."
+        )
 
     return {
         "selection_score": round(selection_score, 2),
         "selection_eligible": eligible,
+        "is_profitable": is_profitable,
+        "beats_benchmark": beats_benchmark,
         "confidence_grade": confidence_grade,
         "data_basis": profile.basis.value,
         "data_quality_reason": profile.reason,
