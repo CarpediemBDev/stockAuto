@@ -187,7 +187,7 @@ class Settings:
 
     # [Phase 30] 거래 수수료 및 제비용 상수
     KIS_FEE_RATE = 0.0008         # 0.08% KIS 우대 수수료율
-    SIMULATED_FEE_RATE = 0.0025   # 0.25% 가상 시뮬레이션 수수료율
+    SIMULATED_FEE_RATE = 0.0008   # 0.08% 가상 시뮬 수수료율 (실거래 KIS 우대와 일치 — 시뮬이 실거래보다 3배 비싼 역전 제거)
     SEC_FEE_RATE = 0.0000278      # 0.00278% 미국 매도 제비용 (SEC Fee)
 
 settings = Settings()

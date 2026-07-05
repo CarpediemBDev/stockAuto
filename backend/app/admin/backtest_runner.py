@@ -208,16 +208,17 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
                     fee_rate=settings.SIMULATED_FEE_RATE,
                 )
                 
-                cash_balance += pnl.net_revenue
-                
+                # RealizedPnL은 Decimal이나 이 러너의 잔고/로그는 float 원장이므로 경계에서 코어싱한다.
+                cash_balance += float(pnl.net_revenue)
+
                 trade_logs.append({
                     "timestamp": t.strftime('%Y-%m-%d %H:%M:%S') if hasattr(t, 'strftime') else str(t),
                     "ticker": h.ticker,
                     "trade_type": "SELL",
                     "price": current_price,
                     "quantity": sell_qty,
-                    "realized_pnl": pnl.realized_pnl,
-                    "return_rate": pnl.return_rate,
+                    "realized_pnl": float(pnl.realized_pnl),
+                    "return_rate": float(pnl.return_rate),
                     "reason": sell_reason,
                     "strategy_type": h.strategy_type
                 })
@@ -354,7 +355,9 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
                             final_qty,
                             settings.SIMULATED_FEE_RATE,
                         )
-                        
+                        # calculate_buy_total은 Decimal 반환 → float 원장과의 혼합연산 크래시 방지
+                        total_cost = float(total_cost)
+
                         cash_balance -= total_cost
                         slot_cash_usd -= total_cost
                         
