@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -10,7 +10,7 @@ import { authAPI, botAPI, fetcher } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { useTimezone } from "@/store/timezoneStore";
 import { toast } from "sonner";
-import { Globe } from "lucide-react";
+import { Globe, Activity } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "📈 자동 매매" },
@@ -26,6 +26,23 @@ export function NavBar() {
   const [isTimezoneMenuOpen, setIsTimezoneMenuOpen] = useState(false);
   const { accessToken, username, role, clearAuth } = useAuthStore();
   const { selectedTimezone, timezoneOptions, setTimezone } = useTimezone();
+
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const timezoneMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (isUserMenuOpen && userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+      if (isTimezoneMenuOpen && timezoneMenuRef.current && !timezoneMenuRef.current.contains(event.target as Node)) {
+        setIsTimezoneMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isUserMenuOpen, isTimezoneMenuOpen]);
 
   const { data: statusData, mutate } = useSWR(
     accessToken ? '/bot/status' : null,
@@ -132,7 +149,7 @@ export function NavBar() {
               {username && (
                 <div className="flex items-center space-x-4 border-l border-zinc-800 pl-6">
                   {/* 타임존 스위처 */}
-                  <div className="relative flex items-center">
+                  <div ref={timezoneMenuRef} className="relative flex items-center">
                     <button
                       onClick={() => {
                         setIsTimezoneMenuOpen(!isTimezoneMenuOpen);
@@ -146,7 +163,6 @@ export function NavBar() {
                     
                     {isTimezoneMenuOpen && (
                       <>
-                        <div className="fixed inset-0 z-40" onClick={() => setIsTimezoneMenuOpen(false)}></div>
                         <div className="absolute right-0 top-10 mt-2 w-48 rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 shadow-2xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                           <div className="px-3 pb-2 border-b border-zinc-800/60 mb-1">
                             <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Timezone</p>
@@ -179,7 +195,7 @@ export function NavBar() {
                     )}
                   </div>
 
-                  <div className="relative flex items-center">
+                  <div ref={userMenuRef} className="relative flex items-center">
                     <button
                       onClick={() => {
                         setIsUserMenuOpen(!isUserMenuOpen);
@@ -202,9 +218,6 @@ export function NavBar() {
                   {/* 드롭다운 메뉴 팝오버 */}
                   {isUserMenuOpen && (
                     <>
-                      {/* 클릭 오프 감지 백드롭 */}
-                      <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)}></div>
-
                       <div className="absolute right-0 top-10 mt-2 w-52 rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                         {/* 계정 정보 */}
                         <div className="px-3 py-2 border-b border-zinc-800/60 mb-1.5">
@@ -261,16 +274,26 @@ export function NavBar() {
 
                         {/* 어드민 패널 단축 링크 (어드민 전용) */}
                         {role === "ADMIN" && (
-                          <Link
-                            href="/admin"
-                            onClick={() => setIsUserMenuOpen(false)}
-                            className="flex items-center space-x-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-zinc-800/50 text-xs font-semibold transition-all duration-200 cursor-pointer"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                            </svg>
-                            <span className="text-blue-400 font-bold">🛡️ 마스터 어드민 패널</span>
-                          </Link>
+                          <>
+                            <Link
+                              href="/admin"
+                              onClick={() => setIsUserMenuOpen(false)}
+                              className="flex items-center space-x-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-zinc-800/50 text-xs font-semibold transition-all duration-200 cursor-pointer"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                              </svg>
+                              <span className="text-blue-400 font-bold">🛡️ 마스터 어드민 패널</span>
+                            </Link>
+                            <Link
+                              href="/admin/system"
+                              onClick={() => setIsUserMenuOpen(false)}
+                              className="flex items-center space-x-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-zinc-800/50 text-xs font-semibold transition-all duration-200 cursor-pointer"
+                            >
+                              <Activity size={14} className="text-emerald-400" />
+                              <span className="text-emerald-400 font-bold">📡 시스템 헬스 관제</span>
+                            </Link>
+                          </>
                         )}
 
                         {/* 개인 투자 설정 단축 링크 */}
