@@ -15,6 +15,11 @@ stockauto.db
 *.db-wal
 backend/data/
 
+# Redis / Memurai runtime artifacts
+*.rdb
+dump.rdb
+memurai-log.txt
+
 #logs
 logs
 
@@ -39,6 +44,9 @@ frontend/.env*
 .gemini/
 .agents/
 **/__pycache__/
+
+# Claude Code (local settings, hooks, nested worktrees)
+.claude/
 
 
 
