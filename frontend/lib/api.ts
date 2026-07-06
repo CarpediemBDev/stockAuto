@@ -249,6 +249,12 @@ export const adminAPI = {
 
 export const isCancel = axios.isCancel;
 
+export const systemAPI = {
+  getHealthCore: (config?: AxiosRequestConfig) => api.get('/system/health/core', config),
+  getHealthBot: (config?: AxiosRequestConfig) => api.get('/system/health/bot', config),
+  getHealthBrokers: (config?: AxiosRequestConfig) => api.get('/system/health/brokers', config),
+};
+
 export const fetcher = (url: string) => api.get(url).then(res => res.data);
 
 export default api;

@@ -25,6 +25,7 @@ from app.admin.router import router as admin_router
 from app.report.router import router as report_router
 from app.bot.router_backtest import router as backtest_router
 from app.mcp.router import router as mcp_router
+from app.system.router import router as system_router
 
 # 💡 Alembic 프로그램 기반 자동 마이그레이션 실행 (스프링부트 Flyway 방식 이식)
 from app.core.migrator import run_migrations_programmatically
@@ -119,6 +120,7 @@ app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin System"])
 app.include_router(report_router, prefix="/api/v1/report", tags=["Trading Report"])
 app.include_router(backtest_router, prefix="/api/v1/backtest", tags=["Backtest"])
 app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["MCP Command Sourcing"])
+app.include_router(system_router, prefix="/api/v1/system", tags=["System Health"])
 
 @app.get("/")
 def read_root():
