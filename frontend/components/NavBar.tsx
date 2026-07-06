@@ -98,10 +98,10 @@ export function NavBar() {
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-base tracking-tight leading-none">StockAuto</span>
-              <span className="text-[9px] text-zinc-500 mt-1 leading-none">QUANT PLATFORM</span>
+              <span className="text-[11px] text-zinc-500 mt-1 leading-none">QUANT PLATFORM</span>
             </div>
             {!isAuthPage && username && (
-              <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider transition-colors duration-500 select-none ${
+              <span className={`px-2 py-0.5 rounded text-[11px] font-black uppercase tracking-wider transition-colors duration-500 select-none ${
                 tradeMode === 'REAL'
                   ? (isBotRunning ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-red-900/40 text-red-300 border border-red-700/50')
                   : tradeMode === 'MOCK'
@@ -133,7 +133,7 @@ export function NavBar() {
                       key={item.href}
                       href={item.href}
                       className={cn(
-                        "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200",
+                        "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap",
                         isActive
                           ? "bg-zinc-800 text-white shadow-inner"
                           : "text-zinc-400 hover:text-white hover:bg-zinc-800/50"
@@ -165,7 +165,7 @@ export function NavBar() {
                       <>
                         <div className="absolute right-0 top-10 mt-2 w-48 rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 shadow-2xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                           <div className="px-3 pb-2 border-b border-zinc-800/60 mb-1">
-                            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Timezone</p>
+                            <p className="text-[11px] text-zinc-500 font-bold uppercase tracking-wider">Timezone</p>
                           </div>
                           <div className="px-1.5 space-y-0.5">
                             {timezoneOptions.map((tz) => (
@@ -221,7 +221,7 @@ export function NavBar() {
                       <div className="absolute right-0 top-10 mt-2 w-52 rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                         {/* 계정 정보 */}
                         <div className="px-3 py-2 border-b border-zinc-800/60 mb-1.5">
-                          <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">User Account</p>
+                          <p className="text-[11px] text-zinc-500 font-bold uppercase tracking-wider">User Account</p>
                           <p className="text-xs text-white font-bold truncate mt-0.5">{username}</p>
                         </div>
 
@@ -248,7 +248,7 @@ export function NavBar() {
                             onClick={handleToggleBot}
                             disabled={isTogglingBot}
                             className={cn(
-                              "w-full py-2 rounded-xl font-bold text-[10px] transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98]",
+                              "w-full py-2 rounded-xl font-bold text-[11px] transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98]",
                               isBotRunning
                                 ? "bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20"
                                 : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20"

@@ -6,7 +6,7 @@ import BotSignals from '@/components/BotSignals';
 import { translationAPI } from '@/lib/api';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/api';
-import { reportHandledError } from '@/lib/utils';
+import { reportHandledError, getScoreColor, getScoreBarColor } from '@/lib/utils';
 import { useWatchlistActions } from '@/hooks/useWatchlistActions';
 
 interface TranslationItem {
@@ -31,6 +31,15 @@ const ManualWatchList = () => {
   const { data: scannerData, isLoading: scannerLoading } = useSWR('/scanner/latest', fetcher, { refreshInterval: 15000 });
 
   const signals: ScannerSignal[] = Array.isArray(scannerData) ? scannerData : (scannerData?.signals || []);
+  
+  const sortedItems = [...items].sort((a, b) => {
+    const sigA = signals.find(s => s.ticker.toUpperCase() === a.ticker.toUpperCase() && (!s.source || s.source.includes("WATCHLIST")));
+    const sigB = signals.find(s => s.ticker.toUpperCase() === b.ticker.toUpperCase() && (!s.source || s.source.includes("WATCHLIST")));
+    const scoreA = sigA ? sigA.signal_score : 0;
+    const scoreB = sigB ? sigB.signal_score : 0;
+    return scoreB - scoreA;
+  });
+
   const loading = watchLoading || scannerLoading;
 
   const [showAddForm, setShowAddForm] = useState(false);
@@ -38,6 +47,7 @@ const ManualWatchList = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allTranslations, setAllTranslations] = useState<TranslationItem[]>([]);
   const [activeTab, setActiveTab] = useState<'user' | 'bot'>('user');
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const fetchTranslations = useCallback(async () => {
     try {
@@ -110,18 +120,18 @@ const ManualWatchList = () => {
       ).slice(0, 5)
     : [];
 
-  if (loading) return <div className="h-64 bg-slate-900/50 rounded-2xl animate-pulse"></div>;
+  if (loading) return <div className="h-64 bg-zinc-900/50 rounded-2xl animate-pulse"></div>;
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-      <div className="px-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+      <div className="px-3 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
         <div className="flex items-center space-x-6 px-2">
           <button 
             onClick={() => setActiveTab('user')}
             className={`flex items-center space-x-2 py-3.5 text-xs font-bold uppercase tracking-wider transition-all border-b-2 -mb-[1px] ${
               activeTab === 'user' 
                 ? 'border-white text-white' 
-                : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-600'
+                : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
             }`}
           >
             <Eye size={16} className={activeTab === 'user' ? "text-blue-400" : ""} />
@@ -132,7 +142,7 @@ const ManualWatchList = () => {
             className={`flex items-center space-x-2 py-3.5 text-xs font-bold uppercase tracking-wider transition-all border-b-2 -mb-[1px] ${
               activeTab === 'bot' 
                 ? 'border-white text-white' 
-                : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-600'
+                : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
             }`}
           >
             <Bot size={16} className={activeTab === 'bot' ? "text-amber-400" : ""} />
@@ -142,7 +152,7 @@ const ManualWatchList = () => {
         {activeTab === 'user' && (
           <button 
             onClick={handleToggleAddForm}
-            className={`p-1.5 hover:bg-slate-800 rounded transition-all duration-200 ${showAddForm ? 'text-blue-400 bg-slate-800/80 rotate-45' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`p-1.5 hover:bg-zinc-800 rounded transition-all duration-200 ${showAddForm ? 'text-blue-400 bg-zinc-800/80 rotate-45' : 'text-zinc-400 hover:text-zinc-200'}`}
           >
             <Plus size={18} />
           </button>
@@ -150,9 +160,9 @@ const ManualWatchList = () => {
       </div>
 
       {showAddForm && activeTab === 'user' && (
-        <form onSubmit={handleAdd} className="p-4 border-b border-slate-800/60 bg-slate-950/40 transition-all duration-300">
+        <form onSubmit={handleAdd} className="p-4 border-b border-zinc-800/60 bg-zinc-950/40 transition-all duration-300">
           <div className="space-y-1.5">
-            <label className="block text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
+            <label className="block text-[11px] text-zinc-500 font-semibold uppercase tracking-wider">
               Add Stock Manually
             </label>
             <div className="flex gap-2 relative">
@@ -162,7 +172,7 @@ const ManualWatchList = () => {
                 placeholder="e.g. AAPL or AAPL Apple"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs font-medium text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-colors"
+                className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-medium text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500 transition-colors"
               />
               <button
                 type="submit"
@@ -174,7 +184,7 @@ const ManualWatchList = () => {
 
               {/* 실시간 한글명/티커 자동 완성 오토컴플릿 드롭다운 (유저 캡처 구현) */}
               {suggestions.length > 0 && (
-                <div className="absolute left-0 right-[78px] top-full mt-1.5 bg-slate-950/95 backdrop-blur-md border border-slate-850 rounded-xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-800/40">
+                <div className="absolute left-0 right-[78px] top-full mt-1.5 bg-zinc-950/95 backdrop-blur-md border border-zinc-850 rounded-xl shadow-2xl z-50 overflow-hidden divide-y divide-zinc-800/40">
                   {suggestions.map((sug) => {
                     // 유저 캡처 화면처럼 매칭된 검색어를 주황색/금색(amber)으로 하이라이팅하여 가독성 극대화!
                     const nameParts = sug.name_ko.split(new RegExp(`(${query})`, 'gi'));
@@ -182,11 +192,11 @@ const ManualWatchList = () => {
                       <div
                         key={sug.ticker}
                         onClick={() => handleSelectSuggestion(sug.ticker, sug.name_ko)}
-                        className="px-3.5 py-2.5 hover:bg-slate-800/60 transition-colors cursor-pointer flex items-center justify-between text-xs group"
+                        className="px-3.5 py-2.5 hover:bg-zinc-800/60 transition-colors cursor-pointer flex items-center justify-between text-xs group"
                       >
                         <div className="flex items-center space-x-3">
-                          <span className="font-mono font-bold text-slate-400 group-hover:text-slate-200 w-12">{sug.ticker}</span>
-                          <span className="text-slate-300 group-hover:text-white font-medium">
+                          <span className="font-mono font-bold text-zinc-400 group-hover:text-zinc-200 w-12">{sug.ticker}</span>
+                          <span className="text-zinc-300 group-hover:text-white font-medium">
                             {nameParts.map((part, i) => 
                               part.toLowerCase() === query 
                                 ? <span key={i} className="text-amber-500 font-bold">{part}</span>
@@ -194,96 +204,126 @@ const ManualWatchList = () => {
                             )}
                           </span>
                         </div>
-                        <span className="text-[10px] text-slate-500 group-hover:text-slate-400 font-medium">나스닥</span>
+                        <span className="text-[11px] text-zinc-500 group-hover:text-zinc-400 font-medium">나스닥</span>
                       </div>
                     );
                   })}
-                  <div className="px-3.5 py-1.5 bg-slate-950/40 text-[9px] text-slate-600 flex items-center justify-between">
+                  <div className="px-3.5 py-1.5 bg-zinc-950/40 text-[11px] text-zinc-600 flex items-center justify-between">
                     <span>ⓘ 사전 매핑된 한글명을 클릭하면 즉시 등록됩니다.</span>
-                    <span className="text-slate-700">StockAuto i18n</span>
+                    <span className="text-zinc-700">StockAuto i18n</span>
                   </div>
                 </div>
               )}
             </div>
-            <p className="text-[10px] text-slate-600">
-              * 첫 단어는 티커로, 뒤의 단어는 이름으로 자동 처리됩니다 (예: <span className="text-slate-500 font-bold">TSLA Tesla</span>)
+            <p className="text-[11px] text-zinc-600">
+              * 첫 단어는 티커로, 뒤의 단어는 이름으로 자동 처리됩니다 (예: <span className="text-zinc-500 font-bold">TSLA Tesla</span>)
             </p>
           </div>
         </form>
       )}
       
       {activeTab === 'user' ? (
-        <div className="overflow-x-auto min-h-[300px]">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="text-slate-500 border-b border-slate-800/50 text-[10px] uppercase tracking-wider">
-                <th className="px-5 py-3 font-semibold">Ticker</th>
-                <th className="px-2 py-3 font-semibold">SIGNAL SCORE</th>
-                <th className="px-5 py-3 font-semibold text-right"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/30">
-              {items.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="px-5 py-12 text-center text-slate-500 text-xs">
-                    <p className="mb-1">관심종목이 비어있습니다.</p>
-                    <p className="text-[10px] text-slate-600">위의 + 버튼을 눌러 티커를 추가하세요.</p>
-                  </td>
+        <div className="flex flex-col">
+          {/* 모바일/태블릿 접이식 요약 (lg 미만에서만 표시) */}
+          <div className="lg:hidden p-4 border-b border-zinc-800/50">
+            <div className="flex justify-between items-center mb-3">
+              <span className="text-[11px] font-bold text-zinc-400">MY LIST 요약 (시그널 발생 종목)</span>
+              <button 
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="text-[11px] text-blue-400 bg-blue-500/10 px-2 py-1 rounded font-bold"
+              >
+                {isExpanded ? "접기" : "전체 보기"}
+              </button>
+            </div>
+            {!isExpanded && (
+              <div className="flex flex-wrap gap-2">
+                {sortedItems.filter(item => {
+                  const sig = signals.find(s => s.ticker.toUpperCase() === item.ticker.toUpperCase() && (!s.source || s.source.includes("WATCHLIST")));
+                  return sig && sig.signal_score > 0;
+                }).map(item => {
+                  const sig = signals.find(s => s.ticker.toUpperCase() === item.ticker.toUpperCase() && (!s.source || s.source.includes("WATCHLIST")));
+                  const scoreColorClass = getScoreColor(sig!.signal_score);
+                  return (
+                    <span key={item.id} className={`text-[11px] px-2 py-1 rounded border font-black ${scoreColorClass}`}>
+                      {item.ticker} {sig!.signal_score}
+                    </span>
+                  );
+                })}
+                {sortedItems.filter(item => {
+                  const sig = signals.find(s => s.ticker.toUpperCase() === item.ticker.toUpperCase() && (!s.source || s.source.includes("WATCHLIST")));
+                  return sig && sig.signal_score > 0;
+                }).length === 0 && (
+                  <span className="text-[11px] text-zinc-500">현재 포착된 시그널 없음</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className={`overflow-x-auto min-h-[300px] ${!isExpanded ? 'hidden lg:block' : 'block'}`}>
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="text-zinc-500 border-b border-zinc-800/50 text-[11px] uppercase tracking-wider">
+                  <th className="px-5 py-3 font-semibold">Ticker</th>
+                  <th className="px-2 py-3 font-semibold">SIGNAL SCORE</th>
+                  <th className="px-5 py-3 font-semibold text-right"></th>
                 </tr>
-              ) : (
-                items.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-800/20 transition-colors group">
-                    <td className="px-5 py-3">
-                      <div className="flex flex-col">
-                        <span className="font-bold text-slate-200 text-sm tracking-tight">{item.ticker}</span>
-                        <span className="text-[10px] text-slate-500 truncate max-w-[120px]">{item.ticker_name}</span>
-                      </div>
-                    </td>
-                    <td className="px-2 py-3">
-                      {/* Premium Score Visualization */}
-                      {(() => {
-                        const sig = signals.find(s => s.ticker.toUpperCase() === item.ticker.toUpperCase() && (!s.source || s.source.includes("WATCHLIST")));
-                        if (sig) {
-                          const score = sig.signal_score;
-                          const scoreColor = score >= 80 ? 'text-rose-500 bg-rose-500/10 border-rose-500/20' : 
-                                            score >= 60 ? 'text-amber-500 bg-amber-500/10 border-amber-500/20' : 
-                                            'text-blue-400 bg-blue-500/10 border-blue-500/20';
-                          const barColor = score >= 80 ? 'bg-rose-500' : score >= 60 ? 'bg-amber-500' : 'bg-blue-400';
-                          return (
-                            <div className="flex items-center space-x-3">
-                              <div className={`w-8 h-8 rounded-full border flex items-center justify-center text-[11px] font-black ${scoreColor}`}>
-                                {score}
-                              </div>
-                              <div className="flex-1 max-w-[50px] h-1.5 bg-slate-800 rounded-full overflow-hidden hidden sm:block">
-                                <div className={`h-full ${barColor} rounded-full`} style={{ width: `${score}%` }}></div>
-                              </div>
-                            </div>
-                          );
-                        } else {
-                          return (
-                            <div className="flex items-center space-x-2 py-1.5">
-                              <div className="w-1.5 h-1.5 rounded-full bg-slate-600 animate-pulse"></div>
-                              <span className="text-[10px] text-slate-500 font-medium tracking-tight">대기중</span>
-                            </div>
-                          );
-                        }
-                      })()}
-                    </td>
-                    <td className="px-5 py-3 text-right">
-                      <button 
-                        onClick={() => handleDelete(item.id)}
-                        disabled={deletingId === item.id}
-                        className="p-1.5 text-slate-600 hover:text-rose-400 hover:bg-rose-400/10 rounded-md transition-all opacity-40 group-hover:opacity-100 cursor-pointer"
-                        title="관심종목 삭제"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/30">
+                {sortedItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="px-5 py-12 text-center text-zinc-500 text-xs">
+                      <p className="mb-1">관심종목이 비어있습니다.</p>
+                      <p className="text-[11px] text-zinc-600">위의 + 버튼을 눌러 티커를 추가하세요.</p>
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  sortedItems.map((item) => {
+                    const sig = signals.find(s => s.ticker.toUpperCase() === item.ticker.toUpperCase() && (!s.source || s.source.includes("WATCHLIST")));
+                    const hasSignal = sig && sig.signal_score > 0;
+                    
+                    return (
+                    <tr key={item.id} className="hover:bg-zinc-800/20 transition-colors group">
+                      <td className={`px-5 ${hasSignal ? 'py-3' : 'py-1.5'}`}>
+                        <div className="flex flex-col">
+                          <span className={`font-bold tracking-tight ${hasSignal ? 'text-zinc-200 text-sm' : 'text-zinc-500 text-xs'}`}>{item.ticker}</span>
+                          {hasSignal && <span className="text-[11px] text-zinc-500 truncate max-w-[120px]">{item.ticker_name}</span>}
+                        </div>
+                      </td>
+                      <td className={`px-2 ${hasSignal ? 'py-3' : 'py-1.5'}`}>
+                        {/* Premium Score Visualization */}
+                        {hasSignal ? (
+                          <div className="flex items-center space-x-3">
+                            <div className={`w-8 h-8 rounded-full border flex items-center justify-center text-[11px] font-black ${getScoreColor(sig.signal_score)}`}>
+                              {sig.signal_score}
+                            </div>
+                            <div className="flex-1 max-w-[50px] h-1.5 bg-zinc-800 rounded-full overflow-hidden hidden sm:block border border-zinc-800">
+                              <div className={`h-full rounded-full transition-all duration-1000 ${getScoreBarColor(sig.signal_score)}`} style={{ width: `${sig.signal_score}%` }}></div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center space-x-2 py-0.5">
+                            <div className="w-1.5 h-1.5 rounded-full bg-zinc-700"></div>
+                            <span className="text-[11px] text-zinc-600 font-medium tracking-tight">대기중</span>
+                          </div>
+                        )}
+                      </td>
+                      <td className={`px-5 text-right ${hasSignal ? 'py-3' : 'py-1.5'}`}>
+                        <button 
+                          onClick={() => handleDelete(item.id)}
+                          disabled={deletingId === item.id}
+                          className="p-1.5 text-zinc-600 hover:text-rose-400 hover:bg-rose-400/10 rounded-md transition-all opacity-40 group-hover:opacity-100 cursor-pointer"
+                          title="관심종목 삭제"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
         <BotSignals hideHeader={true} />
