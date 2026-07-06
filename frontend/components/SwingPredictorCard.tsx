@@ -1,14 +1,14 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Compass, ShieldCheck, Flame, Layers, TrendingUp, TrendingDown, HelpCircle, Activity, RefreshCw } from 'lucide-react';
 
-import { scannerAPI } from '@/lib/api';
+import { scannerAPI, translationAPI } from '@/lib/api';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/api';
 import { useTimezone } from '@/store/timezoneStore';
 import { toast } from 'sonner';
-import { cn, reportHandledError } from '@/lib/utils';
+import { cn, reportHandledError, getScoreColor, getScoreBarColor } from '@/lib/utils';
 import { ScannerTabs, type ScannerTab } from '@/components/ScannerTabs';
 
 interface SwingPredictorCardProps {
@@ -43,6 +43,19 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
   const updatedAt = payload.updated_at;
 
   const [refreshing, setRefreshing] = useState(false);
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    translationAPI.getAll().then(res => {
+      const map: Record<string, string> = {};
+      res.data.forEach((t: { ticker: string; name_ko: string }) => {
+        map[t.ticker.toUpperCase()] = t.name_ko;
+      });
+      setTranslations(map);
+    }).catch(err => {
+      console.warn("Failed to load translations", err);
+    });
+  }, []);
   const { selectedTimezone } = useTimezone();
   const loading = swrLoading;
 
@@ -98,7 +111,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
           <div>
             <h3 className="text-base font-black text-slate-200 tracking-tight flex items-center gap-2">
               내일 세력돌파 예측 스윙 스캐너
-              <span className="text-[9px] bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-2 py-0.5 rounded font-black uppercase tracking-wider">
+              <span className="text-[11px] bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-2 py-0.5 rounded font-black uppercase tracking-wider">
                 Daily Swing
               </span>
             </h3>
@@ -106,7 +119,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
           </div>
         </div>
         <div className="flex items-center gap-2 self-end md:self-auto">
-          <span className="text-[10px] bg-zinc-900 text-zinc-400 border border-zinc-800 font-mono px-3 py-1 rounded-full flex items-center gap-1.5 select-none">
+          <span className="text-[11px] bg-zinc-900 text-zinc-400 border border-zinc-800 font-mono px-3 py-1 rounded-full flex items-center gap-1.5 select-none">
             <span className={cn(
               "w-1.5 h-1.5 rounded-full animate-pulse",
               syncStatus === "fresh" ? "bg-emerald-500" :
@@ -117,7 +130,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
             GLOBAL MARKET · {syncStatus.toUpperCase()} SWING SIGNALS
           </span>
           {updatedAt && (
-            <span className="text-[10px] text-zinc-400 font-mono flex items-center gap-1.5">
+            <span className="text-[11px] text-zinc-400 font-mono flex items-center gap-1.5">
               <span className="bg-zinc-800/80 text-zinc-400 px-1.5 py-0.5 rounded font-black tracking-widest">{selectedTimezone.abbr}</span>
               {new Date(updatedAt).toLocaleTimeString('ko-KR', {
                 timeZone: selectedTimezone.timeZone,
@@ -127,7 +140,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
           <button
             onClick={() => refreshSwingCandidates()}
             disabled={refreshing}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50 border border-zinc-800"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50 border border-zinc-800 whitespace-nowrap"
             title="모든 사용자가 공유하는 공용 시장 주도주 풀의 스윙 예측을 새로 계산합니다"
           >
             <RefreshCw size={13} className={cn(refreshing && "animate-spin text-indigo-400")} />
@@ -152,18 +165,23 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {candidates.map((c) => {
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {candidates.map((c, index) => {
             // 점수에 따른 테마 색상 결정
             const isHighProb = c.score >= 80;
-            const isMidProb = c.score >= 50 && c.score < 80;
+            
             
             return (
 
               <div 
                 key={c.ticker} 
-                className="bg-zinc-900/40 hover:bg-zinc-900/80 border border-zinc-800/80 hover:border-indigo-500/30 rounded-2xl p-5 transition-all duration-300 relative overflow-hidden group"
-              >
+                className={cn("bg-zinc-900/40 hover:bg-zinc-900/80 border rounded-2xl p-5 transition-all duration-300 relative overflow-hidden group", index === 0 ? "border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.15)]" : "border-zinc-800/80 hover:border-indigo-500/30")}>
+                {/* 1위 강조 뱃지 */}
+                {index === 0 && (
+                  <div className="absolute top-0 right-0 bg-amber-500/20 text-amber-400 text-[11px] font-black px-2 py-1 rounded-bl-xl border-l border-b border-amber-500/30 flex items-center gap-1">
+                    👑 RANK 1
+                  </div>
+                )}
                 {/* 점수에 따른 우측 상단 글로우 효과 */}
                 {isHighProb && (
                   <div className="absolute -top-10 -right-10 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl group-hover:bg-indigo-500/20 transition-colors duration-300"></div>
@@ -171,14 +189,19 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
 
                 <div className="flex justify-between items-start mb-4 relative z-10">
                   <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg font-black text-slate-100 group-hover:text-indigo-400 transition-colors duration-300">{c.ticker}</span>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-lg font-black text-zinc-100 group-hover:text-indigo-400 transition-colors duration-300">{c.ticker}</span>
+                      {translations[c.ticker.toUpperCase()] && (
+                        <span className="text-xs font-bold text-zinc-400 truncate max-w-[120px]" title={translations[c.ticker.toUpperCase()]}>
+                          {translations[c.ticker.toUpperCase()]}
+                        </span>
+                      )}
                       {c.is_bullish_trend ? (
-                        <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-black select-none">
+                        <span className="text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-black select-none">
                           정배열 추세
                         </span>
                       ) : (
-                        <span className="text-[9px] bg-zinc-800 text-zinc-500 border border-zinc-700/50 px-1.5 py-0.5 rounded font-black select-none">
+                        <span className="text-[11px] bg-zinc-800 text-zinc-500 border border-zinc-700/50 px-1.5 py-0.5 rounded font-black select-none">
                           보합/횡보
                         </span>
                       )}
@@ -188,12 +211,12 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
 
                   <div className="flex flex-col items-end">
                     {c.change_pct >= 0 ? (
-                      <span className="text-xs font-bold text-rose-500 flex items-center gap-0.5">
+                      <span className="text-xs font-bold text-rose-400 flex items-center gap-0.5">
                         <TrendingUp size={14} />
                         +{c.change_pct}%
                       </span>
                     ) : (
-                      <span className="text-xs font-bold text-emerald-400 flex items-center gap-0.5">
+                      <span className="text-xs font-bold text-rose-400 flex items-center gap-0.5">
                         <TrendingDown size={14} />
                         {c.change_pct}%
                       </span>
@@ -205,78 +228,68 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
                 <div className="mb-4">
                   <div className="flex justify-between items-center text-xs mb-1.5 font-bold">
                     <span className="text-zinc-400">내일 세력돌파 예상 점수</span>
-                    <span className={`
-                      ${isHighProb ? 'text-indigo-400 font-black' : isMidProb ? 'text-emerald-400 font-black' : 'text-zinc-500'}
-                    `}>
+                    <span className={getScoreColor(c.score).split(' ')[0] + ' font-black'}>
                       {c.score} / 100
                     </span>
                   </div>
                   <div className="w-full h-2.5 bg-zinc-950 rounded-full overflow-hidden p-0.5 border border-zinc-800">
-                    <div 
-                      className={`h-full rounded-full transition-all duration-1000 bg-gradient-to-r
-                        ${isHighProb 
-                          ? 'from-indigo-500 via-purple-500 to-pink-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]' 
-                          : isMidProb 
-                          ? 'from-emerald-500 to-teal-500' 
-                          : 'from-zinc-600 to-zinc-500'
-                        }
-                      `}
+                    <div className={`h-full rounded-full transition-all duration-1000 ${getScoreBarColor(c.score)}`}
                       style={{ width: `${c.score}%` }}
                     ></div>
                   </div>
                 </div>
 
                 {/* 퀀트 다중 진단 조건 배지들 */}
-                <div className="flex flex-wrap gap-2 pt-2 border-t border-zinc-900 text-[10px] font-black">
+                <div className="flex flex-wrap gap-2 pt-2 border-t border-zinc-900 text-[11px] font-bold">
                   {/* VCP 수축 배지 */}
                   {c.vcp_triggered ? (
-                    <span className="bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-1 rounded-lg flex items-center gap-1">
-                      <ShieldCheck size={11} />
+                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg flex items-center gap-1 cursor-help" title="주가 변동성이 극도로 축소되며 세력이 에너지를 응축하는 VCP 패턴 완료 (호재)">
+                      <ShieldCheck size={11} className="text-amber-400" />
                       VCP 수렴 완료
                     </span>
                   ) : c.bollinger_band_width_percentile < 30.0 ? (
-                    <span className="bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 px-2 py-1 rounded-lg flex items-center gap-1">
-                      <Layers size={11} />
+                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg flex items-center gap-1 cursor-help" title="VCP 패턴 진행 중으로 변동성이 줄어들고 있음">
+                      <Layers size={11} className="text-indigo-400" />
                       VCP 진폭 압축 중
                     </span>
                   ) : null}
 
                   {/* Volume Dry-up 배지 */}
                   {c.vud_ratio <= 0.40 ? (
-                    <span className="bg-rose-500/10 text-rose-400 border border-rose-500/30 px-2 py-1 rounded-lg flex items-center gap-1">
-                      <Activity size={11} className="animate-pulse" />
+                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg flex items-center gap-1 cursor-help" title="거래량이 극단적으로 마르며 매도세가 소진되었음을 의미 (강력한 반등 신호)">
+                      <Activity size={11} className="animate-pulse text-emerald-400" />
                       VUD 극감 (매도 씨 마름)
                     </span>
                   ) : c.vud_ratio <= 0.70 ? (
-                    <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded-lg">
+                    <span className="bg-zinc-800/80 text-zinc-400 border border-zinc-700 px-2 py-1 rounded-lg cursor-help" title="최근 거래량이 줄어들며 조정 장세가 마무리되는 중">
                       VUD 건조 ({Math.round(c.vud_ratio * 100)}%)
                     </span>
                   ) : (
-                    <span className="bg-zinc-800/80 text-zinc-500 border border-zinc-800 px-2 py-1 rounded-lg">
+                    <span className="bg-zinc-900 text-zinc-500 border border-zinc-800 px-2 py-1 rounded-lg cursor-help" title="평소와 비슷한 거래량 유지 중">
                       거래량 보합 ({Math.round(c.vud_ratio * 100)}%)
                     </span>
                   )}
 
                   {/* OBV 세력 매집 다이버전스 배지 */}
                   {c.obv_divergence > 10.0 ? (
-                    <span className="bg-rose-500/10 text-rose-400 border border-rose-500/30 px-2 py-1 rounded-lg flex items-center gap-1">
-                      <Flame size={11} />
+                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg flex items-center gap-1 cursor-help" title="거래량이 극단적으로 마르며 매도세가 소진되었음을 의미 (강력한 반등 신호)">
+                      <Flame size={11} className="text-amber-400" />
                       OBV 세력 매집중 ({c.obv_divergence.toFixed(0)}%)
                     </span>
                   ) : c.obv_divergence > 1.0 ? (
-                    <span className="bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-1 rounded-lg">
+                    <span className="bg-zinc-800/80 text-zinc-400 border border-zinc-700 px-2 py-1 rounded-lg cursor-help" title="약한 수준의 세력 매집 시그널 포착">
                       OBV 매집 포착 ({c.obv_divergence.toFixed(0)}%)
                     </span>
                   ) : null}
 
                   {/* BB 스퀴즈 압착 강도 배지 */}
                   {c.bollinger_band_width_percentile <= 20.0 ? (
-                    <span className="bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 px-2 py-1 rounded-lg">
-                      🧭 BB 대압착 (에너지 100% 장착)
+                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg cursor-help flex items-center gap-1" title="볼린저 밴드가 극도로 압착되어 조만간 폭발적인 추세가 나올 가능성 높음"><span className="text-indigo-400">🧭</span>
+                      BB 대압착 (에너지 100% 장착)
                     </span>
                   ) : c.bollinger_band_width_percentile <= 40.0 ? (
-                    <span className="bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-1 rounded-lg">
-                      🧭 BB 수축 (에너지 충전중)
+                    <span className="bg-zinc-800/80 text-zinc-400 border border-zinc-700 px-2 py-1 rounded-lg cursor-help flex items-center gap-1" title="볼린저 밴드가 수축되며 방향성을 탐색 중"><span className="text-purple-400">🧭</span>
+                      BB 수축 (에너지 충전중)
                     </span>
                   ) : null}
                 </div>

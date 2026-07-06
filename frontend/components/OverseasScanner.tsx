@@ -93,7 +93,7 @@ function HeaderTooltip({ title, desc }: HeaderTooltipProps) {
     <span className="group/tip relative inline-flex items-center gap-1 cursor-help justify-center">
       <span className="font-semibold text-zinc-500 group-hover/tip:text-zinc-300 transition-colors">{title}</span>
       <Info size={11} className="text-zinc-600 group-hover/tip:text-zinc-400 transition-colors" />
-      <span className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 w-56 scale-90 opacity-0 group-hover/tip:scale-100 group-hover/tip:opacity-100 transition-all duration-200 bg-zinc-950 text-zinc-300 text-[10px] font-normal leading-relaxed p-2.5 rounded-lg shadow-xl border border-zinc-850 z-50 text-left normal-case whitespace-normal">
+      <span className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 w-56 scale-90 opacity-0 group-hover/tip:scale-100 group-hover/tip:opacity-100 transition-all duration-200 bg-zinc-950 text-zinc-300 text-[11px] font-normal leading-relaxed p-2.5 rounded-lg shadow-xl border border-zinc-850 z-50 text-left normal-case whitespace-normal">
         {desc}
       </span>
     </span>
@@ -178,7 +178,7 @@ export function OverseasScanner({
 
         <div className="flex items-center gap-3">
           {lastUpdated && (
-            <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1.5 select-none">
+            <span className="text-[11px] text-zinc-500 font-mono flex items-center gap-1.5 select-none">
               <span className="bg-zinc-800/80 text-zinc-400 px-1.5 py-0.5 rounded font-black tracking-widest">{selectedTimezone.abbr}</span>
               Last update: {lastUpdated.toLocaleTimeString('ko-KR', {
                 timeZone: selectedTimezone.timeZone,
@@ -220,7 +220,7 @@ export function OverseasScanner({
         ) : (
           <table className="w-full min-w-[850px] text-left border-collapse">
             <thead>
-              <tr className="border-b border-zinc-800/50 text-zinc-500 text-[10px] uppercase tracking-[0.1em]">
+              <tr className="border-b border-zinc-800/50 text-zinc-500 text-[11px] uppercase tracking-[0.1em]">
                 <th className="py-4 px-5 font-semibold">Rank</th>
                 <th className="py-4 px-2 font-semibold">Ticker / Name</th>
                 <th className="py-4 px-4 font-semibold text-right">Price</th>
@@ -271,7 +271,7 @@ export function OverseasScanner({
 
                           {/* 티커 + 패턴 뱃지 한 줄 */}
                           <div className="flex items-center gap-1.5">
-                            <span className="text-zinc-500 font-mono text-[10px] uppercase tracking-wider">
+                            <span className="text-zinc-500 font-mono text-[11px] uppercase tracking-wider">
                               {item.ticker}
                             </span>
                             {item.patterns && item.patterns.length > 0 && (
@@ -298,7 +298,7 @@ export function OverseasScanner({
                                 title="클릭해서 AI 뉴스 분석 보기"
                               >
                                 <div className={cn(
-                                  "flex items-center gap-1 text-[9px] font-bold",
+                                  "flex items-center gap-1 text-[11px] font-bold",
                                   isPositive ? "text-emerald-400" : isNegative ? "text-rose-400" : "text-sky-400"
                                 )}>
                                   {/* 감성 아이콘 */}
@@ -360,13 +360,13 @@ export function OverseasScanner({
                         <div className="flex flex-col items-center gap-1.5">
                           <div className="flex items-center gap-1.5">
                             <span className={cn(
-                              "text-[9px] px-1.5 py-0.5 rounded font-bold border",
+                              "text-[11px] px-1.5 py-0.5 rounded font-bold border",
                               d.ema_aligned ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-zinc-500/10 text-zinc-500 border-zinc-700/30"
                             )}>
                               {d.ema_aligned ? "UPTREND" : "SIDEWAYS"}
                             </span>
                             <span className={cn(
-                              "text-[10px] font-mono font-bold",
+                              "text-[11px] font-mono font-bold",
                               d.rs > 0 ? "text-indigo-400" : "text-zinc-500"
                             )}>
                               RS {d.rs > 0 ? '+' : ''}{d.rs.toFixed(1)}
@@ -385,7 +385,7 @@ export function OverseasScanner({
                       <td className="py-4 px-4">
                         <div className="flex flex-col items-center gap-1.5">
                           <span className={cn(
-                            "text-[9px] px-1.5 py-0.5 rounded-full font-bold border",
+                            "text-[11px] px-1.5 py-0.5 rounded-full font-bold border",
                             d.risk === "LOW" ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" :
                             d.risk === "HIGH" ? "bg-rose-500/10 text-rose-500 border-rose-500/20 animate-bounce" :
                             "bg-amber-500/10 text-amber-500 border-amber-500/20"
@@ -393,7 +393,7 @@ export function OverseasScanner({
                             {d.risk} RISK
                           </span>
                           <div className="flex items-center gap-1">
-                            <span className="text-[10px] text-zinc-500 font-medium">Wick: {(d.wick * 100).toFixed(0)}%</span>
+                            <span className="text-[11px] text-zinc-500 font-medium">Wick: {(d.wick * 100).toFixed(0)}%</span>
                             {d.wick >= 0.5 && <Zap size={10} className="text-rose-500 fill-rose-500" />}
                           </div>
                         </div>
@@ -403,7 +403,7 @@ export function OverseasScanner({
                       <td className="py-4 px-4 text-center">
                         <div className="flex flex-col items-center gap-1.5">
                           <div className={cn(
-                            "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-black tracking-widest transition-all group-hover:scale-105",
+                            "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-black tracking-widest transition-all group-hover:scale-105",
                             signal.bg, signal.color
                           )}>
                             <SignalIcon size={12} strokeWidth={3} />
@@ -419,7 +419,7 @@ export function OverseasScanner({
                                 style={{ width: `${item.signal_score}%` }}
                               />
                             </div>
-                            <span className="text-[10px] text-zinc-400 font-mono font-bold flex items-center gap-1">
+                            <span className="text-[11px] text-zinc-400 font-mono font-bold flex items-center gap-1">
                               {item.signal_score}
                               <BarChart2 size={11} className="text-zinc-600 group-hover:text-indigo-400 transition-colors" />
                             </span>
@@ -456,7 +456,7 @@ export function OverseasScanner({
 
       {/* 푸터 정보 */}
       <div className="px-5 py-3 bg-white/[0.01] border-t border-zinc-800/50 flex justify-between items-center">
-        <div className="flex items-center gap-4 text-[10px] text-zinc-650 font-medium">
+        <div className="flex items-center gap-4 text-[11px] text-zinc-650 font-medium">
           <div className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
             <span>Gap UP</span>
@@ -470,7 +470,7 @@ export function OverseasScanner({
             <span>Trend Aligned</span>
           </div>
         </div>
-        <div className="text-[10px] text-zinc-500 italic flex items-center gap-1">
+        <div className="text-[11px] text-zinc-500 italic flex items-center gap-1">
           <BarChart2 size={10} className="text-zinc-600" />
           행 클릭: 스코어 상세 &nbsp;·&nbsp; AI 칩 클릭: 뉴스 분석
         </div>
@@ -509,7 +509,7 @@ export function OverseasScanner({
                 </div>
                 <div>
                   <h3 className="text-sm font-black text-white tracking-wide uppercase">Technical Score Breakdown</h3>
-                  <p className="text-[10px] text-zinc-500 font-mono tracking-wider mt-0.5">
+                  <p className="text-[11px] text-zinc-500 font-mono tracking-wider mt-0.5">
                     QUANT SCORECARD · {selectedScoreItem.name} ({selectedScoreItem.ticker})
                   </p>
                 </div>
@@ -546,7 +546,7 @@ export function OverseasScanner({
                   />
                 </div>
                 {/* 점수 구간 레이블 */}
-                <div className="flex justify-between mt-2 text-[9px] text-zinc-700 font-mono">
+                <div className="flex justify-between mt-2 text-[11px] text-zinc-700 font-mono">
                   <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
                 </div>
               </div>
@@ -576,7 +576,7 @@ export function OverseasScanner({
                         </span>
                       </div>
                       <span className={cn(
-                        "font-mono text-[10px] px-1.5 py-0.5 rounded font-extrabold shrink-0 ml-2",
+                        "font-mono text-[11px] px-1.5 py-0.5 rounded font-extrabold shrink-0 ml-2",
                         card.passed ? "bg-emerald-500/15 text-emerald-400" : "bg-rose-500/10 text-rose-500"
                       )}>
                         {card.score > 0 ? `+${card.score}` : card.score}
@@ -638,7 +638,7 @@ export function OverseasScanner({
                 </div>
                 <div>
                   <h3 className="text-sm font-black text-white tracking-wide uppercase">AI Sentiment & Signals</h3>
-                  <p className="text-[10px] text-zinc-500 font-mono tracking-wider">{selectedNewsItem.name} ({selectedNewsItem.ticker})</p>
+                  <p className="text-[11px] text-zinc-500 font-mono tracking-wider">{selectedNewsItem.name} ({selectedNewsItem.ticker})</p>
                 </div>
               </div>
 
@@ -661,12 +661,12 @@ export function OverseasScanner({
 
             {/* Sentiment spectrum */}
             <div className="flex flex-col gap-2.5 bg-zinc-950/60 p-4.5 rounded-xl border border-zinc-850/80 mb-4 shadow-inner">
-              <div className="flex justify-between items-center text-[10px] text-zinc-500 font-extrabold tracking-wide">
+              <div className="flex justify-between items-center text-[11px] text-zinc-500 font-extrabold tracking-wide">
                 <span>BEARISH 📉</span>
                 <span className="text-xs font-black text-white font-mono flex items-center gap-1.5">
                   뉴스 심리 온도
                   <span className={cn(
-                    "px-1.5 py-0.5 rounded text-[10px] font-mono",
+                    "px-1.5 py-0.5 rounded text-[11px] font-mono",
                     (selectedNewsItem.news_sentiment_score ?? 50) >= 60 ? "bg-emerald-500/10 text-emerald-400" :
                     (selectedNewsItem.news_sentiment_score ?? 50) <= 40 ? "bg-rose-500/10 text-rose-400" :
                     "bg-zinc-800 text-zinc-400"
@@ -689,14 +689,14 @@ export function OverseasScanner({
               <div>
                 <div className="flex items-center justify-between gap-2 mb-3.5">
                   <span className={cn(
-                    "text-[9px] font-black px-2 py-0.5 rounded border tracking-widest",
+                    "text-[11px] font-black px-2 py-0.5 rounded border tracking-widest",
                     selectedNewsItem.news_sentiment === "POSITIVE" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
                     selectedNewsItem.news_sentiment === "NEGATIVE" ? "bg-rose-500/10 text-rose-450 border-rose-500/20" :
                     "bg-zinc-500/10 text-zinc-400 border-zinc-850"
                   )}>
                     {selectedNewsItem.news_sentiment ?? "NEUTRAL"}
                   </span>
-                  <span className="text-[9px] text-zinc-500 font-bold font-mono tracking-wider">AI REAL-TIME ANALYSIS</span>
+                  <span className="text-[11px] text-zinc-500 font-bold font-mono tracking-wider">AI REAL-TIME ANALYSIS</span>
                 </div>
                 
                 <div className="relative pl-4 border-l-2 border-indigo-500/30">
@@ -711,7 +711,7 @@ export function OverseasScanner({
                   href={selectedNewsItem.news_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="self-end flex items-center gap-1.5 mt-4 text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors font-black uppercase tracking-widest group/link"
+                  className="self-end flex items-center gap-1.5 mt-4 text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors font-black uppercase tracking-widest group/link"
                 >
                   원문 기사 읽기
                   <ExternalLink size={11} className="group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5 transition-transform" />

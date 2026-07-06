@@ -192,7 +192,7 @@ export function AfterHoursScanner({
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-black text-white">{candidate.ticker}</span>
                           <span className={cn(
-                            'text-[9px] px-1.5 py-0.5 rounded border font-black',
+                            'text-[11px] px-1.5 py-0.5 rounded border font-black whitespace-nowrap',
                             strong ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
                             watch ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
                             'bg-zinc-800 text-zinc-500 border-zinc-700'
@@ -201,18 +201,18 @@ export function AfterHoursScanner({
                           </span>
                         </div>
                         <span className="text-[11px] text-zinc-500 font-medium truncate max-w-[180px]">{candidate.name}</span>
-                        <span className="text-[10px] text-zinc-600 font-mono">{candidate.session_date}</span>
+                        <span className="text-[11px] text-zinc-600 font-mono">{candidate.session_date}</span>
                       </div>
                     </td>
                     <td className="py-4 px-3 text-right">
                       <div className="flex flex-col items-end gap-1">
                         <span className="text-sm text-zinc-200 font-mono font-bold">${candidate.price.toFixed(2)}</span>
-                        <span className="text-[10px] text-zinc-600 font-mono">Close ${candidate.regular_close.toFixed(2)}</span>
+                        <span className="text-[11px] text-zinc-600 font-mono">Close ${candidate.regular_close.toFixed(2)}</span>
                       </div>
                     </td>
                     <td className="py-4 px-3">
                       <div className="flex flex-col items-center gap-1.5 text-[11px] font-bold">
-                        <span className={candidate.details.regular_change_pct >= 0 ? 'text-rose-400' : 'text-blue-400'}>
+                        <span className={candidate.details.regular_change_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
                           정규장 {candidate.details.regular_change_pct >= 0 ? '+' : ''}{candidate.details.regular_change_pct}%
                         </span>
                         <span className="text-zinc-400">마감 1h {candidate.details.final_hour_return_pct >= 0 ? '+' : ''}{candidate.details.final_hour_return_pct}%</span>
@@ -231,19 +231,19 @@ export function AfterHoursScanner({
                     <td className="py-4 px-3">
                       <div className="flex flex-wrap gap-1.5 max-w-[300px]">
                         {candidate.reasons.slice(0, 4).map((reason) => (
-                          <span key={reason} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[10px] font-bold">
+                          <span key={reason} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[11px] font-bold">
                             <ShieldCheck size={10} />
                             {reason}
                           </span>
                         ))}
                         {candidate.catalyst_keywords.map((keyword) => (
-                          <span key={keyword} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-[10px] font-bold">
+                          <span key={keyword} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-[11px] font-bold">
                             <Zap size={10} />
                             {keyword}
                           </span>
                         ))}
                         {candidate.risk_flags.slice(0, 3).map((flag) => (
-                          <span key={flag} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20 text-[10px] font-bold">
+                          <span key={flag} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/20 text-[11px] font-bold">
                             <AlertTriangle size={10} />
                             {flag}
                           </span>
@@ -269,7 +269,7 @@ export function AfterHoursScanner({
                         onClick={() => handleAddToWatchlist(candidate.ticker, candidate.name)}
                         disabled={isAdding || isInWatchlist || !onAddToWatchlist}
                         className={cn(
-                          "inline-flex items-center gap-1.5 px-2.5 py-1.5 border rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50",
+                          "inline-flex items-center gap-1.5 px-2.5 py-1.5 border rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50 whitespace-nowrap",
                           isInWatchlist
                             ? "bg-zinc-800/70 text-zinc-400 border-zinc-700"
                             : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
