@@ -6,7 +6,7 @@ import httpx
 from app.core.config import settings
 
 
-DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_GEMINI_TIMEOUT_SECONDS = 8.0
 
 

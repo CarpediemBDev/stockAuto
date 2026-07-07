@@ -301,6 +301,8 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
         news_map = {t: res for t, res in zip(candidate_tickers, news_results)}
         fundamental_map = {t: res for t, res in zip(candidate_tickers, fundamental_results)}
         
+        ai_news_count = 0
+        
         for cand in candidates:
             ticker = cand['ticker']
             try:
@@ -340,8 +342,20 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                     logger.info(f"[Scanner Filter] {ticker} discarded - Negative earnings (not healthy).")
                     continue
                 
+                # 💡 AI 호출 횟수 최적화 (다이나믹 스로틀링): 
+                # 1. 기본적으로 뉴스가 있는 상위 3개 종목은 무조건 AI 정밀 분석 수행
+                # 2. 4순위 이하라도 s1_score가 90점 이상인 '초강력 매수 후보'라면 최대 10개까지 AI 분석 허용 (RPM 15 방어)
+                force_local = True
+                if len(news_list) > 0:
+                    if ai_news_count < 3:
+                        force_local = False
+                        ai_news_count += 1
+                    elif ai_news_count < 10 and cand.get('s1_score', 0) >= 90:
+                        force_local = False
+                        ai_news_count += 1
+                
                 # AI 기반 뉴스 감성 판독 호출 (Gemini API + 로컬 룰 백업 하이브리드 엔진)
-                news_analysis = await analyze_news_sentiment(ticker, news_list)
+                news_analysis = await analyze_news_sentiment(ticker, news_list, force_local=force_local)
                 news_sentiment = news_analysis["sentiment"]
                 news_sentiment_score = news_analysis["sentiment_score"]
                 news_summary = news_analysis["summary"]
