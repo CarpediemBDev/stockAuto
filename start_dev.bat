@@ -6,13 +6,31 @@ set "BACKEND_DIR=%PROJECT_ROOT%backend"
 set "FRONTEND_DIR=%PROJECT_ROOT%frontend"
 set "BACKEND_PYTHON=%BACKEND_DIR%\venv\Scripts\python.exe"
 set "CHECK_ONLY=0"
+set "KILL_EXISTING=0"
 
-if /I "%~1"=="--check" set "CHECK_ONLY=1"
-if not "%~1"=="" if /I not "%~1"=="--check" (
-    echo [FAIL] Unsupported argument: %~1
-    echo Usage: start_dev.bat [--check]
-    exit /b 2
+:parse_args
+if "%~1"=="" goto :args_done
+if /I "%~1"=="--check" (
+    set "CHECK_ONLY=1"
+    shift
+    goto :parse_args
 )
+if /I "%~1"=="--kill" (
+    set "KILL_EXISTING=1"
+    shift
+    goto :parse_args
+)
+if /I "%~1"=="--restart" (
+    set "KILL_EXISTING=1"
+    shift
+    goto :parse_args
+)
+echo [FAIL] Unsupported argument: %1
+echo Usage: start_dev.bat [--check] [--kill] [--restart]
+exit /b 2
+
+:args_done
+
 
 pushd "%PROJECT_ROOT%" >nul 2>&1
 if errorlevel 1 (
@@ -132,8 +150,32 @@ goto :wait_redis
 :redis_ready
 echo [OK] Redis at 127.0.0.1:6379
 
+if "%KILL_EXISTING%"=="1" (
+    echo =============================================================
+    echo [INFO] Killing existing StockAuto frontend and backend...
+    echo =============================================================
+    
+    :: 1. Close cmd windows with titles starting with StockAuto Backend or StockAuto Frontend
+    taskkill /F /FI "WINDOWTITLE eq StockAuto Backend*" >nul 2>&1
+    taskkill /F /FI "WINDOWTITLE eq StockAuto Frontend*" >nul 2>&1
+    
+    :: 2. Find and kill processes listening on ports 8000 and 3000
+    for /f "tokens=5" %%A in ('netstat -ano ^| findstr /R /C:"[.:]8000 " ^| findstr LISTENING') do (
+        echo Killing backend process ^(PID %%A^) on port 8000...
+        taskkill /F /PID %%A >nul 2>&1
+    )
+    for /f "tokens=5" %%A in ('netstat -ano ^| findstr /R /C:"[.:]3000 " ^| findstr LISTENING') do (
+        echo Killing frontend process ^(PID %%A^) on port 3000...
+        taskkill /F /PID %%A >nul 2>&1
+    )
+    
+    :: Give OS a moment to release ports
+    powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 1" >nul 2>&1
+)
+
 set "START_BACKEND=1"
 set "START_FRONTEND=1"
+
 
 call :port_open 8000
 if errorlevel 1 goto :check_frontend_port
