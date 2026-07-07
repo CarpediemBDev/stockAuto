@@ -109,7 +109,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
             <Compass size={22} className="text-indigo-400" />
           </div>
           <div>
-            <h3 className="text-base font-black text-slate-200 tracking-tight flex items-center gap-2">
+            <h3 className="text-base font-black text-zinc-200 tracking-tight flex items-center gap-2">
               내일 세력돌파 예측 스윙 스캐너
               <span className="text-[11px] bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-2 py-0.5 rounded font-black uppercase tracking-wider">
                 Daily Swing
@@ -119,7 +119,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
           </div>
         </div>
         <div className="flex items-center gap-2 self-end md:self-auto">
-          <span className="text-[11px] bg-zinc-900 text-zinc-400 border border-zinc-800 font-mono px-3 py-1 rounded-full flex items-center gap-1.5 select-none">
+          <span className="text-[11px] bg-zinc-900 text-zinc-400 border border-zinc-800 font-mono px-3 py-1 rounded-full hidden sm:flex items-center gap-1.5 select-none whitespace-nowrap">
             <span className={cn(
               "w-1.5 h-1.5 rounded-full animate-pulse",
               syncStatus === "fresh" ? "bg-emerald-500" :
@@ -197,11 +197,11 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
                         </span>
                       )}
                       {c.is_bullish_trend ? (
-                        <span className="text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-black select-none">
+                        <span className="text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-black select-none whitespace-nowrap">
                           정배열 추세
                         </span>
                       ) : (
-                        <span className="text-[11px] bg-zinc-800 text-zinc-500 border border-zinc-700/50 px-1.5 py-0.5 rounded font-black select-none">
+                        <span className="text-[11px] bg-zinc-800 text-zinc-500 border border-zinc-700/50 px-1.5 py-0.5 rounded font-black select-none whitespace-nowrap">
                           보합/횡보
                         </span>
                       )}
@@ -211,7 +211,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
 
                   <div className="flex flex-col items-end">
                     {c.change_pct >= 0 ? (
-                      <span className="text-xs font-bold text-rose-400 flex items-center gap-0.5">
+                      <span className="text-xs font-bold text-emerald-400 flex items-center gap-0.5">
                         <TrendingUp size={14} />
                         +{c.change_pct}%
                       </span>
