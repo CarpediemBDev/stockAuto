@@ -163,7 +163,7 @@ class BacktestSimulator:
     과거 역사적 데이터를 로드하여 StockAuto v2.0 트레이딩 규칙과 자금 관리 모듈을 정밀 시뮬레이션하는 엔진.
     데이터 프로바이더를 연동하며 미래 데이터를 참조하지 않는 완벽한 Event-driven 방식으로 작동합니다.
     """
-    def __init__(self, tickers: list, start_date: str, end_date: str, interval: str = "1h", initial_cash: float = 10000.0, csv_path: str = None, strategy_type: str = "complex"):
+    def __init__(self, tickers: list, start_date: str, end_date: str, interval: str = "1h", initial_cash: float = 10000.0, csv_path: str = None, strategy_type: str = "complex", variant: str = "BASE"):
         self.tickers = list(set(tickers))
         self.start_date = start_date
         self.end_date = end_date
@@ -176,7 +176,28 @@ class BacktestSimulator:
         from app.strategies.strategy_factory import get_strategy
         self.strategy = get_strategy(strategy_type)
         
-        # 💡 이탈 연속 횟수 추적 캐시 (2회 연속 이탈 확정용)
+        # 💡 6대 변형 시나리오 제어 변수 설정
+        self.variant = variant.upper().strip()
+        
+        # 1) 이탈 확정 횟수 (exit_confirm_count): 기본값 2, BUF3/WHIP/FULL 일 때 3
+        if self.variant in ["BUF3", "WHIP", "FULL"]:
+            self.exit_confirm_count = 3
+        else:
+            self.exit_confirm_count = 2
+            
+        # 2) 당일 재진입 금지 (day_lock_enabled): LOCK/WHIP/FULL 일 때 True
+        if self.variant in ["LOCK", "WHIP", "FULL"]:
+            self.day_lock_enabled = True
+        else:
+            self.day_lock_enabled = False
+            
+        # 3) 상승장 100% 비중 강제 (bullish_alloc_100): P100/FULL 일 때 True
+        if self.variant in ["P100", "FULL"]:
+            self.bullish_alloc_100 = True
+        else:
+            self.bullish_alloc_100 = False
+            
+        # 💡 이탈 연속 횟수 추적 캐시
         self.breach_counts = {}  # {ticker: count}
         
         # 다운로드된 원시 데이터들 저장소
@@ -860,13 +881,13 @@ class BacktestSimulator:
                     is_breached = True
                     breach_reason = f"동적 트레일링 스탑 이탈 (최고가 대비 -{trailing_stop_pct:.2f}% 하락 | 수익률: {profit_rate:.2f}%)"
 
-                # 💡 손절선/트레일링 스탑 이탈 감지 시, 연속 2회 확정식 가드 적용
+                # 💡 손절선/트레일링 스탑 이탈 감지 시, 연속 N회 확정식 가드 적용
                 if is_breached:
                     self.breach_counts[ticker] = self.breach_counts.get(ticker, 0) + 1
                     count = self.breach_counts[ticker]
                     
-                    if count >= 2:
-                        sell_reason = breach_reason + " [2회 연속 이탈 확정]"
+                    if count >= self.exit_confirm_count:
+                        sell_reason = breach_reason + f" [{self.exit_confirm_count}회 연속 이탈 확정]"
                 else:
                     self.breach_counts.pop(ticker, None)
 
@@ -904,9 +925,13 @@ class BacktestSimulator:
                 price = current_prices[ticker]
                 row = self.processed_metrics[ticker].loc[t]
                 
-                # ① 매도 후 20분(또는 20개 봉) 쿨다운 검사
+                # ① 매도 후 20분(또는 20개 봉) 쿨다운 및 당일 재진입 락 검사
                 last_sell = self.broker.sell_cooldowns.get(ticker)
                 if last_sell:
+                    # 당일 재진입 금지 락(Day Lock) 검사
+                    if self.day_lock_enabled and t.date() == last_sell.date():
+                        continue  # 동일 날짜에 매도 이력이 있으면 진입 생략
+                        
                     # 봉 단위 인터벌에 맞춰 쿨다운 검사 (1분봉 -> 20분 / 1시간봉 -> 2봉 등 유동적 분기)
                     cooldown_minutes = 20 if self.interval == "1m" else 120
                     time_diff = (t - last_sell).total_seconds() / 60.0
@@ -945,6 +970,9 @@ class BacktestSimulator:
                 else:
                     # 💡 신규 포지션 진입 분기
                     proposed_alloc_factor = self.strategy.get_initial_entry_factor(regime)
+                    if self.bullish_alloc_100 and regime == "BULLISH":
+                        proposed_alloc_factor = 1.0
+                        
                     if regime == "BULLISH" and proposed_alloc_factor < 1.0:
                         next_stage = 1  # 정찰병 15% 진입
                     else:
