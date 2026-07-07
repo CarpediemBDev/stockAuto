@@ -6,7 +6,7 @@ import { Activity, AlertTriangle, Moon, RefreshCw, ShieldCheck, Star, TrendingUp
 import { toast } from 'sonner';
 
 import { fetcher, scannerAPI } from '@/lib/api';
-import { cn, reportHandledError } from '@/lib/utils';
+import { cn, reportHandledError, getScoreColor, getScoreBarColor } from '@/lib/utils';
 import { useTimezone } from '@/store/timezoneStore';
 import { ScannerTabs, type ScannerTab } from '@/components/ScannerTabs';
 
@@ -254,11 +254,11 @@ export function AfterHoursScanner({
                       <div className="flex flex-col items-center gap-1.5">
                         <div className="w-24 h-2 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800">
                           <div
-                            className={cn('h-full transition-all duration-1000', strong ? 'bg-emerald-500' : watch ? 'bg-amber-500' : 'bg-zinc-500')}
+                            className={cn('h-full transition-all duration-1000', getScoreBarColor(candidate.score))}
                             style={{ width: `${candidate.score}%` }}
                           />
                         </div>
-                        <span className={cn('text-xs font-black font-mono flex items-center gap-1', strong ? 'text-emerald-400' : watch ? 'text-amber-400' : 'text-zinc-500')}>
+                        <span className={cn('text-xs font-black font-mono flex items-center gap-1', getScoreColor(candidate.score).split(' ')[0])}>
                           <TrendingUp size={13} />
                           {candidate.score}
                         </span>

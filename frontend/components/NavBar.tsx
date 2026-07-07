@@ -12,10 +12,11 @@ import { useTimezone } from "@/store/timezoneStore";
 import { toast } from "sonner";
 import { Globe, Activity } from "lucide-react";
 
+// 모바일(<md)에서는 아이콘만 노출해 가로 오버플로를 막는다
 const navItems = [
-  { href: "/", label: "📈 자동 매매" },
-  { href: "/scanner", label: "🔭 마켓 스캐너" },
-  { href: "/report", label: "📊 매매 보고서" },
+  { href: "/", icon: "📈", text: "자동 매매" },
+  { href: "/scanner", icon: "🔭", text: "마켓 스캐너" },
+  { href: "/report", icon: "📊", text: "매매 보고서" },
 ];
 
 export function NavBar() {
@@ -89,19 +90,19 @@ export function NavBar() {
 
   return (
     <nav className="sticky top-0 z-[100] w-full backdrop-blur-md bg-black/50 border-b border-zinc-800">
-      <div className="max-w-[1600px] mx-auto px-6">
+      <div className="max-w-[1600px] mx-auto px-3 md:px-6">
         <div className="flex items-center justify-between h-16">
           {/* 로고 영역 */}
           <Link href="/" className="flex-shrink-0 flex items-center gap-3 group">
             <div className="w-8 h-8 rounded bg-gradient-to-br from-blue-500 to-emerald-500 flex items-center justify-center font-bold text-white group-hover:scale-110 transition-transform">
               SA
             </div>
-            <div className="flex flex-col">
+            <div className="hidden sm:flex flex-col">
               <span className="font-bold text-base tracking-tight leading-none">StockAuto</span>
               <span className="text-[11px] text-zinc-500 mt-1 leading-none">QUANT PLATFORM</span>
             </div>
             {!isAuthPage && username && (
-              <span className={`px-2 py-0.5 rounded text-[11px] font-black uppercase tracking-wider transition-colors duration-500 select-none ${
+              <span className={`hidden md:inline-block px-2 py-0.5 rounded text-[11px] font-black uppercase tracking-wider transition-colors duration-500 select-none whitespace-nowrap ${
                 tradeMode === 'REAL'
                   ? (isBotRunning ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-red-900/40 text-red-300 border border-red-700/50')
                   : tradeMode === 'MOCK'
@@ -119,9 +120,9 @@ export function NavBar() {
 
           {/* 메뉴 및 사용자 계정 영역 */}
           {!isAuthPage && (
-            <div className="flex items-center space-x-6">
+            <div className="flex items-center space-x-2 md:space-x-6">
               {/* 메인 메뉴 링크 */}
-              <div className="flex space-x-2">
+              <div className="flex space-x-1 md:space-x-2">
                 {navItems.map((item) => {
                   const isActive =
                     item.href === "/"
@@ -132,14 +133,15 @@ export function NavBar() {
                     <Link
                       key={item.href}
                       href={item.href}
+                      title={item.text}
                       className={cn(
-                        "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap",
+                        "px-3 md:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap",
                         isActive
                           ? "bg-zinc-800 text-white shadow-inner"
                           : "text-zinc-400 hover:text-white hover:bg-zinc-800/50"
                       )}
                     >
-                      {item.label}
+                      {item.icon} <span className="hidden md:inline">{item.text}</span>
                     </Link>
                   );
                 })}
@@ -147,7 +149,7 @@ export function NavBar() {
 
               {/* 사용자 계정 프로필 및 타임존 드롭다운 */}
               {username && (
-                <div className="flex items-center space-x-4 border-l border-zinc-800 pl-6">
+                <div className="flex items-center space-x-2 md:space-x-4 border-l border-zinc-800 pl-2 md:pl-6">
                   {/* 타임존 스위처 */}
                   <div ref={timezoneMenuRef} className="relative flex items-center">
                     <button

@@ -16,6 +16,7 @@ TOURNAMENT_STRATEGIES = (
     "strategy_a", "strategy_b", "strategy_c", "exploded_c", "senior_simple",
     "qullamaggie", "obv_only", "rsi_bb_only", "ema_only", "vwap_only",
     "orb_only", "rsi2_connors", "bb_squeeze", "regime_switching",
+    "cross_sectional_momentum",
     "episodic_pivot", "vcp_breakout", "pairs_trading", "weekend_trend",
     "darvas_box", "zscore_reversion", "heikin_ashi", "ichimoku_kumo",
     "parabolic_sar", "supertrend", "hma_swing", "coppock_curve", "elder_ray",
