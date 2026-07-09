@@ -54,61 +54,12 @@ class LocalSimulatedBroker(BaseBroker):
         total_eval_usd = Decimal('0.0000')
 
         if holdings:
-            # 💡 [캐시 최적화] 스케줄러 캐시로부터 실시간 가격을 먼저 매핑하여 yfinance 무차별 호출 차단
-            cache_prices = {}
-            try:
-                from app.bot.scheduler import latest_scanned_signals, latest_watchlist_signals
-                for s in latest_scanned_signals:
-                    if "ticker" in s and "price" in s:
-                        cache_prices[s["ticker"]] = to_decimal(s["price"])
-                for t, s in latest_watchlist_signals.items():
-                    if isinstance(s, dict) and "price" in s:
-                        cache_prices[t] = to_decimal(s["price"])
-            except Exception as ce:
-                print(f"[SimulatedBroker] Failed to load scheduler cache: {ce}")
-
-            tickers_to_fetch = []
+            # 💡 유저 대면 경로 외부 호출 0건 원칙: 스케줄러가 DB에 영속화한 last_price로 평가.
+            # last_price가 아직 없으면(신규 매수 직후 등) 평단가로 폴백하여 손익 0으로 표시.
             for h in holdings:
-                if h.ticker in cache_prices:
-                    current_price = cache_prices[h.ticker]
-                    total_purchase_usd += (to_decimal(h.avg_price) * h.quantity)
-                    total_eval_usd += (current_price * h.quantity)
-                else:
-                    tickers_to_fetch.append(h.ticker)
-
-            if tickers_to_fetch:
-                try:
-                    data = fetch_bulk_ohlcv_sync(tickers_to_fetch, period="1d", interval="1m", group_by="ticker")
-                    for h in holdings:
-                        if h.ticker not in tickers_to_fetch:
-                            continue
-                        clean_t = h.ticker
-                        current_price = to_decimal(h.avg_price)  # 기본 폴백값
-                        try:
-                            if len(tickers_to_fetch) == 1:
-                                if isinstance(data.columns, pd.MultiIndex):
-                                    df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else data.dropna()
-                                else:
-                                    df = data.dropna()
-                            else:
-                                if isinstance(data.columns, pd.MultiIndex):
-                                    df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else pd.DataFrame()
-                                else:
-                                    df = data.dropna()
-
-                            if not df.empty:
-                                current_price = to_decimal(df['Close'].iloc[-1])
-                        except Exception as e:
-                            print(f"[SimulatedBroker] Failed to parse price for {h.ticker}: {e}")
-
-                        total_purchase_usd += (to_decimal(h.avg_price) * h.quantity)
-                        total_eval_usd += (current_price * h.quantity)
-                except Exception as e:
-                    print(f"[SimulatedBroker] Failed to download prices: {e}")
-                    for h in holdings:
-                        if h.ticker in tickers_to_fetch:
-                            total_purchase_usd += (to_decimal(h.avg_price) * h.quantity)
-                            total_eval_usd += (to_decimal(h.avg_price) * h.quantity)
+                current_price = to_decimal(h.last_price) if h.last_price is not None else to_decimal(h.avg_price)
+                total_purchase_usd += (to_decimal(h.avg_price) * h.quantity)
+                total_eval_usd += (current_price * h.quantity)
 
         # 수익률은 외화 기준으로 계산합니다.
         strategy_initial_cash_usd = initial_cash / to_decimal(settings.SIMULATED_INITIAL_FX_RATE)
@@ -150,96 +101,24 @@ class LocalSimulatedBroker(BaseBroker):
         if exchange_rate is None:
             exchange_rate = FXRateCache.get_rate()
 
-        # 💡 [캐시 최적화] 스케줄러 캐시로부터 실시간 가격을 먼저 매핑하여 yfinance 무차별 호출 차단
-        cache_prices = {}
-        try:
-            from app.bot.scheduler import latest_scanned_signals, latest_watchlist_signals
-            for s in latest_scanned_signals:
-                if "ticker" in s and "price" in s:
-                    cache_prices[s["ticker"]] = to_decimal(s["price"])
-            for t, s in latest_watchlist_signals.items():
-                if isinstance(s, dict) and "price" in s:
-                    cache_prices[t] = to_decimal(s["price"])
-        except Exception as ce:
-            print(f"[SimulatedBroker] Failed to load scheduler cache: {ce}")
-
+        # 💡 유저 대면 경로 외부 호출 0건 원칙: DB에 영속화된 last_price로 평가 (없으면 평단가 폴백)
         result = []
-        tickers_to_fetch = []
-
         for h in holdings:
-            if h.ticker in cache_prices:
-                result.append({
-                    "id": h.id,
-                    "ticker": h.ticker,
-                    "ticker_name": h.ticker_name,
-                    "strategy_type": h.strategy_type,
-                    "strategy_name": Translator.translate_strategy(h.strategy_type, "ko"),
-                    "avg_price": float(to_decimal(h.avg_price)),
-                    "quantity": h.quantity,
-                    "highest_price": float(to_decimal(h.highest_price)),
-                    "current_price": float(cache_prices[h.ticker]),
-                    "fx_rate": float(exchange_rate),
-                    "is_mock": True,
-                    "provider": "Simulated"
-                })
-            else:
-                tickers_to_fetch.append(h)
-
-        if tickers_to_fetch:
-            tickers = [h.ticker for h in tickers_to_fetch]
-            try:
-                data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
-                for h in tickers_to_fetch:
-                    clean_t = h.ticker
-                    current_price = to_decimal(h.avg_price)  # 기본 폴백값
-                    try:
-                        if len(tickers) == 1:
-                            if isinstance(data.columns, pd.MultiIndex):
-                                df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else data.dropna()
-                            else:
-                                df = data.dropna()
-                        else:
-                            if isinstance(data.columns, pd.MultiIndex):
-                                df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else pd.DataFrame()
-                            else:
-                                df = data.dropna()
-
-                        if not df.empty:
-                            current_price = to_decimal(df['Close'].iloc[-1])
-                    except Exception as e:
-                        print(f"[SimulatedBroker] Failed to get price for {h.ticker}: {e}")
-
-                    result.append({
-                        "id": h.id,
-                        "ticker": h.ticker,
-                        "ticker_name": h.ticker_name,
-                        "strategy_type": h.strategy_type,
-                        "strategy_name": Translator.translate_strategy(h.strategy_type, "ko"),
-                        "avg_price": float(to_decimal(h.avg_price)),
-                        "quantity": h.quantity,
-                        "highest_price": float(to_decimal(h.highest_price)),
-                        "current_price": float(current_price),
-                        "fx_rate": float(exchange_rate),
-                        "is_mock": True,
-                        "provider": "Simulated"
-                    })
-            except Exception as e:
-                print(f"[SimulatedBroker] Error downloading live prices: {e}")
-                for h in tickers_to_fetch:
-                    result.append({
-                        "id": h.id,
-                        "ticker": h.ticker,
-                        "ticker_name": h.ticker_name,
-                        "strategy_type": h.strategy_type,
-                        "strategy_name": Translator.translate_strategy(h.strategy_type, "ko"),
-                        "avg_price": float(to_decimal(h.avg_price)),
-                        "quantity": h.quantity,
-                        "highest_price": float(to_decimal(h.highest_price)),
-                        "current_price": float(to_decimal(h.avg_price)),  # 💡 [예외 처리 리스크 개선] 통신 장애 시 강제 2% 펌핑 대신 평단가 적용
-                        "fx_rate": float(exchange_rate),
-                        "is_mock": True,
-                        "provider": "Simulated"
-                    })
+            current_price = to_decimal(h.last_price) if h.last_price is not None else to_decimal(h.avg_price)
+            result.append({
+                "id": h.id,
+                "ticker": h.ticker,
+                "ticker_name": h.ticker_name,
+                "strategy_type": h.strategy_type,
+                "strategy_name": Translator.translate_strategy(h.strategy_type, "ko"),
+                "avg_price": float(to_decimal(h.avg_price)),
+                "quantity": h.quantity,
+                "highest_price": float(to_decimal(h.highest_price)),
+                "current_price": float(current_price),
+                "fx_rate": float(exchange_rate),
+                "is_mock": True,
+                "provider": "Simulated"
+            })
         return result
 
     def process_unfilled_orders(self, db):

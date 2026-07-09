@@ -80,6 +80,10 @@ def _create_strategy(strategy_type: str) -> BaseStrategy:
         from app.strategies.regime_switching import RegimeSwitching
         return RegimeSwitching()
 
+    elif strategy_type in ["cross_sectional_momentum", "xsec_momentum"]:
+        from app.strategies.cross_sectional_momentum import CrossSectionalMomentum
+        return CrossSectionalMomentum()
+
     elif strategy_type in ["double_bb_reversion", "double_bb"]:
         from app.strategies.double_bb_reversion import DoubleBbReversion
         return DoubleBbReversion()

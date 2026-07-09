@@ -152,12 +152,13 @@ def _analyze_sentiment_locally(ticker: str, news_list: list) -> dict:
     }
 
 
-async def analyze_news_sentiment(ticker: str, news_list: list) -> dict:
+async def analyze_news_sentiment(ticker: str, news_list: list, force_local: bool = False) -> dict:
     """
     Analyze scanner news sentiment.
 
     Gemini is a runtime feature flag, disabled by default through system_settings.
     When it is disabled, unconfigured, or fails, local lexicon fallback is used.
+    If force_local is True, Gemini is bypassed to save API quota.
     """
     if not news_list:
         return {
@@ -169,7 +170,7 @@ async def analyze_news_sentiment(ticker: str, news_list: list) -> dict:
 
     first_url = _extract_news_url(news_list[0])
 
-    if is_system_setting_enabled(SETTING_ENABLE_GEMINI_NEWS_ANALYSIS):
+    if not force_local and is_system_setting_enabled(SETTING_ENABLE_GEMINI_NEWS_ANALYSIS):
         news_text = "\n".join(
             f"- {title}"
             for title in (_extract_news_title(item) for item in news_list[:5])

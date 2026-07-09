@@ -34,30 +34,30 @@ const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
   const radarTickers: string[] = balanceData?.focused_radar_tickers || [];
   const loading = isLoadingSignals || isLoadingBalance;
 
-  if (loading) return <div className="h-64 bg-slate-900/50 rounded-2xl animate-pulse"></div>;
+  if (loading) return <div className="h-64 bg-zinc-900/50 rounded-2xl animate-pulse"></div>;
 
   return (
-    <div className={hideHeader ? "" : "bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl"}>
+    <div className={hideHeader ? "" : "bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl"}>
       {!hideHeader && (
-        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+        <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
           <div className="flex items-center space-x-2">
             <Zap size={16} className="text-amber-400" />
-            <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">{"Bot's Detected Signals"}</h3>
+            <h3 className="text-sm font-bold text-zinc-200 uppercase tracking-wider">{"Bot's Detected Signals"}</h3>
           </div>
-          <span className="text-[10px] text-slate-500 font-mono italic text-rose-400 animate-pulse">LIVE SCANNING...</span>
+          <span className="text-[11px] text-zinc-500 font-mono italic text-rose-400 animate-pulse">LIVE SCANNING...</span>
         </div>
       )}
 
       {/* ⚡ 실시간 최정예 돌파 레이더 (Breakout Radar Watchlist) */}
-      <div className="p-5 bg-gradient-to-br from-amber-950/20 to-orange-950/20 border-b border-slate-800">
+      <div className="p-5 bg-gradient-to-br from-amber-950/20 to-orange-950/20 border-b border-zinc-800">
         <h4 className="text-xs font-black text-amber-400 tracking-wider uppercase mb-3 flex items-center gap-1.5 animate-pulse">
           <Zap size={14} className="fill-amber-400 text-amber-400" />
           실시간 최정예 돌파 레이더 (BREAKOUT RADAR WATCHLIST)
         </h4>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {radarTickers.length === 0 ? (
-            <div className="col-span-full py-4 text-center border border-dashed border-slate-850 rounded-xl bg-slate-950/30">
-              <span className="text-xs text-slate-500 font-bold tracking-tight block animate-pulse">
+            <div className="col-span-full py-4 text-center border border-dashed border-zinc-850 rounded-xl bg-zinc-950/30">
+              <span className="text-xs text-zinc-500 font-bold tracking-tight block animate-pulse">
                 실시간 감지된 돌파 레이더 종목이 없습니다. (RVOL ≥ 2.0 대기 중)
               </span>
             </div>
@@ -67,16 +67,16 @@ const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
               return (
                 <div 
                   key={t}
-                  className="bg-slate-950/90 border border-amber-500/30 hover:border-amber-400/80 hover:shadow-[0_0_15px_rgba(245,158,11,0.15)] rounded-xl p-3 text-center transition-all duration-300 relative group overflow-hidden"
+                  className="bg-zinc-950/90 border border-amber-500/30 hover:border-amber-400/80 hover:shadow-[0_0_15px_rgba(245,158,11,0.15)] rounded-xl p-3 text-center transition-all duration-300 relative group overflow-hidden"
                 >
                   <span className="absolute inset-0 border border-amber-500/20 rounded-xl group-hover:animate-pulse" />
                   <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse" />
                   
-                  <span className="text-xs font-black text-slate-200 group-hover:text-amber-400 transition-colors tracking-tight block">
+                  <span className="text-xs font-black text-zinc-200 group-hover:text-amber-400 transition-colors tracking-tight block">
                     {t}
                   </span>
                   
-                  <span className="text-[9px] text-amber-500/80 font-black block mt-0.5 uppercase tracking-tighter">
+                  <span className="text-[11px] text-amber-500/80 font-black block mt-0.5 uppercase tracking-tighter">
                     {matchingSig ? `$${matchingSig.price.toFixed(2)}` : "RVOL ≥ 2.0"}
                   </span>
                 </div>
@@ -89,32 +89,32 @@ const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="text-slate-500 border-b border-slate-800/50 text-[11px] uppercase tracking-tighter">
+            <tr className="text-zinc-500 border-b border-zinc-800/50 text-[11px] uppercase tracking-tighter">
               <th className="px-5 py-3 font-semibold">Ticker</th>
               <th className="px-2 py-3 font-semibold">Price</th>
               <th className="px-2 py-3 font-semibold text-center">Score</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800/30">
+          <tbody className="divide-y divide-zinc-800/30">
             {signals.length === 0 ? (
               <tr>
-                <td colSpan={3} className="px-5 py-10 text-center text-slate-600 italic">No signals detected yet.</td>
+                <td colSpan={3} className="px-5 py-10 text-center text-zinc-600 italic">No signals detected yet.</td>
               </tr>
             ) : (
               signals.map((s) => (
-                <tr key={s.ticker} className="hover:bg-slate-800/30 transition-colors group">
+                <tr key={s.ticker} className="hover:bg-zinc-800/30 transition-colors group">
                   <td className="px-5 py-3">
                     <div className="flex flex-col">
-                      <span className="font-bold text-slate-200">{s.ticker}</span>
-                      <span className="text-[10px] text-slate-500 truncate max-w-[100px]">{s.name}</span>
+                      <span className="font-bold text-zinc-200">{s.ticker}</span>
+                      <span className="text-[11px] text-zinc-500 truncate max-w-[100px]">{s.name}</span>
                     </div>
                   </td>
-                  <td className="px-2 py-3 font-mono text-slate-300">${s.price.toFixed(2)}</td>
+                  <td className="px-2 py-3 font-mono text-zinc-300">${s.price.toFixed(2)}</td>
                   <td className="px-2 py-3">
                     <div className="flex justify-center">
                       <div className={`w-10 h-10 rounded-full border-2 flex items-center justify-center text-[12px] font-black
                         ${s.signal_score >= 80 ? 'border-rose-500 text-rose-500 bg-rose-500/5' : 
-                          s.signal_score >= 60 ? 'border-amber-500 text-amber-500' : 'border-slate-700 text-slate-500'}`}>
+                          s.signal_score >= 60 ? 'border-amber-500 text-amber-500' : 'border-zinc-700 text-zinc-500'}`}>
                         {s.signal_score}
                       </div>
                     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Wallet, TrendingUp, DollarSign, PieChart, ShieldAlert, Zap, Crown, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import useSWR from "swr";
@@ -25,6 +25,7 @@ interface BalanceData {
   qqq_regime?: "BULLISH" | "BEARISH" | "NEUTRAL";
   wallet_allocation?: Record<string, WalletSlot>;
   focused_radar_tickers?: string[];
+  captured_at?: string | null;
 }
 
 export function AccountBalance({ 
@@ -37,6 +38,18 @@ export function AccountBalance({
   const { data: balanceData, error: swrError } = useSWR('/account/balance', fetcher, { refreshInterval: 15000 });
   const balance: BalanceData | null = balanceData || null;
   const error = swrError ? (swrError.message || "Failed to fetch account balance") : null;
+
+  // 스냅샷 신선도 배지용 현재 시각 — 렌더 순수성 규칙상 Date.now()는 타이머 콜백에서만 읽는다
+  // (초기값도 setTimeout(0)으로 지연 설정해 SSR 하이드레이션 불일치를 함께 방지)
+  const [nowTs, setNowTs] = useState<number | null>(null);
+  useEffect(() => {
+    const initialId = setTimeout(() => setNowTs(Date.now()), 0);
+    const timerId = setInterval(() => setNowTs(Date.now()), 60_000);
+    return () => {
+      clearTimeout(initialId);
+      clearInterval(timerId);
+    };
+  }, []);
 
   const formatMoney = useCallback((amount: number) => {
     if (!balance) return "";
@@ -81,6 +94,12 @@ export function AccountBalance({
   const isProfit = balance.profit_rate >= 0;
   const regime = balance.qqq_regime || "NEUTRAL";
 
+  // 스냅샷 신선도: 5분 이상 낡은 잔고는 사용자에게 기준 시각을 노출한다 (낡음을 숨기지 않는 원칙)
+  const capturedAgeMin = balance.captured_at && nowTs !== null
+    ? Math.floor((nowTs - new Date(balance.captured_at).getTime()) / 60000)
+    : null;
+  const isStaleSnapshot = capturedAgeMin !== null && capturedAgeMin >= 5;
+
   // 격리형 지갑 동적 분배 리스트 획득 및 폴백 처리
   const walletAllocations = balance.wallet_allocation
     ? Object.entries(balance.wallet_allocation).map(([key, value]) => ({
@@ -120,14 +139,21 @@ export function AccountBalance({
                 </h3>
               </div>
             </div>
-            <span className={cn(
-              "text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wider uppercase",
-              balance.is_mock === false
-                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30 animate-pulse"
-                : "bg-amber-500/15 text-amber-400 border-amber-500/30"
-            )}>
-              {balance.provider || (balance.is_mock === false ? "Live KIS" : "Simulated")}
-            </span>
+            <div className="flex flex-col items-end gap-1">
+              <span className={cn(
+                "text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wider uppercase",
+                balance.is_mock === false
+                  ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30 animate-pulse"
+                  : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+              )}>
+                {balance.provider || (balance.is_mock === false ? "Live KIS" : "Simulated")}
+              </span>
+              {isStaleSnapshot && (
+                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wide bg-zinc-500/15 text-zinc-400 border-zinc-500/30">
+                  ⚠️ {capturedAgeMin}분 전 기준
+                </span>
+              )}
+            </div>
           </div>
           <div className="text-3xl font-extrabold text-white tracking-tight">
             {formatMoney(balance.total_asset)}

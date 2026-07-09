@@ -66,6 +66,14 @@ def calculate_strategy_score(strategy_instance, row, regime: str, is_entry: bool
         return strategy_instance.calculate_score(row, regime, is_entry=is_entry, score_card=score_card)
     return strategy_instance.calculate_score(row, regime, is_entry=is_entry)
 
+def get_cached_market_sentiment() -> str | None:
+    """
+    네트워크 호출 없이 마지막으로 계산된 시장 레짐만 반환합니다.
+    TTL이 지났어도 마지막 값을 그대로 반환하며(stale-while-revalidate),
+    갱신은 스케줄러의 check_market_sentiment() 호출이 담당합니다.
+    """
+    return _sentiment_cache["value"]
+
 async def check_market_sentiment() -> str:
     """
     나스닥(QQQ) 지수의 추세를 분석하여 전체 시장의 분위기를 파악합니다.
@@ -301,6 +309,8 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
         news_map = {t: res for t, res in zip(candidate_tickers, news_results)}
         fundamental_map = {t: res for t, res in zip(candidate_tickers, fundamental_results)}
         
+        ai_news_count = 0
+        
         for cand in candidates:
             ticker = cand['ticker']
             try:
@@ -340,8 +350,20 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                     logger.info(f"[Scanner Filter] {ticker} discarded - Negative earnings (not healthy).")
                     continue
                 
+                # 💡 AI 호출 횟수 최적화 (다이나믹 스로틀링): 
+                # 1. 기본적으로 뉴스가 있는 상위 3개 종목은 무조건 AI 정밀 분석 수행
+                # 2. 4순위 이하라도 s1_score가 90점 이상인 '초강력 매수 후보'라면 최대 10개까지 AI 분석 허용 (RPM 15 방어)
+                force_local = True
+                if len(news_list) > 0:
+                    if ai_news_count < 3:
+                        force_local = False
+                        ai_news_count += 1
+                    elif ai_news_count < 10 and cand.get('s1_score', 0) >= 90:
+                        force_local = False
+                        ai_news_count += 1
+                
                 # AI 기반 뉴스 감성 판독 호출 (Gemini API + 로컬 룰 백업 하이브리드 엔진)
-                news_analysis = await analyze_news_sentiment(ticker, news_list)
+                news_analysis = await analyze_news_sentiment(ticker, news_list, force_local=force_local)
                 news_sentiment = news_analysis["sentiment"]
                 news_sentiment_score = news_analysis["sentiment_score"]
                 news_summary = news_analysis["summary"]
