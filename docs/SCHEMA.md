@@ -44,6 +44,8 @@ erDiagram
         float avg_price
         int quantity
         float highest_price
+        float last_price
+        datetime last_price_updated_at
         string regime_mode
         int buy_stage
         datetime updated_at
@@ -134,6 +136,8 @@ erDiagram
 * `avg_price` (FLOAT): 매수 평단가 (피라미딩 시 가중평균 갱신)
 * `quantity` (INTEGER): 보유 수량
 * `highest_price` (FLOAT): **매수 이후 최고가 (Trailing Stop 고점 기준점)**
+* `last_price` (NUMERIC(20,4), Nullable): 스케줄러가 관측·영속화한 최근 현재가 (`avg_price`와 동일한 USD 기준). 유저 대면 잔고/보유종목 API가 외부 시세 호출 없이 평가금을 계산하는 원천.
+* `last_price_updated_at` (DATETIME, Nullable): `last_price` 관측 시각. 백그라운드 잡이 10분 이상 낡은 종목만 벌크 시세로 재갱신하는 신선도 기준.
 * `regime_mode` (VARCHAR, Nullable): ⭐ **[v2.0]** 최초 진입 당시 장세 레짐
 * `buy_stage` (INTEGER, Default: 1): ⭐ **[v2.0]** 후지모토 시게루식 1:2:6 피라미딩 매수 단계 (1=정찰, 2=확인, 3=승부)
 * `updated_at` (DATETIME): 마지막 보유 현황 동기화 일시
@@ -171,6 +175,18 @@ erDiagram
 * `requested_qty`, `broker_filled_qty`, `applied_filled_qty`: 요청·증권사 누적 체결·DB 적용 수량
 * `strategy_type`: 체결을 반영할 보유 전략 슬롯
 * 과거 `resume_after_resolution` 컬럼은 제거되었습니다. 봇 실행 의도는 `user_settings.is_running`에서만 관리합니다.
+
+### ⑨ `account_equity_snapshots` (계좌 자산 스냅샷)
+백그라운드 스케줄러(`admin_balance_cache_sync`)가 주기 기록하는 사용자별 잔고 스냅샷입니다.
+관리자 자산 곡선뿐 아니라 **유저 대면 `GET /account/balance`의 유일한 읽기 소스**로 사용되어, 대시보드 조회 경로에서 외부 증권사/시세 API 호출을 제거합니다.
+* `user_id` (INTEGER, FK -> `users.id`): 사용자 외래 키 (CASCADE 삭제)
+* `total_asset`, `cash_balance`, `stock_balance` (NUMERIC(20,4)): 총자산·예수금·주식 평가금 (KRW)
+* `profit_rate` (NUMERIC(20,4), Nullable): 수익률(%)
+* `profit_loss` (NUMERIC(20,4), Nullable): 평가손익 (KRW, 대시보드 표시용)
+* `fx_rate` (NUMERIC(20,4), Nullable): 기록 당시 USD/KRW 환율
+* `trade_mode` (VARCHAR): 기록 당시 모드 (`SIMULATED`/`MOCK`/`REAL`). **조회 시 반드시 현재 모드로 필터**하여 모드 전환 시 잔고가 섞이지 않게 합니다.
+* `captured_at` (DATETIME, Index): 기록 시각. API 응답에 포함되어 프론트 신선도 배지의 기준이 됩니다.
+* *보존 정책:* 사용자·모드별 최신 500건 유지, 평시 60초 dedup (체결·초기화·청산 직후에는 `force=True`로 즉시 기록).
 
 ---
 

@@ -176,6 +176,8 @@ class Holding(Base):
     avg_price = Column(Numeric(precision=20, scale=4, asdecimal=True))   # 평단가
     quantity = Column(Integer)  # 보유수량
     highest_price = Column(Numeric(precision=20, scale=4, asdecimal=True)) # 구매 후 최고가 (트레일링 스탑 기준점)
+    last_price = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)  # 최근 관측 현재가 (avg_price와 동일한 USD 기준)
+    last_price_updated_at = Column(AwareDateTime, nullable=True)  # last_price 관측 시각 (신선도 판단 기준)
     regime_mode = Column(String, nullable=True)     # ⭐ v2.0 진입 당시 장세 레짐
     buy_stage = Column(Integer, default=1)          # ⭐ v2.0 후지모토 시게루식 피라미딩 단계 (1, 2, 3단계)
     strategy_type = Column(String, default="regime_switching", nullable=False)
@@ -247,6 +249,7 @@ class AccountEquitySnapshot(Base):
     cash_balance = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)
     stock_balance = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)
     profit_rate = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)
+    profit_loss = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)  # 평가손익 (KRW, 대시보드 표시용)
     fx_rate = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)
     trade_mode = Column(String, nullable=False)
     captured_at = Column(AwareDateTime, default=utc_now_aware, nullable=False, index=True)

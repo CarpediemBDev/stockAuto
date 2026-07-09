@@ -44,15 +44,6 @@ def test_simulated_balance_reflects_user_open_position_pnl(tmp_path, monkeypatch
     session_factory = sessionmaker(bind=engine)
     monkeypatch.setattr(simulated_broker_module, "SessionLocal", session_factory)
 
-    def fake_fetch_bulk_ohlcv_sync(*args, **kwargs):
-        return simulated_broker_module.pd.DataFrame({"Close": [120.0]})
-
-    monkeypatch.setattr(
-        simulated_broker_module,
-        "fetch_bulk_ohlcv_sync",
-        fake_fetch_bulk_ohlcv_sync,
-    )
-
     db = session_factory()
     try:
         idle_user = User(username="idle", hashed_password="hash")
@@ -62,6 +53,7 @@ def test_simulated_balance_reflects_user_open_position_pnl(tmp_path, monkeypatch
         db.refresh(idle_user)
         db.refresh(active_user)
 
+        # 유저 대면 경로 외부 호출 제거 이후, 평가금은 스케줄러가 영속화한 last_price를 사용한다.
         db.add(
             Holding(
                 user_id=active_user.id,
@@ -70,6 +62,7 @@ def test_simulated_balance_reflects_user_open_position_pnl(tmp_path, monkeypatch
                 avg_price=100.0,
                 quantity=10,
                 highest_price=120.0,
+                last_price=120.0,
                 strategy_type="regime_switching",
             )
         )
@@ -108,3 +101,43 @@ def test_simulated_balance_reflects_user_open_position_pnl(tmp_path, monkeypatch
     assert active_balance_high_fx["profit_rate"] == active_balance["profit_rate"]
 
     engine.dispose()
+
+
+def test_simulated_balance_falls_back_to_avg_price_without_last_price(tmp_path, monkeypatch):
+    """last_price가 아직 기록되지 않은 보유종목은 평단가 평가(손익 0)로 폴백해야 한다."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'simulated_fallback.db'}")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    monkeypatch.setattr(simulated_broker_module, "SessionLocal", session_factory)
+
+    db = session_factory()
+    try:
+        user = User(username="fresh", hashed_password="hash")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        db.add(
+            Holding(
+                user_id=user.id,
+                ticker="MSFT",
+                ticker_name="Microsoft",
+                avg_price=200.0,
+                quantity=5,
+                highest_price=210.0,
+                strategy_type="regime_switching",
+            )
+        )
+        db.commit()
+        user_id = user.id
+    finally:
+        db.close()
+
+    balance = LocalSimulatedBroker(
+        db_settings=SimpleNamespace(user_id=user_id)
+    ).get_account_balance(exchange_rate=1_400.0)
+
+    # 평가액 = 매수액 → 미실현 손익 0, 총자산은 초기 자본 그대로
+    assert balance["profit_loss"] == 0
+    assert balance["profit_rate"] == 0.0
+    assert balance["total_asset"] == int(settings.SIMULATED_INITIAL_CASH_KRW)

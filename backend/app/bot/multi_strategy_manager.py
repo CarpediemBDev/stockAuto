@@ -110,8 +110,15 @@ class MultiStrategyManager:
         
         for h in holdings:
             qty = h.quantity
-            # 현재 평가가치는 highest_price 또는 avg_price로 우선 활용하고, 스케너 루프에서 보정 가능
-            price = getattr(h, 'current_price', None) or h.highest_price or h.avg_price
+            # 평가가치 우선순위: 봇 사이클 관측가(current_price) → DB 영속 관측가(last_price) → 최고가 → 평단가.
+            # Numeric 컬럼은 Decimal이므로 float 합산과 섞이지 않도록 명시 변환한다.
+            raw_price = (
+                getattr(h, 'current_price', None)
+                or getattr(h, 'last_price', None)
+                or h.highest_price
+                or h.avg_price
+            )
+            price = float(raw_price or 0.0)
             
             slot_key = h.strategy_type
             if slot_key in slot_stock_values:

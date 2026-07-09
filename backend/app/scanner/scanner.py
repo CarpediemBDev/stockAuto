@@ -66,6 +66,14 @@ def calculate_strategy_score(strategy_instance, row, regime: str, is_entry: bool
         return strategy_instance.calculate_score(row, regime, is_entry=is_entry, score_card=score_card)
     return strategy_instance.calculate_score(row, regime, is_entry=is_entry)
 
+def get_cached_market_sentiment() -> str | None:
+    """
+    네트워크 호출 없이 마지막으로 계산된 시장 레짐만 반환합니다.
+    TTL이 지났어도 마지막 값을 그대로 반환하며(stale-while-revalidate),
+    갱신은 스케줄러의 check_market_sentiment() 호출이 담당합니다.
+    """
+    return _sentiment_cache["value"]
+
 async def check_market_sentiment() -> str:
     """
     나스닥(QQQ) 지수의 추세를 분석하여 전체 시장의 분위기를 파악합니다.

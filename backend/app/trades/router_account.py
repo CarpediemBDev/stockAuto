@@ -25,32 +25,90 @@ from app.core.locks import (
 from app.core.response import SuccessResponseRoute
 router = APIRouter(route_class=SuccessResponseRoute, tags=["Account"])
 
+def _provider_label(settings_row, trade_mode: str) -> str:
+    """스냅샷 응답용 provider 라벨을 브로커 호출 없이 설정값에서 파생합니다."""
+    if trade_mode == "SIMULATED":
+        return "Simulated"
+    provider = (getattr(settings_row, "broker_provider", None) or "").upper()
+    if provider == "KIS":
+        return "KIS Live" if trade_mode == "REAL" else "KIS Mock"
+    if provider == "TOSS":
+        return "TOSS"
+    return provider or "Unknown"
+
+
 @router.get("/balance")
 async def get_balance(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    현재 로그인한 사용자의 UserSettings에 맞춰 알맞은 증권사 API(또는 로컬 시뮬레이터)를 호출하여
-    현재 계좌의 예수금, 주식 평가금, 총자산 및 전체 실시간 수익률 정보를 가져오며,
-    실시간 QQQ 시장 레짐, 슬롯 격리 가상 지갑 자산 분배 정보, 그리고 최정예 돌파 관심종목 레이더 리스트를 추가 반환합니다.
+    스냅샷 기반 즉시 응답 잔고 API — 유저 대면 경로에서 외부 네트워크 호출 0건 원칙.
+
+    백그라운드 스케줄러(admin_balance_cache_sync)가 DB에 영속화한 AccountEquitySnapshot을
+    읽어 즉시 반환하고, QQQ 레짐·슬롯 지갑 분배·레이더는 메모리 캐시와 DB 숫자만으로 조립합니다.
+    스냅샷이 없는 유저(신규 가입·trade_mode 전환 직후)만 최초 1회 직접 계산 후 스냅샷을 저장합니다.
     """
-    from app.bot.fx_cache import FXRateCache
-    from app.scanner.scanner import check_market_sentiment
+    from app.scanner.scanner import get_cached_market_sentiment
     from app.bot.multi_strategy_manager import MultiStrategyManager
     import app.bot.scheduler as scheduler_mod
+    from app.core.models import AccountEquitySnapshot, MarketOverviewSnapshot, utc_now_aware
 
-    broker = get_broker_client(current_user.settings)
-    balance = await run_in_threadpool(broker.get_account_balance)
+    settings_row = current_user.settings
+    trade_mode = ((settings_row.trade_mode if settings_row else None) or "SIMULATED").upper()
+
+    snapshot = (
+        db.query(AccountEquitySnapshot)
+        .filter(
+            AccountEquitySnapshot.user_id == current_user.id,
+            AccountEquitySnapshot.trade_mode == trade_mode,
+        )
+        .order_by(AccountEquitySnapshot.captured_at.desc())
+        .first()
+    )
+
+    if snapshot is not None:
+        balance = {
+            "total_asset": int(float(snapshot.total_asset)),
+            "cash_balance": int(float(snapshot.cash_balance)) if snapshot.cash_balance is not None else 0,
+            "stock_balance": int(float(snapshot.stock_balance)) if snapshot.stock_balance is not None else 0,
+            "profit_rate": float(snapshot.profit_rate or 0.0),
+            "fx_rate": float(snapshot.fx_rate) if snapshot.fx_rate is not None else float(app_settings.SIMULATED_INITIAL_FX_RATE),
+            "is_mock": trade_mode != "REAL",
+            "provider": _provider_label(settings_row, trade_mode),
+            "captured_at": snapshot.captured_at.isoformat() if snapshot.captured_at else None,
+        }
+        if snapshot.profit_loss is not None:
+            balance["profit_loss"] = int(float(snapshot.profit_loss))
+    else:
+        # 구멍 1·2 폴백: 스냅샷이 없을 때만 최초 1회 직접 계산 (threadpool로 이벤트 루프 보호)
+        # 계산 결과를 즉시 영속화하므로 두 번째 요청부터는 스냅샷 경로를 탄다.
+        broker = get_broker_client(settings_row)
+        balance = await run_in_threadpool(broker.get_account_balance)
+        balance["captured_at"] = utc_now_aware().isoformat()
+        try:
+            await run_in_threadpool(
+                scheduler_mod.record_equity_snapshot,
+                current_user.id, trade_mode, balance, None, True,
+            )
+        except Exception as persist_error:
+            print(f"[Balance] First-time snapshot persist failed: {persist_error}")
+
+    # 시장 레짐: 메모리 캐시 → MarketOverviewSnapshot(DB, 재시작 생존) → NEUTRAL. 네트워크 호출 없음.
+    sentiment = get_cached_market_sentiment()
+    if not sentiment:
+        overview = (
+            db.query(MarketOverviewSnapshot)
+            .order_by(MarketOverviewSnapshot.created_at.desc(), MarketOverviewSnapshot.id.desc())
+            .first()
+        )
+        sentiment = overview.market_condition if overview else "NEUTRAL"
 
     try:
-        # 💡 실시간 QQQ 지수 기반 시장 레짐 판별
-        sentiment = await check_market_sentiment()
-
-        # 💡 각 격리형 슬롯별 지갑 자산 정밀 분배 계산 (수학적 격리)
-        strategy_type = current_user.settings.strategy_type if current_user.settings else "regime_switching"
+        # 💡 각 격리형 슬롯별 지갑 자산 정밀 분배 계산 — 저장된 숫자만 쓰는 순수 로컬 연산
+        strategy_type = settings_row.strategy_type if settings_row else "regime_switching"
         ms_manager = MultiStrategyManager(strategy_type=strategy_type)
-        exchange_rate = FXRateCache.get_rate()
+        exchange_rate = balance.get("fx_rate") or float(app_settings.SIMULATED_INITIAL_FX_RATE)
 
         total_asset_krw = balance.get(
             "total_asset",
@@ -100,7 +158,7 @@ async def get_balance(
     except Exception as e:
         print(f"[Balance Enricher] Error enriching balance data: {e}")
         # 오류 발생 시 기본값으로 폴백하여 대시보드 중단 방지
-        balance["qqq_regime"] = "NEUTRAL"
+        balance["qqq_regime"] = sentiment or "NEUTRAL"
         try:
             ms_manager = MultiStrategyManager(strategy_type=current_user.settings.strategy_type if current_user.settings else "regime_switching")
             balance["wallet_allocation"] = {
@@ -195,6 +253,16 @@ def reset_balance(
         db.query(TradeLog).filter(TradeLog.user_id == current_user.id).delete()
         db.query(ActionLog).filter(ActionLog.user_id == current_user.id).delete()
         db.commit()
+
+        # 초기화 직후 대시보드에 낡은 스냅샷이 보이지 않도록 즉시 재계산·영속화 (dedup 우회)
+        try:
+            import app.bot.scheduler as scheduler_mod
+            fresh_balance = get_broker_client(settings).get_account_balance()
+            if isinstance(fresh_balance, dict):
+                scheduler_mod.record_equity_snapshot(current_user.id, "SIMULATED", fresh_balance, None, True)
+        except Exception as snapshot_error:
+            print(f"[Reset Balance] Snapshot refresh failed: {snapshot_error}")
+
         return {"message": "가상 모의투자 계좌 자산 및 로그가 성공적으로 초기화되었습니다."}
     except Exception as e:
         db.rollback()
@@ -407,11 +475,23 @@ async def force_liquidate(
 
         if not is_kis_order:
             db.commit()
-            
+
             empty_holdings = db.query(Holding).filter(Holding.user_id == current_user.id, Holding.quantity <= 0).all()
             for eh in empty_holdings:
                 db.delete(eh)
             db.commit()
+
+        # 청산 직후 대시보드에 낡은 잔고가 보이지 않도록 스냅샷 즉시 갱신 (dedup 우회)
+        try:
+            import app.bot.scheduler as scheduler_mod
+            fresh_balance = await run_in_threadpool(broker.get_account_balance)
+            if isinstance(fresh_balance, dict):
+                await run_in_threadpool(
+                    scheduler_mod.record_equity_snapshot,
+                    current_user.id, trade_mode, fresh_balance, None, True,
+                )
+        except Exception as snapshot_error:
+            print(f"[Force Liquidate] Snapshot refresh failed: {snapshot_error}")
 
         return {
             "message": (

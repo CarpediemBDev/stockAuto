@@ -671,6 +671,21 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             current_price_dec = to_decimal(current_data['price'])
             current_price = float(current_price_dec)
             h.current_price = current_price
+            # 관측 현재가를 DB에 영속화 — 유저 대면 잔고 API가 외부 호출 없이 평가금을 계산하는 원천.
+            # version_id 낙관적 잠금과 간섭하지 않도록 ORM merge 대신 컬럼 단위 UPDATE를 사용하고,
+            # 실제 ORM Holding일 때만 기록한다 (테스트 더블 등 비영속 객체 보호).
+            h.last_price = current_price_dec
+            h.last_price_updated_at = utc_now_aware()
+            if isinstance(h, Holding) and h.id is not None:
+                with micro_session(ctx) as db:
+                    db.query(Holding).filter(Holding.id == h.id).update(
+                        {
+                            Holding.last_price: current_price_dec,
+                            Holding.last_price_updated_at: h.last_price_updated_at,
+                        },
+                        synchronize_session=False,
+                    )
+                    db.commit()
             profit_rate = calculate_profit_rate(current_price_dec, h.avg_price)
 
             current_score = strategy_instance.calculate_score(current_data['details'] or current_data, sentiment, is_entry=False)
@@ -846,6 +861,11 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                         f"💰 *실현 실수익:* `{pnl_sign}${abs(realized_pnl):,.2f}`\n"
                         f"• *주문 번호:* `{res['order_no']}`",
                     )
+                    # 체결 직후 잔고 스냅샷 즉시 갱신 (60초 dedup 우회) — 대시보드 낡은 잔고 방지
+                    _schedule_background_task(
+                        refresh_user_equity_snapshot(user_id),
+                        f"equity-snapshot-refresh-{user_id}",
+                    )
                 if application.is_unresolved:
                     halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
                     return
@@ -915,6 +935,11 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     f"{pnl_emoji} *실수익률:* `{pnl_sign}{calc_return_rate:.2f}%`\n"
                     f"💰 *실현 실수익:* `{pnl_sign}${realized_pnl_abs:,.2f}`\n"
                     f"• *주문 번호:* `{res['order_no']}`"
+                )
+                # 체결 직후 잔고 스냅샷 즉시 갱신 (60초 dedup 우회) — 대시보드 낡은 잔고 방지
+                _schedule_background_task(
+                    refresh_user_equity_snapshot(user_id),
+                    f"equity-snapshot-refresh-{user_id}",
                 )
                 if requires_review:
                     halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
@@ -1371,6 +1396,11 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                         signal=signal, filled_price=filled_price, filled_qty=filled_qty,
                         next_stage=next_stage, order_no=res["order_no"],
                     )
+                    # 체결 직후 잔고 스냅샷 즉시 갱신 (60초 dedup 우회) — 대시보드 낡은 잔고 방지
+                    _schedule_background_task(
+                        refresh_user_equity_snapshot(user_id),
+                        f"equity-snapshot-refresh-{user_id}",
+                    )
                 if application.is_unresolved:
                     halt_trading_for_order_review(ctx, "BUY", clean_ticker, res)
                     return False
@@ -1397,6 +1427,11 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 ticker=clean_ticker, strategy_type=slot_key, signal=signal, filled_price=filled_price,
                 filled_qty=filled_qty, next_stage=next_stage,
                 order_no=res["order_no"], current_score=score,
+            )
+            # 체결 직후 잔고 스냅샷 즉시 갱신 (60초 dedup 우회) — 대시보드 낡은 잔고 방지
+            _schedule_background_task(
+                refresh_user_equity_snapshot(user_id),
+                f"equity-snapshot-refresh-{user_id}",
             )
 
             send_successful_buy_message(
@@ -1676,6 +1711,164 @@ def reconcile_open_orders_wrapper():
 def discover_orphan_orders_wrapper():
     discover_orphan_orders_once()
 
+# last_price가 이 시간 이상 낡으면 백그라운드 벌크 시세 조회로 재갱신한다.
+LAST_PRICE_STALE_SECONDS = 600
+
+
+def _refresh_stale_holding_prices() -> None:
+    """
+    봇이 꺼진 유저의 보유종목도 평가금이 동결되지 않도록,
+    낡은 Holding.last_price를 벌크 시세 1회로 갱신합니다.
+    (백그라운드 전용 — 유저 대면 경로에서는 절대 호출 금지)
+    """
+    from app.scanner.data_provider import fetch_bulk_ohlcv_sync
+    import pandas as pd
+
+    db = SessionLocal()
+    try:
+        holdings = db.query(Holding).all()
+        now = utc_now_aware()
+        stale = [
+            h for h in holdings
+            if h.last_price_updated_at is None
+            or (now - h.last_price_updated_at).total_seconds() >= LAST_PRICE_STALE_SECONDS
+        ]
+        if not stale:
+            return
+
+        tickers = sorted({h.ticker for h in stale})
+        data = fetch_bulk_ohlcv_sync(tickers, interval="1m", period="1d", group_by="ticker")
+        if data is None or data.empty:
+            return
+
+        prices = {}
+        for ticker in tickers:
+            try:
+                if isinstance(data.columns, pd.MultiIndex):
+                    df = data[ticker].dropna() if ticker in data.columns.levels[0] else pd.DataFrame()
+                else:
+                    df = data.dropna()
+                if not df.empty:
+                    prices[ticker] = to_decimal(df['Close'].iloc[-1])
+            except Exception as exc:
+                logger.warning(f"[Equity Snapshot] Failed to parse bulk price for {ticker}: {exc}")
+
+        refreshed_at = utc_now_aware()
+        for h in stale:
+            price = prices.get(h.ticker)
+            if price is None:
+                continue
+            db.query(Holding).filter(Holding.id == h.id).update(
+                {Holding.last_price: price, Holding.last_price_updated_at: refreshed_at},
+                synchronize_session=False,
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("[Equity Snapshot] Stale holding price refresh failed")
+    finally:
+        db.close()
+
+
+def record_equity_snapshot(
+    user_id: int,
+    trade_mode: str,
+    balance: dict,
+    exchange_rate: float | None = None,
+    force: bool = False,
+) -> bool:
+    """
+    잔고 dict를 AccountEquitySnapshot으로 영속화합니다.
+    force=True면 60초 dedup을 우회합니다(체결 직후 즉시 갱신용).
+    """
+    total_asset = balance.get("total_asset")
+    if total_asset is None or not math.isfinite(float(total_asset)):
+        return False
+
+    captured_at = utc_now_aware()
+    snapshot_db = SessionLocal()
+    try:
+        latest_snapshot = (
+            snapshot_db.query(AccountEquitySnapshot)
+            .filter(
+                AccountEquitySnapshot.user_id == user_id,
+                AccountEquitySnapshot.trade_mode == trade_mode,
+            )
+            .order_by(AccountEquitySnapshot.captured_at.desc())
+            .first()
+        )
+        should_record = (
+            force
+            or latest_snapshot is None
+            or (captured_at - latest_snapshot.captured_at).total_seconds() >= 60
+        )
+        if not should_record:
+            return False
+
+        snapshot_db.add(AccountEquitySnapshot(
+            user_id=user_id,
+            total_asset=float(total_asset),
+            cash_balance=balance.get("cash_balance"),
+            stock_balance=balance.get("stock_balance"),
+            profit_rate=float(balance.get("profit_rate", 0.0)),
+            profit_loss=balance.get("profit_loss"),
+            fx_rate=balance.get("fx_rate", exchange_rate),
+            trade_mode=trade_mode,
+            captured_at=captured_at,
+        ))
+        snapshot_db.flush()
+
+        expired_snapshots = (
+            snapshot_db.query(AccountEquitySnapshot)
+            .filter(
+                AccountEquitySnapshot.user_id == user_id,
+                AccountEquitySnapshot.trade_mode == trade_mode,
+            )
+            .order_by(AccountEquitySnapshot.captured_at.desc())
+            .offset(500)
+            .all()
+        )
+        for expired_snapshot in expired_snapshots:
+            snapshot_db.delete(expired_snapshot)
+        snapshot_db.commit()
+        return True
+    except Exception:
+        snapshot_db.rollback()
+        raise
+    finally:
+        snapshot_db.close()
+
+
+async def refresh_user_equity_snapshot(user_id: int) -> None:
+    """
+    체결·계좌 초기화 등 잔고 변동 직후 스냅샷을 dedup 없이 즉시 갱신합니다.
+    실패해도 다음 admin_balance_cache_sync 주기가 자연 복구하므로 경고만 남깁니다.
+    """
+    try:
+        db = SessionLocal()
+        try:
+            user = (
+                db.query(User)
+                .options(selectinload(User.settings).selectinload(UserSettings.credentials))
+                .filter(User.id == user_id)
+                .first()
+            )
+            if not user or not user.settings:
+                return
+            trade_mode = user.settings.trade_mode
+            broker = get_broker_client(user.settings)
+        finally:
+            db.expunge_all()
+            db.close()
+
+        balance = await safe_broker_call(broker.get_account_balance)
+        if not isinstance(balance, dict):
+            return
+        await asyncio.to_thread(record_equity_snapshot, user_id, trade_mode, balance, None, True)
+    except Exception as exc:
+        logger.warning(f"[Equity Snapshot] Immediate refresh failed for user {user_id}: {exc}")
+
+
 async def admin_balance_cache_sync():
     """
     Refresh admin account-equity snapshots without holding a DB connection
@@ -1724,65 +1917,17 @@ async def admin_balance_cache_sync():
         db.expunge_all()
         db.close()
 
-    exchange_rate = FXRateCache.get_rate()
+    # 봇 미가동 유저의 보유종목 평가금이 동결되지 않도록 낡은 last_price를 먼저 벌크 갱신
+    await asyncio.to_thread(_refresh_stale_holding_prices)
+
+    exchange_rate = await asyncio.to_thread(FXRateCache.get_rate)
 
     for target in targets:
         try:
             balance = await safe_broker_call(target["broker"].get_account_balance)
             if not isinstance(balance, dict):
                 continue
-            total_asset = balance.get("total_asset")
-            if total_asset is None or not math.isfinite(float(total_asset)):
-                continue
-            profit_rate = float(balance.get("profit_rate", 0.0))
-
-            captured_at = utc_now_aware()
-            snapshot_db = SessionLocal()
-            try:
-                latest_snapshot = (
-                    snapshot_db.query(AccountEquitySnapshot)
-                    .filter(
-                        AccountEquitySnapshot.user_id == target["user_id"],
-                        AccountEquitySnapshot.trade_mode == target["trade_mode"],
-                    )
-                    .order_by(AccountEquitySnapshot.captured_at.desc())
-                    .first()
-                )
-                should_record = (
-                    latest_snapshot is None
-                    or (captured_at - latest_snapshot.captured_at).total_seconds() >= 60
-                )
-                if should_record:
-                    snapshot_db.add(AccountEquitySnapshot(
-                        user_id=target["user_id"],
-                        total_asset=float(total_asset),
-                        cash_balance=balance.get("cash_balance"),
-                        stock_balance=balance.get("stock_balance"),
-                        profit_rate=profit_rate,
-                        fx_rate=balance.get("fx_rate", exchange_rate),
-                        trade_mode=target["trade_mode"],
-                        captured_at=captured_at,
-                    ))
-                    snapshot_db.flush()
-
-                    expired_snapshots = (
-                        snapshot_db.query(AccountEquitySnapshot)
-                        .filter(
-                            AccountEquitySnapshot.user_id == target["user_id"],
-                            AccountEquitySnapshot.trade_mode == target["trade_mode"],
-                        )
-                        .order_by(AccountEquitySnapshot.captured_at.desc())
-                        .offset(500)
-                        .all()
-                    )
-                    for expired_snapshot in expired_snapshots:
-                        snapshot_db.delete(expired_snapshot)
-                    snapshot_db.commit()
-            except Exception:
-                snapshot_db.rollback()
-                raise
-            finally:
-                snapshot_db.close()
+            record_equity_snapshot(target["user_id"], target["trade_mode"], balance, exchange_rate)
         except Exception as exc:
             logger.warning(f"[Admin Cache Sync] Error for user {target['username']}: {exc}")
 

@@ -314,8 +314,10 @@ def _process_command(user_id: int, text: str):
                 from app.core.models import AccountEquitySnapshot
                 snapshot_db = SessionLocal()
                 try:
+                    # 현재 trade_mode의 스냅샷만 조회 (모드 전환 시 다른 모드 잔고가 섞이는 버그 방지)
                     snapshot = snapshot_db.query(AccountEquitySnapshot).filter(
-                        AccountEquitySnapshot.user_id == user_id
+                        AccountEquitySnapshot.user_id == user_id,
+                        AccountEquitySnapshot.trade_mode == mode,
                     ).order_by(AccountEquitySnapshot.captured_at.desc()).first()
                 finally:
                     snapshot_db.close()
