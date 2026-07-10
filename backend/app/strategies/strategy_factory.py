@@ -72,6 +72,11 @@ def _create_strategy(strategy_type: str) -> BaseStrategy:
         from app.strategies.rsi2_connors import Rsi2Connors
         return Rsi2Connors()
         
+    elif strategy_type == "connors_rsi":
+        from app.strategies.connors_rsi import ConnorsRsi
+        return ConnorsRsi()
+
+        
     elif strategy_type == "bb_squeeze":
         from app.strategies.bb_squeeze import BbSqueeze
         return BbSqueeze()
@@ -79,6 +84,14 @@ def _create_strategy(strategy_type: str) -> BaseStrategy:
     elif strategy_type == "regime_switching":
         from app.strategies.regime_switching import RegimeSwitching
         return RegimeSwitching()
+
+    elif strategy_type == "leveraged_regime":
+        from app.strategies.leveraged_regime import LeveragedRegime
+        return LeveragedRegime()
+
+    elif strategy_type == "benchmark_qqq_hold":
+        from app.strategies.leveraged_regime import BenchmarkQqqHold
+        return BenchmarkQqqHold()
 
     elif strategy_type in ["cross_sectional_momentum", "xsec_momentum"]:
         from app.strategies.cross_sectional_momentum import CrossSectionalMomentum

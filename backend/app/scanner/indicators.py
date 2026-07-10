@@ -110,11 +110,70 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     ema_up = up.ewm(com=period - 1, adjust=False).mean()
     ema_down = down.ewm(com=period - 1, adjust=False).mean()
     
-    # 0으로 나누기 방지
     with np.errstate(divide='ignore', invalid='ignore'):
         rs = ema_up / ema_down
         rsi = 100 - (100 / (1 + rs))
         return rsi.fillna(50).squeeze()
+
+
+def calculate_connors_rsi(close_series: pd.Series, rsi_period: int = 3, streak_period: int = 2, rank_period: int = 100) -> pd.Series:
+    """
+    래리 코너스 ConnorsRSI(3, 2, 100) 지표 계산.
+    1) RSI(Close, 3)
+    2) RSI(Streak, 2)
+    3) PercentRank(ROC(100), 1)
+    세 가지 구성 요소의 단순 평균을 반환합니다.
+    """
+    if close_series.empty or len(close_series) < max(rsi_period, streak_period, rank_period) + 2:
+        return pd.Series(50.0, index=close_series.index)
+        
+    # 1. RSI(Close, 3)
+    rsi_close = calculate_rsi(close_series, rsi_period)
+    
+    # 2. Streak 계산 및 RSI(Streak, 2)
+    change = close_series.diff()
+    # Streak 계산 (오르면 +1, 내리면 -1, 연속 상승/하락 누적)
+    streak = pd.Series(0.0, index=close_series.index)
+    current_streak = 0.0
+    for idx, val in enumerate(change):
+        if idx == 0:
+            continue
+        if pd.isna(val):
+            current_streak = 0.0
+        elif val > 0:
+            current_streak = current_streak + 1.0 if current_streak > 0 else 1.0
+        elif val < 0:
+            current_streak = current_streak - 1.0 if current_streak < 0 else -1.0
+        else:
+            current_streak = 0.0
+        streak.iloc[idx] = current_streak
+        
+    rsi_streak = calculate_rsi(streak, streak_period)
+    
+    # 3. PercentRank(ROC(100), 1)
+    # ROC(1) = 오늘 변동률
+    roc1 = close_series.pct_change(1)
+    
+    # PercentRank 계산
+    percent_rank = pd.Series(50.0, index=close_series.index)
+    for t in range(len(close_series)):
+        if t < rank_period:
+            percent_rank.iloc[t] = 50.0
+            continue
+        # 과거 rank_period일의 roc1 값들과 오늘의 roc1 비교
+        window_roc = roc1.iloc[t-rank_period+1 : t+1] # t일 포함
+        today_roc = roc1.iloc[t]
+        if pd.isna(today_roc):
+            percent_rank.iloc[t] = 50.0
+            continue
+        # today_roc가 window_roc 내의 다른 값들보다 작은 횟수의 백분위수
+        smaller_count = np.sum(window_roc < today_roc)
+        valid_count = np.sum(~pd.isna(window_roc))
+        percent_rank.iloc[t] = (smaller_count / valid_count) * 100.0 if valid_count > 0 else 50.0
+        
+    # 4. 단순 평균
+    connors_rsi = (rsi_close + rsi_streak + percent_rank) / 3.0
+    return connors_rsi.fillna(50.0).squeeze()
 
 def calculate_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
     """MACD 계산"""
