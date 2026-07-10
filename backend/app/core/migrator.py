@@ -115,6 +115,9 @@ def seed_competitive_users():
             {"username": "admin9", "strategy": "bb_squeeze"},
             {"username": "admin10", "strategy": "rsi2_connors"},
             {"username": "admin11", "strategy": "strategy_c"},
+            # 2026-07-09 코어-새틀라이트 라이브 시뮬레이션 가상 유저 (vs QQQ 벤치마크 동시 계측)
+            {"username": "admin12", "strategy": "core_satellite"},
+            {"username": "admin13", "strategy": "benchmark_qqq_hold"},
         ]
 
         strategy_keys = {

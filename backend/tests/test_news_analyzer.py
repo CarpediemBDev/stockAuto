@@ -57,4 +57,5 @@ async def test_news_analyzer_uses_common_gemini_adapter_when_enabled(monkeypatch
         "sentiment_score": 100,
         "summary": "엔비디아 관련 호재가 감지되었습니다.",
         "url": "https://example.test/content-url",
+        "source": "gemini",
     }
