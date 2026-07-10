@@ -33,12 +33,53 @@ from app.scanner.data_provider import (
     fetch_ticker_news
 )
 from app.scanner.news_analyzer import analyze_news_sentiment
+from app.core.system_settings import (
+    SETTING_ENABLE_GEMINI_NEWS_ANALYSIS,
+    is_system_setting_enabled,
+)
 
 # 지수 비교용 (Relative Strength)
 MARKET_INDEX = "QQQ" 
 
 # 최소 거래대금 기준 (한국 돈 1억 원)
 MIN_KRW_VOLUME = 100_000_000.0
+
+# 💡 Gemini AI 뉴스 분석 호출 예산 (Free Tier RPM 15 기준, 안전 마진 적용)
+AI_NEWS_GUARANTEED_SLOTS = 3     # 필터 통과 상위 N개는 무조건 AI 분석
+AI_NEWS_MAX_SLOTS = 10           # 스캔 1회당 총 AI 호출 상한
+AI_NEWS_ELITE_THRESHOLD = 90     # s1_score가 이 점수 이상이면 보장 슬롯 이후에도 AI 허용
+
+
+class _AiQuotaPolicy:
+    """스캔 회차당 Gemini API 호출 예산을 관리한다.
+
+    - Gemini 설정이 꺼져있으면 애초에 AI 슬롯을 배정하지 않음
+    - 필터 통과 상위 GUARANTEED 종목은 무조건 AI 분석
+    - 그 이후는 s1_score 기준 초과 허용, MAX 상한 방어
+    - AI 호출이 실패하면 release_slot()으로 예산 복원
+    """
+
+    def __init__(self, gemini_enabled: bool = True):
+        self._used = 0
+        self._gemini_enabled = gemini_enabled
+
+    def should_use_ai(self, has_news: bool, s1_score: float) -> bool:
+        """AI 분석 슬롯을 요청한다. 허용되면 True를 반환하고 예산을 차감한다."""
+        if not self._gemini_enabled or not has_news:
+            return False
+        if self._used < AI_NEWS_GUARANTEED_SLOTS:
+            self._used += 1
+            return True
+        if self._used < AI_NEWS_MAX_SLOTS and s1_score >= AI_NEWS_ELITE_THRESHOLD:
+            self._used += 1
+            return True
+        return False
+
+    def release_slot(self):
+        """AI 호출이 실패하여 실제 분석을 못 받았을 때 슬롯을 반환한다."""
+        if self._used > 0:
+            self._used -= 1
+
 
 # 💡 Sentiment 캐시 (5분 TTL - API 호출 최소화 & 로그 과다 출력 방지)
 _sentiment_cache = {"value": None, "timestamp": 0}
@@ -273,6 +314,8 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
             logger.error(f"[Stage 1] Error in chunk: {e}", exc_info=True)
 
     # 3. Stage 2: 후보군 정밀 분석
+    # 💡 RVOL(거래량 폭발력) 1차, s1_score(품질) 2차 내림차순 — 유동성 우선 설계
+    # AI 슬롯도 이 순서로 배정됨. 품질 우선으로 변경하려면 키를 (s1_score, rvol)로 수정할 것.
     candidates = sorted(all_results, key=lambda x: (x['rvol'], x['s1_score']), reverse=True)[:25]
     if not candidates: return []
     
@@ -309,7 +352,9 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
         news_map = {t: res for t, res in zip(candidate_tickers, news_results)}
         fundamental_map = {t: res for t, res in zip(candidate_tickers, fundamental_results)}
         
-        ai_news_count = 0
+        ai_quota = _AiQuotaPolicy(
+            gemini_enabled=is_system_setting_enabled(SETTING_ENABLE_GEMINI_NEWS_ANALYSIS),
+        )
         
         for cand in candidates:
             ticker = cand['ticker']
@@ -350,20 +395,23 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                     logger.info(f"[Scanner Filter] {ticker} discarded - Negative earnings (not healthy).")
                     continue
                 
-                # 💡 AI 호출 횟수 최적화 (다이나믹 스로틀링): 
-                # 1. 기본적으로 뉴스가 있는 상위 3개 종목은 무조건 AI 정밀 분석 수행
-                # 2. 4순위 이하라도 s1_score가 90점 이상인 '초강력 매수 후보'라면 최대 10개까지 AI 분석 허용 (RPM 15 방어)
-                force_local = True
-                if len(news_list) > 0:
-                    if ai_news_count < 3:
-                        force_local = False
-                        ai_news_count += 1
-                    elif ai_news_count < 10 and cand.get('s1_score', 0) >= 90:
-                        force_local = False
-                        ai_news_count += 1
+                # 💡 AI 호출 예산 판단 (정책 객체 위임)
+                use_ai = ai_quota.should_use_ai(
+                    has_news=len(news_list) > 0,
+                    s1_score=cand.get('s1_score', 0),
+                )
                 
                 # AI 기반 뉴스 감성 판독 호출 (Gemini API + 로컬 룰 백업 하이브리드 엔진)
-                news_analysis = await analyze_news_sentiment(ticker, news_list, force_local=force_local)
+                # 예외 안전: AI 슬롯 차감 후 예외 발생 시 슬롯 반환 보장
+                try:
+                    news_analysis = await analyze_news_sentiment(ticker, news_list, force_local=not use_ai)
+                    # AI 호출 실패(Gemini 내부 에러 등) 시 슬롯 반환
+                    if use_ai and news_analysis.get("source") != "gemini":
+                        ai_quota.release_slot()
+                except Exception:
+                    if use_ai:
+                        ai_quota.release_slot()
+                    raise
                 news_sentiment = news_analysis["sentiment"]
                 news_sentiment_score = news_analysis["sentiment_score"]
                 news_summary = news_analysis["summary"]
