@@ -83,6 +83,27 @@ class LeveragedRegime(BaseStrategy):
         return 0.0
 
 
+class LeveragedRegime3x(LeveragedRegime):
+    """
+    🚀 지수 레버리지 레짐 3x (Leveraged Regime 3x) — 공격형 슬리브
+
+    - 코어(LeveragedRegime)와 신호·상태기계·룩어헤드 차단 로직이 완전히 동일하되,
+      보유 자산만 QLD(2x) 대신 TQQQ(3x)를 사용한다.
+    - 실증(월별 20년): 월 +30% 도달은 197개월 중 4회(2%)로 희귀하며, 그 대가로
+      월 −35% 낙폭·상시 MDD −55%대를 감수한다. '월 30%' 2차 목표 도전 전용.
+    """
+
+    def __init__(self):
+        super().__init__(
+            name="🚀 지수 레버리지 레짐 3x (TQQQ 3x + SMA200)",
+            asset_ticker="TQQQ",
+            signal_ticker="QQQ",
+            sma_period=200,
+            confirm_days=3,
+            use_filter=True,
+        )
+
+
 class BenchmarkQqqHold(LeveragedRegime):
     """
     📏 QQQ 단순보유 벤치마크 (Benchmark Buy & Hold)

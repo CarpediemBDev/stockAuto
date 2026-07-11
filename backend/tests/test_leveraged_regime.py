@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.strategies.leveraged_regime import LeveragedRegime, BenchmarkQqqHold
+from app.strategies.leveraged_regime import LeveragedRegime, LeveragedRegime3x, BenchmarkQqqHold
 from app.strategies.strategy_factory import get_strategy
 
 
@@ -94,3 +94,18 @@ class TestFactoryAndSlots:
     def test_non_autonomous_strategies_unaffected(self):
         regime = get_strategy("regime_switching")
         assert getattr(regime, "is_autonomous", False) is False
+
+    def test_3x_variant_uses_tqqq_same_signal_logic(self):
+        aggr = get_strategy("leveraged_regime_3x")
+        assert isinstance(aggr, LeveragedRegime3x)
+        assert aggr.is_autonomous is True
+        assert aggr.asset_ticker == "TQQQ"       # 자산만 3x
+        assert aggr.signal_ticker == "QQQ"       # 신호는 코어와 동일
+        assert aggr.sma_period == 200
+        assert aggr.confirm_days == 3
+        # 신호 로직이 동일하므로 같은 시계열에서 코어와 목표 상태가 일치해야 한다
+        core = LeveragedRegime(sma_period=50, confirm_days=3)
+        aggr_same = LeveragedRegime3x()
+        aggr_same.sma_period, aggr_same.confirm_days = 50, 3
+        closes = _rising()
+        assert aggr_same.compute_target_state(closes) == core.compute_target_state(closes)
