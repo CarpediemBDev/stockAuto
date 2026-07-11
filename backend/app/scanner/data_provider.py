@@ -144,11 +144,11 @@ async def fetch_index_data(market_index: str = "QQQ") -> pd.DataFrame:
 # 로컬 디스크 Parquet 캐시 디렉터리 정의
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "cache")
 
-def _get_cache_path(tickers, interval, start, end):
+def _get_cache_path(tickers, interval, start, end, period="5d"):
     os.makedirs(CACHE_DIR, exist_ok=True)
     # 정렬된 티커 문자열을 SHA1 해싱하여 유일하고 안전한 파일명 생성
     ticker_str = ",".join(sorted(tickers))
-    key_str = f"{ticker_str}_{interval}_{start}_{end}"
+    key_str = f"{ticker_str}_{interval}_{start}_{end}_{period}"
     h = hashlib.sha1(key_str.encode('utf-8')).hexdigest()
     return os.path.join(CACHE_DIR, f"{h}.parquet")
 
@@ -168,17 +168,29 @@ async def fetch_bulk_ohlcv(
     if not tickers:
         return pd.DataFrame()
         
-    # 1. 로컬 Parquet 영구 디스크 캐시 확인
-    cache_path = _get_cache_path(tickers, interval, start, end)
+    # 1. 로컬 Parquet 영구 디스크 캐시 확인 (TTL 60초 적용 - start/end가 지정된 과거 조회는 영구 캐싱)
+    cache_path = _get_cache_path(tickers, interval, start, end, period)
+    is_historical = start is not None or end is not None
+    
     if os.path.exists(cache_path):
-        try:
-            logger.info(f"[DataProvider] Local Parquet Cache HIT for {len(tickers)} tickers ({interval})")
-            # pandas는 parquet을 동기로 읽으므로 asyncio.to_thread 사용
-            df = await asyncio.to_thread(pd.read_parquet, cache_path)
-            if not df.empty:
-                return df
-        except Exception as e:
-            logger.warning(f"[DataProvider] Failed to read local Parquet cache: {e}")
+        is_valid_cache = True
+        if not is_historical:
+            # 실시간/최신 조회 시 캐시 TTL(60초) 검사
+            import time
+            mtime = os.path.getmtime(cache_path)
+            if time.time() - mtime > 60.0:
+                is_valid_cache = False
+                logger.info(f"[DataProvider] Local Parquet Cache EXPIRED (older than 60s) for {len(tickers)} tickers")
+                
+        if is_valid_cache:
+            try:
+                logger.info(f"[DataProvider] Local Parquet Cache HIT for {len(tickers)} tickers ({interval})")
+                # pandas는 parquet을 동기로 읽으므로 asyncio.to_thread 사용
+                df = await asyncio.to_thread(pd.read_parquet, cache_path)
+                if not df.empty:
+                    return df
+            except Exception as e:
+                logger.warning(f"[DataProvider] Failed to read local Parquet cache: {e}")
 
     # 다운로드 인자 빌드
     download_kwargs = {

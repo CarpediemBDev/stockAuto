@@ -54,10 +54,12 @@ TOURNAMENT_STRATEGIES = (
 )
 
 
-def run_single_strategy_sync(strategy_key, tickers, start_date, end_date, interval, cash, tickers_data, qqq_metrics, qqq_data, processed_metrics, timeline):
+def run_single_strategy_sync(strategy_key, tickers, start_date, end_date, interval, cash, tickers_data, qqq_data):
     """
     멀티프로세싱 프로세스 내에서 개별 전략의 백테스트 연산을 독립 수행하는 동기식 탑 레벨 래퍼.
+    지표 계산(prepare_data)을 서브프로세스 내부에서 각자 수행하여 IPC 피클링 오버헤드를 원천 차단합니다.
     """
+    import asyncio
     sim = BacktestSimulator(
         tickers=tickers,
         start_date=start_date,
@@ -66,12 +68,12 @@ def run_single_strategy_sync(strategy_key, tickers, start_date, end_date, interv
         initial_cash=cash,
         strategy_type=strategy_key
     )
-    # 다운로드 및 전처리 단계를 우회하고, 메인 프로세스에서 전달받은 데이터를 주입
+    # 원본 시세 데이터 주입
     sim.tickers_data = tickers_data
-    sim.qqq_metrics = qqq_metrics
     sim.qqq_data = qqq_data
-    sim.processed_metrics = processed_metrics
-    sim.timeline = timeline
+    
+    # 서브프로세스 내에서 로컬로 지표 연산 및 타임라인 구축 실행
+    asyncio.run(sim.prepare_data())
     
     try:
         report = sim.run()
@@ -141,12 +143,11 @@ async def main():
         interval=args.interval,
         initial_cash=args.cash,
         strategy_type="strategy_a",
-        download_only=args.download_only
+        download_only=True # 메인에서는 무조건 다운로드만 수행해 지표 연산 중복과 오버헤드를 방지
     )
     await dummy_sim.prepare_data()
     
     tickers_data = dummy_sim.tickers_data
-    qqq_metrics = dummy_sim.qqq_metrics
     qqq_data = dummy_sim.qqq_data
     
     print(f"   ➔ 시세 데이터 수집 완료! (실제 수집 종목 수: {len(tickers_data)}개)")
@@ -175,10 +176,7 @@ async def main():
                 args.interval,
                 args.cash,
                 tickers_data,
-                qqq_metrics,
-                qqq_data,
-                dummy_sim.processed_metrics,
-                dummy_sim.timeline
+                qqq_data
             )
             tasks.append(task)
             

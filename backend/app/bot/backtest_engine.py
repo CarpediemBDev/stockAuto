@@ -484,8 +484,8 @@ class BacktestSimulator:
                     metrics['spread_zscore'] = 0.0
 
                 # [4] Darvas Box (20일 다바스 박스 고가/저가선)
-                metrics['darvas_high'] = df['High'].rolling(20).max().fillna(df['High'])
-                metrics['darvas_low'] = df['Low'].rolling(20).min().fillna(df['Low'])
+                metrics['darvas_high'] = df['High'].rolling(20).max().shift(1).fillna(df['High'])
+                metrics['darvas_low'] = df['Low'].rolling(20).min().shift(1).fillna(df['Low'])
                 
                 # [5] Z-Score Mean Reversion (일반 주가 Z-Score)
                 ma20_p = df['Close'].rolling(20).mean()

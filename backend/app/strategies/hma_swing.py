@@ -16,14 +16,16 @@ class HmaSwing(BaseStrategy):
     def calculate_score(self, row, regime: str, is_entry: bool = True) -> float:
         close = self._safe_get(row, 'Close')
         volume = self._safe_get(row, 'Volume')
-        if close * volume < 7400.0:
+        # 거래대금 필터 강화 (최소 $100,000)
+        if close * volume < 100000.0:
             return 0.0
             
         hma_up = self._safe_get(row, 'hma_up')
         
         if is_entry:
-            # HMA 기울기가 우상향 전환 시 매수
-            if hma_up == 1.0:
+            # HMA 기울기가 우상향이면서 지수 대비 강세일 때만 스윙 진입하여 휩소 방지
+            relative_strength = self._safe_get(row, 'relative_strength', 0.0)
+            if hma_up == 1.0 and relative_strength > 0.0:
                 return 100.0
             return 0.0
         else:

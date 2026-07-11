@@ -17,10 +17,7 @@ class AntigravitySurge(BaseStrategy):
         if close * volume < 7400.0:
             return 0.0
             
-        ema10 = self._safe_get(row, 'EMA10')
-        if ema10 == 0.0:
-            # fallback if EMA10 is missing
-            ema10 = self._safe_get(row, 'EMA9')
+        ema9 = self._safe_get(row, 'EMA9')
             
         obv_div = self._safe_get(row, 'OBV_divergence')
         
@@ -33,7 +30,7 @@ class AntigravitySurge(BaseStrategy):
                 return 100.0
             return 0.0
         else:
-            # 종가 기준 EMA10 위에 있거나 OBV 수급이 여전히 유지될 때 홀딩
-            if close >= ema10 or obv_div > 0:
+            # 종가 기준 EMA9 위에 있으면서 OBV 수급이 여전히 유지될 때 홀딩
+            if close >= ema9 and obv_div > 0:
                 return 100.0
             return 30.0
