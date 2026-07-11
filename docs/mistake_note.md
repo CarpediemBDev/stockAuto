@@ -66,3 +66,34 @@ ema20 = calculate_ema(df_15m['Close'], 20)
 - 외부 API에 의존하는 UI 표시용 엔드포인트는 전체 실패보다 부분 실패 허용 구조를 우선 적용한다.
 - 여러 외부 지표를 한 응답에 묶는 경우, 프론트 타임아웃 증가만으로 해결하지 말고 백엔드에서 개별 작업 시간 제한과 fallback을 먼저 설계한다.
 - 동일 증상 발생 시 `/api/v1/market/overview`의 전체 응답 시간과 개별 지표 fallback 여부를 먼저 확인한다.
+
+---
+
+## [Bug-003] "SIMULATED 자동매매 매도 경로 StaleDataError 사이클 중단 이슈"
+
+### 📅 발생 일시
+- 발견일: 2026-07-11
+- 영향 범위: 백엔드 스케줄러 매도 실행 경로 (`scheduler.py` `micro_session` / `process_exit_signals`)
+
+### 🔍 현상 (Symptom)
+- trade_mode 스냅샷 핫픽스로 `process_exit_signals`의 `db_settings` DetachedInstanceError가 제거되자, 그다음 단계인 SIMULATED 매도 실행의 `db.merge(h)`에서 `sqlalchemy.orm.exc.StaleDataError: Version id '1' ... does not match existing version '2'`가 발생함.
+- `run_user_trading_flow`의 광역 except가 이를 삼켜 매도 사이클이 통째로 중단되고, 같은 사이클의 매수(`process_entry_signals`)까지 스킵됨. SIMULATED은 브로커 `sell_order`를 먼저 호출한 뒤 `merge`에서 죽으므로 "브로커 매도됨/DB 미반영" 불일치 위험까지 있었음.
+
+### 🕵️ 근본 원인 (Root Cause)
+- `micro_session`은 진입 때마다 `ctx.holdings` 전체를 기본값 `db.merge(h)`(load=True)로 auto-merge해 재조정한다.
+- `process_exit_signals`는 `last_price`/`highest_price`를 version_id 낙관적 잠금과 간섭하지 않도록 Core 컬럼 단위 bulk-UPDATE로 DB에만 반영하려 했다.
+- 그러나 관측값을 공유 detached holding의 매핑 컬럼에도 세팅해 h가 dirty가 되고, 다음 auto-merge(load=True)가 이 diff를 flush하며 (1) Core UPDATE로 쓴 값을 되돌리고 (2) `version_id`를 1→2로 올린다. Core UPDATE로 version 간섭을 피하려 한 의도를 auto-merge가 무력화한 것.
+- 이후 Part B 매도가 여전히 stale 원본(v1)을 `db.merge(h)`하며 DB(v2)와 불일치해 StaleDataError 발생. 조기 중단으로 한 사이클 2종목 이상 매도 시 삭제된 holding이 `ctx.holdings`에 남아 다음 auto-merge를 오염시키는 2차 잠복 버그까지 가려두고 있었음.
+
+### 🛠️ 해결 조치 (Resolution)
+- 수정 파일: `backend/app/bot/scheduler.py`
+- `micro_session`의 holdings auto-merge를 `db.merge(h, load=False)`로 변경 — DB 재조정 flush를 원천 제거해 Core UPDATE 값 되돌림·version 상승을 막음. 병합 이후의 실제 변경(수량 증감·delete)은 그대로 dirty 추적·flush됨.
+- `process_exit_signals`가 관측값(`last_price`/`highest_price`)을 공유 holding 매핑 컬럼에 세팅하지 않고 로컬 변수로만 다루도록 정리(DB 반영은 Core UPDATE 유지).
+- 전량 매도(delete)된 holding을 `ctx.holdings`에서 즉시 제거해 다음 auto-merge의 삭제분 재병합·유령 재삽입 차단.
+- trade_mode 스냅샷 핫픽스와 결합: 위 수정이 version 상승을 없애므로 `expire_on_commit=False`(세션 밖 holding 속성 접근 보장)를 유지해도 StaleData가 재발하지 않음.
+- 검증: 회귀 테스트 `backend/tests/test_scheduler_detached_snapshot.py`가 두 종목 전량 매도 성사(sell_calls==2, 잔여 holdings==0)를 고정. `python scripts/verify_harness.py` 통과.
+
+### 🧠 재발 방지 교훈
+- 하나의 ORM 행에 Core bulk-UPDATE(version 비간섭)와 ORM 재-merge(load=True)를 혼용하면 세션 밖 객체가 DB와 diverge해 값 되돌림·version 상승을 유발한다. 읽기용 재부착은 `merge(load=False)`, 실제 영속은 명시적 `merge`로 역할을 분리한다.
+- 세션 경계를 넘나드는 ORM 객체를 컨텍스트에 장기 보관하는 패턴(`ctx.holdings`)은 삭제/수량변경 후 스냅샷 정합성을 함께 갱신해야 한다. (근본 해소는 HoldingView DTO 전환 — 후속 과제)
+- 광역 except가 StaleData 같은 정합성 오류를 삼켜 사이클을 조용히 중단시키면 하위 잠복 버그가 가려진다. 정합성 예외는 조기에 드러내고 회귀 테스트로 고정한다.

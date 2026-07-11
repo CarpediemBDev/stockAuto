@@ -356,6 +356,7 @@ class TradingFlowContext:
     db: object
     user_id: int
     db_settings: UserSettings
+    trade_mode: str
     session: str
     sentiment: str
     exchange_rate: float
@@ -376,8 +377,12 @@ def micro_session(ctx: TradingFlowContext):
     """
     db = SessionLocal()
     # 커밋 후에도 ctx.db_settings/holdings의 속성값을 세션 밖(Detached)에서 계속 읽어야 한다.
-    # 기본값(expire_on_commit=True)이면 커밋 시 병합 인스턴스의 속성이 만료되고,
-    # expunge/close 이후 접근 시 refresh를 시도하다 DetachedInstanceError로 사이클이 침묵 실패한다.
+    # 기본값(expire_on_commit=True)이면 커밋 시 병합 인스턴스가 만료되고, expunge/close 이후
+    # 접근 시 refresh를 시도하다 DetachedInstanceError로 사이클이 침묵 실패한다.
+    # ※ 과거 이 옵션이 version_id 낙관적 잠금과 겹쳐 StaleDataError를 유발했던 원인(재진입 auto-merge가
+    #   dirty holding을 flush하며 version을 올림)은 아래 load=False 병합과 process_exit_signals의 관측값
+    #   로컬화로 제거됐다. 따라서 expire_on_commit=False를 안전하게 유지한다.
+    #   추가 방어: 세션 밖에서 읽는 스칼라(trade_mode)는 ctx에 값 스냅샷으로도 떠 둔다.
     db.expire_on_commit = False
     old_db = getattr(ctx, "db", None)
     ctx.db = db
@@ -386,7 +391,14 @@ def micro_session(ctx: TradingFlowContext):
             if hasattr(ctx, "db_settings") and ctx.db_settings:
                 ctx.db_settings = db.merge(ctx.db_settings)
             if hasattr(ctx, "holdings") and ctx.holdings:
-                ctx.holdings = [db.merge(h) for h in ctx.holdings]
+                # load=False로 병합한다: DB를 다시 읽지 않고 detached holding을 그대로 "영속(clean)"으로
+                # 세션에 붙인다. 기본값(load=True)은 재진입마다 DB를 읽어 재조정하는데, process_exit_signals가
+                # last_price/highest_price를 version 비간섭 Core UPDATE로 DB에만 반영해 두면 세션 밖 holding의
+                # 매핑 컬럼값이 DB와 어긋난 상태가 되고, 다음 auto-merge가 이 diff를 flush하며 (1) Core UPDATE로
+                # 쓴 값을 되돌리고 (2) version_id를 1→2로 올려 Part B 매도의 db.merge(h)를 StaleDataError로
+                # 죽인다. load=False는 이 재조정 flush를 원천 제거한다. 병합 이후 객체에 가한 실제 변경
+                # (sync guard의 quantity 증감·delete 등)은 그대로 dirty 추적·flush되어 정상 영속된다.
+                ctx.holdings = [db.merge(h, load=False) for h in ctx.holdings]
         yield db
     except Exception as e:
         db.rollback()  # 💡 예외 발생 시 트랜잭션 롤백 및 커넥션 오염 방지
@@ -465,6 +477,10 @@ def prepare_trading_flow_context(
 
     log_action(db, user_id, f"Scan Cycle Started (Mode: {db_settings.trade_mode} | Market Regime: {sentiment})")
 
+    # 세션이 살아있는 지금 trade_mode를 평범한 문자열 값으로 스냅샷한다.
+    # (log_action 커밋으로 만료됐어도 이 접근이 전체 행을 refresh시켜 이후 merge 경로도 안전해진다.)
+    trade_mode = (db_settings.trade_mode or "SIMULATED")
+
     broker = get_broker_client(db_settings)
 
     from app.bot.multi_strategy_manager import MultiStrategyManager
@@ -476,6 +492,7 @@ def prepare_trading_flow_context(
         db=db,
         user_id=user_id,
         db_settings=db_settings,
+        trade_mode=trade_mode,
         session=session,
         sentiment=sentiment,
         exchange_rate=exchange_rate,
@@ -889,19 +906,27 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
 
             current_price_dec = to_decimal(current_data['price'])
             current_price = float(current_price_dec)
-            h.current_price = current_price
+            h.current_price = current_price  # 비영속(transient) 속성 — version_id 간섭 없음
             # 관측 현재가를 DB에 영속화 — 유저 대면 잔고 API가 외부 호출 없이 평가금을 계산하는 원천.
             # version_id 낙관적 잠금과 간섭하지 않도록 ORM merge 대신 컬럼 단위 UPDATE를 사용하고,
             # 실제 ORM Holding일 때만 기록한다 (테스트 더블 등 비영속 객체 보호).
-            h.last_price = current_price_dec
-            h.last_price_updated_at = utc_now_aware()
+            # ⚠️ 매핑 컬럼(last_price/last_price_updated_at)을 공유 detached holding(ctx.holdings 원소)에
+            #    세팅하면 h가 dirty가 되고, 다음 micro_session 진입 시 auto-merge(scheduler.py:388)가 이
+            #    dirty 상태를 flush하며 version_id를 올린다. 그러면 Part B 매도의 db.merge(h)가 stale 원본을
+            #    병합하다 StaleDataError로 사이클을 통째 중단시킨다. 따라서 관측값은 로컬 변수로만 다루고
+            #    h의 매핑 컬럼은 절대 건드리지 않는다.
+            observed_at = utc_now_aware()
             if isinstance(h, Holding) and h.id is not None:
                 with micro_session(ctx) as db:
                     db.query(Holding).filter(Holding.id == h.id).update(
                         {
                             Holding.last_price: current_price_dec,
-                            Holding.last_price_updated_at: h.last_price_updated_at,
+                            Holding.last_price_updated_at: observed_at,
                         },
+                        # version_id를 건드리지 않도록 ORM flush가 아닌 Core UPDATE를 쓴다. 세션 내 병합본과
+                        # 동기화(evaluate/fetch)하면 그 병합본이 dirty가 되어 오히려 version이 오르므로 False를
+                        # 유지하고, 대신 micro_session의 holdings auto-merge를 load=False로 두어(scheduler.py:389)
+                        # 이 Core UPDATE 값이 재병합 때 되돌려지거나 version이 오르지 않게 한다.
                         synchronize_session=False,
                     )
                     db.commit()
@@ -913,11 +938,18 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             dec_highest_price = to_decimal(h.highest_price or current_price_dec)
             if current_price_dec > dec_highest_price:
                 dec_highest_price = current_price_dec
-                h.highest_price = current_price_dec
                 _log(f"[{strategy_instance.name}] New Peak for {clean_ticker}: ${current_price}", "SIGNAL")
-                with micro_session(ctx) as db:
-                    db.merge(h)
-                    db.commit()
+                # last_price와 동일 사유(위 주석 참조): 공유 detached holding에 highest_price(매핑 컬럼)를
+                # 세팅해 merge로 영속화하면 version_id가 올라 Part B 매도의 db.merge(h)가 StaleData로 실패한다.
+                # 트레일링 기준점은 로컬 dec_highest_price로만 계산하고, DB에는 version 비간섭 컬럼 UPDATE로 반영.
+                if isinstance(h, Holding) and h.id is not None:
+                    with micro_session(ctx) as db:
+                        db.query(Holding).filter(Holding.id == h.id).update(
+                            {Holding.highest_price: current_price_dec},
+                            # last_price와 동일 사유: Core UPDATE(version 비간섭) + auto-merge load=False 조합.
+                            synchronize_session=False,
+                        )
+                        db.commit()
 
             atr = current_data.get('details', {}).get('atr', 0.0)
             stop_loss_pct = strategy_instance.get_stop_loss_pct(atr, current_price)
@@ -957,7 +989,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             if sell_reason:
                 _log(f"[{strategy_instance.name}] EXIT SIGNAL: {h.ticker} | Reason: {sell_reason}", "SIGNAL")
 
-                is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
+                is_kis_order = (ctx.trade_mode or "").upper() in {"MOCK", "REAL"}
                 metadata = None
                 if is_kis_order:
                     metadata = await safe_broker_call(broker.get_order_metadata, clean_ticker, ctx.session)
@@ -1001,7 +1033,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             return
 
         try:
-            is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
+            is_kis_order = (ctx.trade_mode or "").upper() in {"MOCK", "REAL"}
             order_intent = None
             if is_kis_order:
                 with micro_session(ctx) as db:
@@ -1132,6 +1164,14 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     db.commit()
                     fill_label = "sold" if is_full_fill else f"partially sold ({filled_qty} filled, {h.quantity} remaining)"
                     log_action(db, user_id, f"SUCCESS: {h.ticker} ({h.strategy_type}) {fill_label} via {sell_reason} | Order: {res['order_no']}", "INFO")
+
+                # 전량 매도된 holding을 ctx.holdings에서 제거한다. 같은 사이클에서 다른 종목이 이어서 매도될 때,
+                # 다음 micro_session의 holdings auto-merge(scheduler.py:388)가 이미 삭제된 detached holding을
+                # 다시 병합하려다 실패하거나 유령 재삽입하는 것을 막는다.
+                if is_full_fill:
+                    holding_id = getattr(h, "id", None)
+                    if holding_id is not None and getattr(ctx, "holdings", None):
+                        ctx.holdings = [x for x in ctx.holdings if getattr(x, "id", None) != holding_id]
 
                 BREACH_COUNT_CACHE.pop((user_id, h.ticker, h.strategy_type), None)
 
@@ -1512,7 +1552,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 )
                 continue
 
-            is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
+            is_kis_order = (ctx.trade_mode or "").upper() in {"MOCK", "REAL"}
             metadata = None
             if is_kis_order:
                 metadata = await safe_broker_call(ctx.broker.get_order_metadata, clean_ticker, ctx.session)
@@ -1524,7 +1564,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
             _, _, reserved_order_total = calculate_buy_total(
                 current_price,
                 final_qty,
-                fee_rate_for_trade_mode(ctx.db_settings.trade_mode),
+                fee_rate_for_trade_mode(ctx.trade_mode),
             )
             slot_cash_usd -= float(reserved_order_total)
             if not existing_holding:
@@ -1557,7 +1597,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
             return False
 
         try:
-            is_kis_order = (ctx.db_settings.trade_mode or "").upper() in {"MOCK", "REAL"}
+            is_kis_order = (ctx.trade_mode or "").upper() in {"MOCK", "REAL"}
             order_intent = None
             if is_kis_order:
                 with micro_session(ctx) as db:
@@ -1697,6 +1737,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         db = SessionLocal()
         # prepare_trading_flow_context 내 log_action 커밋이 db_settings 속성을 만료시키는데,
         # 이후 expunge_all로 Detached된 상태에서 속성을 읽으면 refresh 실패한다. 만료를 끈다.
+        # (micro_session과 동일 정책 — 상세 근거는 micro_session 주석 참조.)
         db.expire_on_commit = False
         try:
             ctx = prepare_trading_flow_context(
