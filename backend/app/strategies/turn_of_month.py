@@ -28,6 +28,6 @@ class TurnOfMonth(BaseStrategy):
             return 0.0
         else:
             # 리밸런싱 기간 종료 시 청산 후 현금화
-            if tom == 0.0:
+            if tom == 1.0:
                 return 100.0
             return 30.0

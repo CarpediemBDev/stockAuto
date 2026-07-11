@@ -29,5 +29,6 @@ class HmaSwing(BaseStrategy):
         else:
             # HMA 기울기가 우하향 전환 시 청산
             if hma_up == 0.0:
-                return 100.0
-            return 30.0
+                return 0.0
+            return 100.0
+
