@@ -116,24 +116,25 @@ if "%CHECK_ONLY%"=="1" (
     goto :fail
 )
 
-echo [INFO] Redis is not running. Trying Docker Compose...
-where docker.exe >nul 2>&1
-if errorlevel 1 (
-    set "ERROR_MESSAGE=Redis is stopped and Docker is unavailable. Start Memurai/Redis or install Docker Desktop."
+echo [INFO] Redis is not running. Trying to start Memurai...
+
+REM Prefer the registered Memurai Windows service (requires elevation).
+net start Memurai >nul 2>&1
+
+call :port_open 6379
+if not errorlevel 1 goto :redis_ready
+
+REM Service unavailable or needs admin: launch the Memurai binary directly.
+set "MEMURAI_EXE=%ProgramFiles%\Memurai\memurai.exe"
+if not exist "%MEMURAI_EXE%" (
+    for /f "delims=" %%I in ('where memurai.exe 2^>nul') do set "MEMURAI_EXE=%%I"
+)
+if not exist "%MEMURAI_EXE%" (
+    set "ERROR_MESSAGE=Redis is stopped and Memurai was not found. Install Memurai (https://www.memurai.com) or start Redis on 127.0.0.1:6379."
     goto :fail
 )
 
-docker.exe info >nul 2>&1
-if errorlevel 1 (
-    set "ERROR_MESSAGE=Docker is installed but its engine is not running. Start Docker Desktop."
-    goto :fail
-)
-
-docker.exe compose -f "%BACKEND_DIR%\docker-compose.yml" up -d redis
-if errorlevel 1 (
-    set "ERROR_MESSAGE=Docker Compose could not start Redis. Review the error above."
-    goto :fail
-)
+start "StockAuto Redis" /MIN "%MEMURAI_EXE%" --port 6379 --save "" --appendonly no
 
 set /a REDIS_WAIT_COUNT=0
 :wait_redis
@@ -141,7 +142,7 @@ call :port_open 6379
 if not errorlevel 1 goto :redis_ready
 set /a REDIS_WAIT_COUNT+=1
 if %REDIS_WAIT_COUNT% GEQ 15 (
-    set "ERROR_MESSAGE=Redis did not open port 6379 within 15 seconds."
+    set "ERROR_MESSAGE=Memurai did not open port 6379 within 15 seconds."
     goto :fail
 )
 powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 1" >nul 2>&1

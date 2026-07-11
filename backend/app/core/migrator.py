@@ -115,6 +115,13 @@ def seed_competitive_users():
             {"username": "admin9", "strategy": "bb_squeeze"},
             {"username": "admin10", "strategy": "rsi2_connors"},
             {"username": "admin11", "strategy": "strategy_c"},
+            # 2026-07-09 레버리지 레짐 관찰 전용 계정 3종 (SIMULATED 라이브, 자산곡선 병렬 비교)
+            #  - obs_qqq_hold: QQQ 단순보유 기준선
+            #  - obs_core:     코어-새틀라이트(QLD 2x 70% + 전략C 30%) — 1차 목표(QQQ 초과)
+            #  - obs_aggressive: TQQQ 3x 레짐 — 2차 목표(월 30%) 도전, 고위험
+            {"username": "obs_qqq_hold", "strategy": "benchmark_qqq_hold"},
+            {"username": "obs_core", "strategy": "core_satellite"},
+            {"username": "obs_aggressive", "strategy": "leveraged_regime_3x"},
         ]
 
         strategy_keys = {

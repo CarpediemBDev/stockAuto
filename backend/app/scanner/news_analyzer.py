@@ -106,6 +106,7 @@ def _analyze_sentiment_locally(ticker: str, news_list: list) -> dict:
             "sentiment_score": 50,
             "summary": "최근 등록된 관련 뉴스가 없습니다.",
             "url": "",
+            "source": "local",
         }
 
     score = 50
@@ -149,6 +150,7 @@ def _analyze_sentiment_locally(ticker: str, news_list: list) -> dict:
         "sentiment_score": score,
         "summary": local_summary,
         "url": first_url,
+        "source": "local",
     }
 
 
@@ -166,6 +168,7 @@ async def analyze_news_sentiment(ticker: str, news_list: list, force_local: bool
             "sentiment_score": 50,
             "summary": "최근 관련 뉴스가 존재하지 않습니다.",
             "url": "",
+            "source": "none",
         }
 
     first_url = _extract_news_url(news_list[0])
@@ -199,6 +202,7 @@ async def analyze_news_sentiment(ticker: str, news_list: list, force_local: bool
                 "sentiment_score": score,
                 "summary": parsed.get("summary", "AI 요약을 생성하지 못했습니다."),
                 "url": first_url,
+                "source": "gemini",
             }
         except GeminiClientError as exc:
             logger.exception(
@@ -206,9 +210,14 @@ async def analyze_news_sentiment(ticker: str, news_list: list, force_local: bool
                 ticker,
                 exc,
             )
+    elif force_local:
+        logger.info(
+            "[AI News Analyzer] Gemini skipped (quota throttle) for %s. Local fallback.",
+            ticker,
+        )
     else:
         logger.info(
-            "[AI News Analyzer] Gemini news analysis disabled. Using local fallback for %s",
+            "[AI News Analyzer] Gemini disabled (setting off) for %s. Local fallback.",
             ticker,
         )
 

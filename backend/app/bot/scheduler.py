@@ -8,7 +8,7 @@ from app.core.locks import (
     acquire_symbol_order_lock,
     acquire_user_operation_lock,
 )
-from app.core.models import TradeLog, Holding, ActionLog, UserSettings, WatchList, User, AccountEquitySnapshot
+from app.core.models import TradeLog, Holding, ActionLog, UserSettings, WatchList, User, AccountEquitySnapshot, UnfilledOrder
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from dataclasses import dataclass
@@ -375,6 +375,10 @@ def micro_session(ctx: TradingFlowContext):
     DB 접근이 필요한 찰나의 순간(0.01초)에만 커넥션을 풀에서 빌려오고 즉시 반납합니다.
     """
     db = SessionLocal()
+    # 커밋 후에도 ctx.db_settings/holdings의 속성값을 세션 밖(Detached)에서 계속 읽어야 한다.
+    # 기본값(expire_on_commit=True)이면 커밋 시 병합 인스턴스의 속성이 만료되고,
+    # expunge/close 이후 접근 시 refresh를 시도하다 DetachedInstanceError로 사이클이 침묵 실패한다.
+    db.expire_on_commit = False
     old_db = getattr(ctx, "db", None)
     ctx.db = db
     try:
@@ -629,6 +633,218 @@ async def build_target_signals(ctx: TradingFlowContext) -> list | None:
         return None
 
     return target_signals
+
+
+async def process_autonomous_slots(ctx: TradingFlowContext, slot_allocations: dict) -> None:
+    """자율 슬롯(지수 레버리지 레짐 계열) 전용 집행 경로.
+
+    스캐너 시그널·손절/트레일링 파이프라인과 무관하게, 신호 지수(QQQ)의 '완결 일봉'
+    레짐(SMA 위/아래 N일 연속 확정)으로 목표 상태(IN=보유/OUT=현금)를 판정하고
+    현재 보유 상태와 다를 때만 정규장에서 슬롯 현금 전액 매수 또는 전량 매도합니다.
+    상태가 일치하면 무매매(멱등)이므로 1분 주기 호출에도 과매매가 발생하지 않습니다.
+    주문 인텐트 원장(KIS 경로)이 배선되지 않았으므로 SIMULATED 모드에서만 집행합니다.
+    """
+    user_id = ctx.user_id
+
+    def _log(msg, level="INFO"):
+        with micro_session(ctx) as db:
+            log_action(db, user_id, msg, level)
+
+    if not any(
+        getattr(s, "is_autonomous", False)
+        for s in ctx.ms_manager.strategies.values()
+    ):
+        return
+
+    # 선행 단계의 micro_session 커밋으로 ORM 객체 속성이 만료(Detached)될 수 있으므로,
+    # 필요한 상태를 세션 안에서 평범한 값(스냅샷)으로 떠서 세션 밖에서는 ORM을 만지지 않는다.
+    with micro_session(ctx) as db:
+        trade_mode = ((ctx.db_settings.trade_mode if ctx.db_settings else None) or "SIMULATED").upper()
+        holdings_snapshot = [
+            {
+                "id": h.id,
+                "ticker": h.ticker,
+                "strategy_type": h.strategy_type,
+                "quantity": int(h.quantity or 0),
+                "avg_price": h.avg_price,
+                "ticker_name": h.ticker_name,
+            }
+            for h in db.query(Holding).filter(Holding.user_id == user_id).all()
+        ]
+
+    for slot_key, slot_info in slot_allocations.items():
+        strategy = ctx.ms_manager.strategies.get(slot_key)
+        if not strategy or not getattr(strategy, "is_autonomous", False):
+            continue
+
+        if trade_mode != "SIMULATED":
+            if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, ("autonomous_mode_guard", user_id, slot_key)):
+                _log(
+                    f"[{strategy.name}] Autonomous slot is SIMULATED-only (order-intent ledger not wired). "
+                    f"Skipping in {trade_mode} mode.",
+                    "WARNING",
+                )
+            continue
+
+        asset = strategy.asset_ticker
+        holding = next(
+            (h for h in holdings_snapshot if h["strategy_type"] == slot_key and h["ticker"] == asset),
+            None,
+        )
+
+        # 1) 레짐 판정 — 완결 일봉만 사용 (당일 미완결 봉 제거로 룩어헤드 차단)
+        try:
+            df = await fetch_ohlcv(strategy.signal_ticker, interval="1d", period="2y")
+        except Exception as fetch_err:
+            _log(f"[{strategy.name}] Failed to fetch daily bars for {strategy.signal_ticker}: {fetch_err}", "WARNING")
+            continue
+        if df is None or df.empty or "Close" not in df.columns:
+            _log(f"[{strategy.name}] Daily bars unavailable for {strategy.signal_ticker}. Skipping this cycle.", "WARNING")
+            continue
+
+        closes = df["Close"].dropna()
+        try:
+            last_bar_date = closes.index[-1].date()
+            if ctx.session != MarketSession.CLOSED and last_bar_date >= datetime.now(tz=ET).date():
+                closes = closes.iloc[:-1]
+        except (AttributeError, TypeError):
+            pass
+
+        target = strategy.compute_target_state(closes)
+        regime_label = "BULLISH" if target == "IN" else "BEARISH"
+
+        # 상태 정합 → 무매매 (멱등 가드)
+        if (target == "IN") == (holding is not None):
+            continue
+
+        # 2) 체결은 정규장에서만 — 백테스트(신호 익일 체결)와 등가 규율
+        if ctx.session != MarketSession.REGULAR:
+            if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, ("autonomous_wait_regular", user_id, slot_key)):
+                _log(f"[{strategy.name}] Regime target={target} pending. Awaiting REGULAR session to execute.", "INFO")
+            continue
+
+        # 3) 동일 슬롯 미체결 가상 주문이 남아 있으면 중복 발주 금지
+        with micro_session(ctx) as db:
+            pending_order = db.query(UnfilledOrder).filter(
+                UnfilledOrder.user_id == user_id,
+                UnfilledOrder.ticker == asset,
+                UnfilledOrder.strategy_type == slot_key,
+            ).first()
+            if pending_order is not None:
+                db.expunge(pending_order)
+        if pending_order is not None:
+            continue
+
+        live_price = await get_realtime_price(asset)
+        if live_price is None or live_price <= 0:
+            _log(f"[{strategy.name}] Live price unavailable for {asset}. Skipping this cycle.", "WARNING")
+            continue
+
+        request_id = str(uuid4())
+        try:
+            symbol_lease = await acquire_symbol_order_lock(user_id, asset, request_id)
+        except RedisLockUnavailable:
+            _log(f"[{strategy.name}] ORDER BLOCKED: Redis order lock unavailable for {asset}.", "ERROR")
+            continue
+        if symbol_lease is None:
+            continue
+
+        try:
+            fee_rate = fee_rate_for_trade_mode(trade_mode)
+            if target == "IN":
+                slot_cash_usd = float(slot_info.get("cash_balance", 0.0))
+                budget_usd = slot_cash_usd * 0.98
+                qty = int(budget_usd / (live_price * (1.0 + float(fee_rate))))
+                if qty < 1:
+                    if should_log_with_cooldown(WARNING_COOLDOWN_CACHE, ("autonomous_budget", user_id, slot_key), 3600.0):
+                        _log(
+                            f"[{strategy.name}] Slot cash ${slot_cash_usd:,.2f} cannot afford 1 share of {asset} (${live_price:,.2f}).",
+                            "WARNING",
+                        )
+                    continue
+
+                _log(f"[{strategy.name}] REGIME ENTRY: {asset} x{qty} @ ~${live_price:,.2f} (target={target})", "SIGNAL")
+                res = await safe_broker_call(
+                    ctx.broker.buy_order, asset, qty,
+                    price=live_price * 1.001, session=ctx.session,
+                    strategy_type=slot_key, regime_mode=regime_label,
+                )
+                if res.get("success") and res.get("filled_qty", 0) > 0:
+                    record_successful_buy(
+                        ctx=ctx, strategy_instance=strategy, existing_holding=None,
+                        ticker=asset, strategy_type=slot_key,
+                        signal={"name": asset}, filled_price=res["filled_price"],
+                        filled_qty=res["filled_qty"], next_stage=3,
+                        order_no=res["order_no"], current_score=0,
+                    )
+                    send_successful_buy_message(
+                        ctx=ctx, strategy_instance=strategy, clean_ticker=asset,
+                        signal={"name": asset}, filled_price=res["filled_price"],
+                        filled_qty=res["filled_qty"], next_stage=3, order_no=res["order_no"],
+                    )
+                elif res.get("success"):
+                    _log(f"[{strategy.name}] BUY order submitted (pending fill): {asset} x{qty} | {res.get('order_no', '')}", "INFO")
+                else:
+                    _log(f"[{strategy.name}] BUY FAILED: {asset} | {res.get('message', '')}", "ERROR")
+            else:
+                sell_qty = int(holding["quantity"] or 0)
+                if sell_qty <= 0:
+                    continue
+
+                _log(f"[{strategy.name}] REGIME EXIT: {asset} x{sell_qty} @ ~${live_price:,.2f} → 현금 대피 (target={target})", "SIGNAL")
+                res = await safe_broker_call(
+                    ctx.broker.sell_order, asset, sell_qty,
+                    price=live_price * 0.999, session=ctx.session,
+                    strategy_type=slot_key, regime_mode=regime_label,
+                )
+                if res.get("success") and res.get("filled_qty", 0) > 0:
+                    filled_qty = res["filled_qty"]
+                    filled_price = res["filled_price"]
+                    pnl = calculate_realized_pnl(
+                        avg_price=holding["avg_price"],
+                        filled_price=filled_price,
+                        quantity=filled_qty,
+                        fee_rate=fee_rate,
+                    )
+                    with micro_session(ctx) as db:
+                        h_db = db.query(Holding).filter(Holding.id == holding["id"]).first()
+                        db.add(TradeLog(
+                            user_id=user_id, ticker=asset, strategy_type=slot_key,
+                            ticker_name=holding["ticker_name"] or asset,
+                            trade_type="SELL", price=filled_price, quantity=filled_qty,
+                            order_no=res["order_no"], regime_mode=regime_label, signal_score=0,
+                            realized_pnl=pnl.realized_pnl, return_rate=pnl.return_rate,
+                        ))
+                        if h_db is not None:
+                            if filled_qty >= (h_db.quantity or 0):
+                                db.delete(h_db)
+                            else:
+                                h_db.quantity -= filled_qty
+                        db.commit()
+                        log_action(db, user_id, f"[{strategy.name}] SUCCESS: {asset} regime exit ({filled_qty} shares) | Order: {res['order_no']}", "INFO")
+
+                    realized_pnl = float(pnl.realized_pnl)
+                    pnl_sign = "+" if realized_pnl >= 0 else "-"
+                    pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
+                    send_message_async(
+                        user_id,
+                        f"🔴 *[{strategy.name} 레짐 이탈 자동매도]*\n"
+                        f"종목: {asset}\n"
+                        f"• *체결 단가:* `${filled_price:,.2f}`\n"
+                        f"• *체결 수량:* `{filled_qty}주`\n"
+                        f"• *매도 사유:* SMA{strategy.sma_period} 하향 이탈 {strategy.confirm_days}일 연속 확정 → 현금 대피\n\n"
+                        f"{pnl_emoji} *실수익률:* `{pnl_sign}{abs(float(pnl.return_rate)):.2f}%`\n"
+                        f"💰 *실현 실수익:* `{pnl_sign}${abs(realized_pnl):,.2f}`\n"
+                        f"• *주문 번호:* `{res['order_no']}`",
+                    )
+                elif res.get("success"):
+                    _log(f"[{strategy.name}] SELL order submitted (pending fill): {asset} x{sell_qty} | {res.get('order_no', '')}", "INFO")
+                else:
+                    _log(f"[{strategy.name}] SELL FAILED: {asset} | {res.get('message', '')}", "ERROR")
+        finally:
+            await symbol_lease.release()
+
+
 async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict) -> None:
     user_id = ctx.user_id
     broker = ctx.broker
@@ -659,6 +875,9 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             if slot_key not in ms_manager.strategies:
                 continue
             strategy_instance = ms_manager.strategies[slot_key]
+            if getattr(strategy_instance, "is_autonomous", False):
+                # 자율 슬롯 보유분은 손절/트레일링 대상이 아님 — 레짐 이탈 시에만 process_autonomous_slots가 청산
+                continue
 
             current_data = target_signal_map.get(clean_ticker) or ctx.signal_map.get(clean_ticker)
             if not current_data:
@@ -1211,6 +1430,9 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
             continue
 
         strategy_instance = ms_manager.strategies[slot_key]
+        if getattr(strategy_instance, "is_autonomous", False):
+            # 자율 슬롯은 스캐너 시그널 기반 신규 진입 대상이 아님 — process_autonomous_slots 전담
+            continue
         slot_cash_usd = slot_info["cash_balance"]
         slot_total_asset_usd = slot_info["total_asset"]
 
@@ -1473,6 +1695,9 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
 
     try:
         db = SessionLocal()
+        # prepare_trading_flow_context 내 log_action 커밋이 db_settings 속성을 만료시키는데,
+        # 이후 expunge_all로 Detached된 상태에서 속성을 읽으면 refresh 실패한다. 만료를 끈다.
+        db.expire_on_commit = False
         try:
             ctx = prepare_trading_flow_context(
                 db=db,
@@ -1493,7 +1718,19 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
 
         try:
             await sync_broker_holdings(ctx)
+
+            # 선행 micro_session 커밋으로 만료(Detached-expired)된 보유 ORM을 신선한 로드 상태로 교체.
+            # 이 재적재가 없으면 보유가 생긴 뒤 calculate_slots_allocation의 세션 밖 속성 접근이
+            # DetachedInstanceError로 사이클 전체를 침묵 실패시킨다.
+            refresh_db = SessionLocal()
+            try:
+                ctx.holdings = refresh_db.query(Holding).filter(Holding.user_id == user_id).all()
+                refresh_db.expunge_all()
+            finally:
+                refresh_db.close()
+
             slot_allocations = await calculate_slot_allocations(ctx)
+            await process_autonomous_slots(ctx, slot_allocations)
             target_signals = await build_target_signals(ctx)
             if target_signals is None:
                 return

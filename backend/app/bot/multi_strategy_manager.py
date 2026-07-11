@@ -27,7 +27,10 @@ class MultiStrategyManager:
             "strategy_b": "SB_",
             "strategy_c": "SC_",
             "exploded_c": "XC_",
-            "asqs": "ASQS_"
+            "asqs": "ASQS_",
+            "leveraged_regime": "LR_",
+            "leveraged_regime_3x": "L3_",
+            "benchmark_qqq_hold": "BH_"
         }
         return prefix_map.get(strategy_type, "ST_")
 
@@ -60,6 +63,13 @@ class MultiStrategyManager:
             self.SLOTS = {
                 "episodic_pivot": self._build_slot("episodic_pivot", 0.50, "EP_"),
                 "regime_switching": self._build_slot("regime_switching", 0.50, "RS_"),
+            }
+        elif strategy_type == "core_satellite":
+            # 코어-새틀라이트 분할 모드 (코어: 지수 레버리지 레짐 70% / 새틀라이트: 전략 C 30%)
+            # 근거: 2026-07-07/09 현황판 — 개별종목 타이밍 85종 전패, 지수 레버리지 레짐만 다년 QQQ 초과
+            self.SLOTS = {
+                "leveraged_regime": self._build_slot("leveraged_regime", 0.70, "LR_"),
+                "strategy_c": self._build_slot("strategy_c", 0.30, "SC_"),
             }
         elif strategy_type in ["three_slot", "multi_slot_3"]:
             # 3슬롯 분할 모드 (EP 30% : ASQS 30% : RS 40%)

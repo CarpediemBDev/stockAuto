@@ -202,7 +202,8 @@ def test_alembic_upgrade_head_builds_expected_core_schema(tmp_path):
             gemini_enabled = connection.exec_driver_sql(
                 "SELECT value FROM system_settings WHERE key = 'enable_gemini_news_analysis'"
             ).scalar_one()
-            assert strategy_count == 85
+            assert strategy_count == 90
+
             assert gemini_enabled == "false"
             assert strategy_name == "격리형 2슬롯 (EP 50% : RS 50%)"
     finally:

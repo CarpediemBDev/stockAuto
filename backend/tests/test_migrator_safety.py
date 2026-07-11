@@ -81,8 +81,12 @@ def test_competitive_seed_preserves_existing_user_settings(tmp_path, monkeypatch
                         ("bb_squeeze", "존카터 BB스퀴즈", "TTM Squeeze"),
                         ("rsi2_connors", "래리코너스 RSI 2", "RSI 2 Only"),
                         ("strategy_c", "전략 C", "Strategy C"),
+                        ("core_satellite", "코어 새틀라이트", "Core Satellite"),
+                        ("benchmark_qqq_hold", "벤치마크 QQQ", "Benchmark QQQ"),
+                        ("leveraged_regime_3x", "레버리지 레짐 3x", "Leveraged Regime 3x"),
                     )
                 ]
+
             )
             db.commit()
         finally:

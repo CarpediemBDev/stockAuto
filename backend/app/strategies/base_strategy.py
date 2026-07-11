@@ -7,6 +7,10 @@ class BaseStrategy(ABC):
     기본 변수(비중 할당, 손절선 배수, 스마트 익절 마진)의 디폴트값을 정의합니다.
     """
     
+    # 자율 슬롯 여부: True인 전략은 스캐너 시그널/손절·트레일링 파이프라인을 우회하고
+    # 스케줄러의 전용 경로(process_autonomous_slots)가 직접 집행합니다.
+    is_autonomous = False
+
     def __init__(self, name: str = "Base Strategy"):
         self.name = name
         
