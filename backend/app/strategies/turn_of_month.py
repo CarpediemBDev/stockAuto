@@ -16,18 +16,23 @@ class TurnOfMonth(BaseStrategy):
     def calculate_score(self, row, regime: str, is_entry: bool = True) -> float:
         close = self._safe_get(row, 'Close')
         volume = self._safe_get(row, 'Volume')
-        if close * volume < 7400.0:
+        
+        # 1. 거래대금 필터 강화 (유동성 부족한 잡주 차단: 최소 $500,000)
+        if close * volume < 500000.0:
             return 0.0
             
         tom = self._safe_get(row, 'is_tom')
         
         if is_entry:
-            # 월말-월초 자금 분출 기간 돌입 시 매수
+            # 월말-월초 자금 분출 기간이면서 지수 대비 강세(상대 강도) 또는 최소 20일선 정배열 지지 시에만 진입
             if tom == 1.0:
-                return 100.0
+                relative_strength = self._safe_get(row, 'relative_strength', 0.0)
+                ema20 = self._safe_get(row, 'EMA20', 0.0)
+                if relative_strength > 0.0 or (ema20 > 0.0 and close > ema20):
+                    return 100.0
             return 0.0
         else:
             # 리밸런싱 기간 종료 시 청산 후 현금화
-            if tom == 0.0:
+            if tom == 1.0:
                 return 100.0
             return 30.0

@@ -28,7 +28,6 @@ class VcpBreakout(BaseStrategy):
             return 0.0
         else:
             ema20 = self._safe_get(row, 'EMA20')
-            # 20일선 이탈 시 청산
-            if close < ema20:
+            if close >= ema20:
                 return 100.0
             return 30.0

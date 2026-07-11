@@ -6,7 +6,7 @@ from app.scanner.data_provider import fetch_ohlcv, fetch_bulk_ohlcv
 from app.scanner.indicators import (
     calculate_ema, calculate_rsi, calculate_macd, calculate_atr, 
     calculate_obv_divergence, calculate_rsi_bb, calculate_vwap, calculate_wick_ratio,
-    calculate_double_bb_reversion_signals
+    calculate_double_bb_reversion_signals, calculate_connors_rsi
 )
 from app.core.logging import logger
 from app.bot.backtest_metrics import calculate_performance_metrics
@@ -163,14 +163,15 @@ class BacktestSimulator:
     과거 역사적 데이터를 로드하여 StockAuto v2.0 트레이딩 규칙과 자금 관리 모듈을 정밀 시뮬레이션하는 엔진.
     데이터 프로바이더를 연동하며 미래 데이터를 참조하지 않는 완벽한 Event-driven 방식으로 작동합니다.
     """
-    def __init__(self, tickers: list, start_date: str, end_date: str, interval: str = "1h", initial_cash: float = 10000.0, csv_path: str = None, strategy_type: str = "complex", variant: str = "BASE"):
-        self.tickers = list(set(tickers))
+    def __init__(self, tickers: list, start_date: str, end_date: str, interval: str = "1h", initial_cash: float = 10000.0, csv_path: str = None, strategy_type: str = "complex", variant: str = "BASE", download_only: bool = False):
+        self.tickers = sorted(list(set(tickers)))
         self.start_date = start_date
         self.end_date = end_date
         self.interval = interval
         self.csv_path = csv_path
         self.broker = BacktestBroker(initial_cash)
         self.strategy_type = strategy_type
+        self.download_only = download_only
         
         # 💡 [전략 패턴] 전략 팩토리를 통해 해당 전략 객체 로드 및 장착
         from app.strategies.strategy_factory import get_strategy
@@ -247,6 +248,21 @@ class BacktestSimulator:
         download_start = start_datetime - timedelta(days=warmup_days)
         download_end = end_datetime + timedelta(days=1)
         
+        # 💡 [yfinance API 한도 보호] 15m/5m/1m 데이터는 yfinance 보관 주기 한도(15m/5m 최대 60일, 1m 최대 30일)를 넘으면 
+        # 다운로드가 통째로 실패하므로 download_start를 제공 한도 범위 안으로 안전하게 클리핑합니다.
+        # yfinance 한도는 언제나 '현재 호출하는 시점(오늘)' 기준이므로, download_end가 아닌 datetime.now() 기준으로 역산하고 2일 안전 마진을 둡니다.
+        limit_days = {
+            "1m": 27,
+            "5m": 57,
+            "15m": 57,
+        }.get(self.interval, None)
+        
+        if limit_days is not None:
+            max_allowed_start = datetime.now() - timedelta(days=limit_days)
+            if download_start < max_allowed_start:
+                logger.warning(f"[Backtest] Interval {self.interval} requested start date {download_start.date()} exceeds yfinance limit. Clipping to {max_allowed_start.date()}")
+                download_start = max_allowed_start
+        
         # 1분봉은 최대 30일 제한이 있으므로 안전하게 period를 제한
         if self.interval == "1m":
             period_str = "30d"
@@ -294,16 +310,39 @@ class BacktestSimulator:
                 "QQQ data does not cover the requested backtest date range."
             )
 
-        # 2. 개별 종목 데이터 다운로드 및 기술 지표 계산
-        # 벌크 다운로드 활용하여 속도 극대화
-        logger.info(f"[Backtest] Fetching target tickers data: {self.tickers}")
-        bulk_data = await fetch_bulk_ohlcv(
-            self.tickers,
-            interval=self.interval,
-            period=period_str,
-            start=download_start,
-            end=download_end,
-        )
+        # 벌크 다운로드 활용하여 속도 극대화 (50개씩 청킹하여 다운로드 후 병합)
+        logger.info(f"[Backtest] Fetching target tickers data (chunked bulk): {self.tickers}")
+        chunk_size = 50
+        ticker_chunks = [self.tickers[i:i+chunk_size] for i in range(0, len(self.tickers), chunk_size)]
+        
+        bulk_dfs = []
+        for chunk in ticker_chunks:
+            chunk_data = await fetch_bulk_ohlcv(
+                chunk,
+                interval=self.interval,
+                period=period_str,
+                start=download_start,
+                end=download_end,
+            )
+            if not chunk_data.empty:
+                bulk_dfs.append(chunk_data)
+            await asyncio.sleep(0.3)  # API 가드용 지연
+            
+        if bulk_dfs:
+            bulk_data = pd.concat(bulk_dfs, axis=1)
+        else:
+            bulk_data = pd.DataFrame()
+
+        if self.download_only:
+            logger.info("[Backtest] download_only is True. Skipping indicators calculation.")
+            self.tickers_data = {}
+            for ticker in self.tickers:
+                if isinstance(bulk_data.columns, pd.MultiIndex):
+                    if ticker in bulk_data.columns.get_level_values(0):
+                        self.tickers_data[ticker] = bulk_data[ticker].dropna()
+                else:
+                    self.tickers_data[ticker] = bulk_data.dropna()
+            return
         
         for ticker in self.tickers:
             try:
@@ -384,6 +423,9 @@ class BacktestSimulator:
                 # 1. 래리 코너스(Larry Connors) RSI 2 및 EMA 5
                 metrics['RSI2'] = calculate_rsi(df['Close'], 2)
                 metrics['EMA5'] = calculate_ema(df['Close'], 5)
+                metrics['connors_rsi'] = calculate_connors_rsi(df['Close'], 3, 2, 100)
+                metrics['EMA3'] = calculate_ema(df['Close'], 3)
+
                 
                 # 2. 존 카터(John Carter) 볼린저 밴드 스퀴즈 (BB Squeeze)
                 ma20 = df['Close'].rolling(window=20).mean()
@@ -442,8 +484,8 @@ class BacktestSimulator:
                     metrics['spread_zscore'] = 0.0
 
                 # [4] Darvas Box (20일 다바스 박스 고가/저가선)
-                metrics['darvas_high'] = df['High'].rolling(20).max().fillna(df['High'])
-                metrics['darvas_low'] = df['Low'].rolling(20).min().fillna(df['Low'])
+                metrics['darvas_high'] = df['High'].rolling(20).max().shift(1).fillna(df['High'])
+                metrics['darvas_low'] = df['Low'].rolling(20).min().shift(1).fillna(df['Low'])
                 
                 # [5] Z-Score Mean Reversion (일반 주가 Z-Score)
                 ma20_p = df['Close'].rolling(20).mean()

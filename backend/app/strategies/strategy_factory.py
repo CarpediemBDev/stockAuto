@@ -20,22 +20,81 @@ def _create_strategy(strategy_type: str) -> BaseStrategy:
         from app.strategies.strategy_b import StrategyB
         return StrategyB()
         
-    elif strategy_type in ["strategy_c", "complex"]:
+    elif strategy_type in ["strategy_c", "complex", "strategy_c_ep", "complex_ep", "strategy_c_aggressive", "complex_aggressive"]:
         from app.strategies.strategy_c import StrategyC
         return StrategyC()
         
     elif strategy_type == "exploded_c":
         from app.strategies.exploded_c import ExplodedC
         return ExplodedC()
-        
-    elif strategy_type in ["strategy_c_ep", "complex_ep"]:
-        from app.strategies.strategy_c_ep import StrategyCEP
-        return StrategyCEP()
-        
-    elif strategy_type in ["strategy_c_aggressive", "complex_aggressive"]:
-        from app.strategies.strategy_c_aggressive import StrategyCAggressive
-        return StrategyCAggressive()
-        
+
+    elif strategy_type == "antigravity_surge":
+        from app.strategies.antigravity_surge import AntigravitySurge
+        return AntigravitySurge()
+
+    elif strategy_type == "regime_sniper":
+        from app.strategies.regime_sniper import RegimeSniper
+        return RegimeSniper()
+
+    elif strategy_type == "phoenix_bounce":
+        from app.strategies.phoenix_bounce import PhoenixBounce
+        return PhoenixBounce()
+    elif strategy_type == "hurst_adaptive":
+        from app.strategies.hurst_adaptive import HurstAdaptive
+        return HurstAdaptive()
+
+    elif strategy_type == "kalman_pairs":
+        from app.strategies.kalman_pairs import KalmanPairs
+        return KalmanPairs()
+
+    elif strategy_type == "chaikin_atr":
+        from app.strategies.chaikin_atr import ChaikinAtr
+        return ChaikinAtr()
+
+    elif strategy_type == "sentiment_fomo":
+        from app.strategies.sentiment_fomo import SentimentFomo
+        return SentimentFomo()
+
+    elif strategy_type == "macro_momentum":
+        from app.strategies.macro_momentum import MacroMomentum
+        return MacroMomentum()
+
+    elif strategy_type == "obi_ofa":
+        from app.strategies.obi_ofa import ObiOfa
+        return ObiOfa()
+
+    elif strategy_type == "volatility_regime":
+        from app.strategies.volatility_regime import VolatilityRegime
+        return VolatilityRegime()
+
+    elif strategy_type == "gex_pinning":
+        from app.strategies.gex_pinning import GexPinning
+        return GexPinning()
+
+    elif strategy_type == "pca_knn":
+        from app.strategies.pca_knn import PcaKnn
+        return PcaKnn()
+
+    elif strategy_type == "sortino_momentum":
+        from app.strategies.sortino_momentum import SortinoMomentum
+        return SortinoMomentum()
+
+    elif strategy_type == "lava_volume":
+        from app.strategies.lava_volume import LavaVolume
+        return LavaVolume()
+
+    elif strategy_type == "td_sequential":
+        from app.strategies.td_sequential import TdSequential
+        return TdSequential()
+
+    elif strategy_type == "donchian_breakout":
+        from app.strategies.donchian_breakout import DonchianBreakout
+        return DonchianBreakout()
+
+    elif strategy_type == "opening_range_breakout":
+        from app.strategies.opening_range_breakout import OpeningRangeBreakout
+        return OpeningRangeBreakout()
+
     elif strategy_type in ["asqs", "supernova_squeeze"]:
         from app.strategies.asqs import ASQS
         return ASQS()
@@ -96,6 +155,10 @@ def _create_strategy(strategy_type: str) -> BaseStrategy:
     elif strategy_type == "benchmark_qqq_hold":
         from app.strategies.leveraged_regime import BenchmarkQqqHold
         return BenchmarkQqqHold()
+
+    elif strategy_type == "core_satellite":
+        from app.strategies.core_satellite import CoreSatellite
+        return CoreSatellite()
 
     elif strategy_type in ["cross_sectional_momentum", "xsec_momentum"]:
         from app.strategies.cross_sectional_momentum import CrossSectionalMomentum

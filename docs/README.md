@@ -63,7 +63,8 @@
 
 > 전략 문서의 과거 버전 스냅샷입니다. 현행 SSOT는 위 '전략 문서' 섹션이며, 아래는 변천 이력 참조용입니다.
 
-- [history/strategy_specification_V1.md](history/strategy_specification_V1.md) · [history/strategy_masterplan_V2.md](history/strategy_masterplan_V2.md) · [history/strategy_tournament_report_V3.md](history/strategy_tournament_report_V3.md) · [history/strategy_refactoring_walkthrough_V4.md](history/strategy_refactoring_walkthrough_V4.md)
+- [history/strategy_specification_V1.md](history/strategy_specification_V1.md) · [history/strategy_masterplan_V2.md](history/strategy_masterplan_V2.md) · [history/strategy_tournament_report_V3.md](history/strategy_tournament_report_V3.md) · [history/strategy_refactoring_walkthrough_V4.md](history/strategy_refactoring_walkthrough_V4.md) · [history/strategy_tournament_report_V5.md](history/strategy_tournament_report_V5.md) (예정)
+
 
 ## 📦 보관 문서 (Archived — `docs/archive/`)
 

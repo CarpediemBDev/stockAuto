@@ -109,3 +109,37 @@ class TestFactoryAndSlots:
         aggr_same.sma_period, aggr_same.confirm_days = 50, 3
         closes = _rising()
         assert aggr_same.compute_target_state(closes) == core.compute_target_state(closes)
+
+
+class TestCoreSatelliteStrategy:
+    def test_factory_returns_registered_class(self):
+        from app.strategies.core_satellite import CoreSatellite
+
+        strat = get_strategy("core_satellite")
+        assert isinstance(strat, CoreSatellite)
+        assert strat.is_composite is True
+        # 복합 전략은 직접 스코어링하지 않음
+        assert strat.calculate_score({"Close": 100.0}, "BULLISH") == 0.0
+
+    def test_composition_is_ssot(self):
+        from app.strategies.core_satellite import CoreSatellite
+
+        assert CoreSatellite.SATELLITE_SLOTS == (
+            ("leveraged_regime", 0.70, "LR_"),
+            ("strategy_c", 0.30, "SC_"),
+        )
+
+    def test_manager_slots_match_legacy_hardcoded(self):
+        """리팩터링 후 슬롯이 기존 하드코딩(leveraged_regime 0.70/LR_ + strategy_c 0.30/SC_)과
+        완전히 동일해야 obs_core 라이브 동작이 무변경으로 보존된다."""
+        from app.bot.multi_strategy_manager import MultiStrategyManager
+
+        manager = MultiStrategyManager(strategy_type="core_satellite")
+        assert set(manager.SLOTS.keys()) == {"leveraged_regime", "strategy_c"}
+        assert manager.SLOTS["leveraged_regime"]["weight"] == pytest.approx(0.70)
+        assert manager.SLOTS["leveraged_regime"]["prefix"] == "LR_"
+        assert manager.SLOTS["strategy_c"]["weight"] == pytest.approx(0.30)
+        assert manager.SLOTS["strategy_c"]["prefix"] == "SC_"
+        # 코어 슬롯은 자율(레짐), 새틀라이트는 스캐너 기반
+        assert manager.strategies["leveraged_regime"].is_autonomous is True
+        assert getattr(manager.strategies["strategy_c"], "is_autonomous", False) is False

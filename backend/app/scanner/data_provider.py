@@ -3,6 +3,8 @@ import pandas as pd
 import asyncio
 import time
 import threading
+import os
+import hashlib
 from app.core.logging import logger
 
 # yfinance는 프로세스 전체 singleton session/crumb를 공유한다.
@@ -10,6 +12,7 @@ from app.core.logging import logger
 _yf_lock = threading.RLock()
 _yf_last_call = 0.0
 _yf_min_interval = 0.25
+
 
 _cache_lock = threading.RLock()
 
@@ -138,6 +141,17 @@ async def fetch_index_data(market_index: str = "QQQ") -> pd.DataFrame:
     """
     return await fetch_ohlcv(market_index, interval="15m", period="10d")
 
+# 로컬 디스크 Parquet 캐시 디렉터리 정의
+CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "cache")
+
+def _get_cache_path(tickers, interval, start, end, period="5d"):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    # 정렬된 티커 문자열을 SHA1 해싱하여 유일하고 안전한 파일명 생성
+    ticker_str = ",".join(sorted(tickers))
+    key_str = f"{ticker_str}_{interval}_{start}_{end}_{period}"
+    h = hashlib.sha1(key_str.encode('utf-8')).hexdigest()
+    return os.path.join(CACHE_DIR, f"{h}.parquet")
+
 async def fetch_bulk_ohlcv(
     tickers: list,
     interval: str,
@@ -149,43 +163,141 @@ async def fetch_bulk_ohlcv(
 ) -> pd.DataFrame:
     """
     여러 종목의 OHLCV 데이터를 벌크(대량)로 다운로드합니다.
-    (💡 10초 전역 캐싱 적용)
+    (💡 10초 전역 캐싱 + 로컬 디스크 Parquet 영구 캐싱 + yfinance API 429 우회 가드 적용)
     """
     if not tickers:
         return pd.DataFrame()
-    cache_key = (
-        tuple(sorted(tickers)),
-        interval,
-        period,
-        group_by,
-        str(start),
-        str(end),
-        True,
-    )
-    try:
-        download_kwargs = {
-            "interval": interval,
-            "group_by": group_by,
-            "progress": False,
-            "threads": False,
-            "prepost": True,
-        }
-        if start is not None or end is not None:
-            download_kwargs.update({"start": start, "end": end})
-        else:
-            download_kwargs["period"] = period
+        
+    # 1. 로컬 Parquet 영구 디스크 캐시 확인 (TTL 60초 적용 - start/end가 지정된 과거 조회는 영구 캐싱)
+    cache_path = _get_cache_path(tickers, interval, start, end, period)
+    is_historical = start is not None or end is not None
+    
+    if os.path.exists(cache_path):
+        is_valid_cache = True
+        if not is_historical:
+            # 실시간/최신 조회 시 캐시 TTL(60초) 검사
+            import time
+            mtime = os.path.getmtime(cache_path)
+            if time.time() - mtime > 60.0:
+                is_valid_cache = False
+                logger.info(f"[DataProvider] Local Parquet Cache EXPIRED (older than 60s) for {len(tickers)} tickers")
+                
+        if is_valid_cache:
+            try:
+                logger.info(f"[DataProvider] Local Parquet Cache HIT for {len(tickers)} tickers ({interval})")
+                # pandas는 parquet을 동기로 읽으므로 asyncio.to_thread 사용
+                df = await asyncio.to_thread(pd.read_parquet, cache_path)
+                if not df.empty:
+                    return df
+            except Exception as e:
+                logger.warning(f"[DataProvider] Failed to read local Parquet cache: {e}")
 
-        data = await asyncio.to_thread(
-            _run_yfinance_cached,
-            _bulk_ohlcv_cache,
-            cache_key,
-            BULK_OHLCV_CACHE_TTL,
-            lambda: yf.download(tickers, **download_kwargs)
-        )
-        return data
-    except Exception as e:
-        logger.warning(f"[DataProvider] Error in bulk download for {len(tickers)} tickers ({interval}): {e}")
-        return pd.DataFrame()
+    # 다운로드 인자 빌드
+    download_kwargs = {
+        "interval": interval,
+        "group_by": group_by,
+        "progress": False,
+        "threads": False,
+        "prepost": True,
+    }
+    if start is not None or end is not None:
+        download_kwargs.update({"start": start, "end": end})
+    else:
+        download_kwargs["period"] = period
+
+    # 429 우회를 위한 유연한 청킹 및 딜레이 메커니즘
+    import random
+    current_chunk_size = 50
+    delay_min = 0.5
+    delay_max = 1.5
+
+    async def download_chunk_with_retry(chunk_tickers, chunk_size, dl_min, dl_max):
+        sub_chunks = [chunk_tickers[i:i+chunk_size] for i in range(0, len(chunk_tickers), chunk_size)]
+        merged_df = pd.DataFrame()
+        
+        nonlocal current_chunk_size, delay_min, delay_max
+        
+        for idx, sub_chunk in enumerate(sub_chunks):
+            # 임의 대기 (Delay Spread)
+            wait = random.uniform(dl_min, dl_max)
+            logger.info(f"[DataProvider] Waiting {wait:.2f}s before downloading chunk of {len(sub_chunk)} tickers ({interval})")
+            await asyncio.sleep(wait)
+            
+            retries = 3
+            success = False
+            sub_df = pd.DataFrame()
+            
+            while retries > 0:
+                try:
+                    sub_cache_key = (
+                        tuple(sorted(sub_chunk)),
+                        interval,
+                        period,
+                        group_by,
+                        str(start),
+                        str(end),
+                        True,
+                    )
+                    
+                    sub_df = await asyncio.to_thread(
+                        _run_yfinance_cached,
+                        _bulk_ohlcv_cache,
+                        sub_cache_key,
+                        BULK_OHLCV_CACHE_TTL,
+                        lambda: yf.download(sub_chunk, **download_kwargs)
+                    )
+                    
+                    # 429 차단 징후 체크: 빈 데이터이거나 특정 에러가 있을 때
+                    if sub_df.empty or (len(sub_chunk) > 1 and isinstance(sub_df.columns, pd.MultiIndex) and sub_df.isna().all().all()):
+                        logger.warning(f"[DataProvider] Potential 429 or Empty Data detected for {len(sub_chunk)} tickers. Backing off...")
+                        retries -= 1
+                        # 딜레이 3초 이상으로 늘리고, 청크 크기를 20으로 축소
+                        current_chunk_size = 20
+                        delay_min = 3.0
+                        delay_max = 5.0
+                        await asyncio.sleep(3.5)
+                    else:
+                        success = True
+                        break
+                except Exception as e:
+                    logger.warning(f"[DataProvider] Exception downloading chunk: {e}. Retries left: {retries}")
+                    retries -= 1
+                    current_chunk_size = 20
+                    delay_min = 3.0
+                    delay_max = 5.0
+                    await asyncio.sleep(3.5)
+            
+            if not success or sub_df.empty:
+                # 실패했고 청크 사이즈가 컸다면, 더 작게 쪼개서 재귀 시도
+                if len(sub_chunk) > 20:
+                    logger.info(f"[DataProvider] Retrying sub-chunk of size {len(sub_chunk)} by splitting into size 20.")
+                    sub_df = await download_chunk_with_retry(sub_chunk, 20, 3.0, 5.0)
+                else:
+                    logger.error(f"[DataProvider] Failed to download sub-chunk {sub_chunk} after all retries.")
+            
+            if not sub_df.empty:
+                if merged_df.empty:
+                    merged_df = sub_df
+                else:
+                    # MultiIndex 혹은 단일 인덱스 컬럼을 안전하게 가로로 결합
+                    merged_df = pd.concat([merged_df, sub_df], axis=1)
+                    
+        return merged_df
+
+    # 다운로드 시작
+    logger.info(f"[DataProvider] Downloading {len(tickers)} tickers with bulk API guard...")
+    data = await download_chunk_with_retry(tickers, current_chunk_size, delay_min, delay_max)
+    
+    # 2. 다운로드 완료 시 로컬 Parquet 영구 디스크 캐시에 저장
+    if not data.empty:
+        try:
+            await asyncio.to_thread(data.to_parquet, cache_path, compression="snappy")
+            logger.info(f"[DataProvider] Saved {len(tickers)} tickers ({interval}) data to local Parquet cache")
+        except Exception as e:
+            logger.warning(f"[DataProvider] Failed to write local Parquet cache: {e}")
+            
+    return data
+
 
 # ⭐ v2.0 Ticker 연관 모든 API 캡슐화 추가 (완벽한 벤더 격리)
 

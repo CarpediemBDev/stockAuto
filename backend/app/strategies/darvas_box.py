@@ -30,5 +30,6 @@ class DarvasBox(BaseStrategy):
         else:
             # 박스 하단 이탈 시 청산
             if close < darvas_low:
-                return 100.0
-            return 30.0
+                return 0.0
+            return 100.0
+

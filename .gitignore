@@ -6,6 +6,10 @@ backend/*.log
 backend/.env*
 !backend/.env.*.example
 
+# 일회성 디버그/스크래치 스크립트 (커밋 대상 아님)
+backend/scratch*.py
+backend/test_gemini.py
+
 # Database files (Root and subfolders)
 *.db
 *.sqlite
