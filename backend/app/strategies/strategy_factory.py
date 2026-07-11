@@ -89,6 +89,10 @@ def _create_strategy(strategy_type: str) -> BaseStrategy:
         from app.strategies.leveraged_regime import LeveragedRegime
         return LeveragedRegime()
 
+    elif strategy_type in ["leveraged_regime_3x", "leveraged_regime_tqqq"]:
+        from app.strategies.leveraged_regime import LeveragedRegime3x
+        return LeveragedRegime3x()
+
     elif strategy_type == "benchmark_qqq_hold":
         from app.strategies.leveraged_regime import BenchmarkQqqHold
         return BenchmarkQqqHold()

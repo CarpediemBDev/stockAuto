@@ -29,6 +29,7 @@ class MultiStrategyManager:
             "exploded_c": "XC_",
             "asqs": "ASQS_",
             "leveraged_regime": "LR_",
+            "leveraged_regime_3x": "L3_",
             "benchmark_qqq_hold": "BH_"
         }
         return prefix_map.get(strategy_type, "ST_")
