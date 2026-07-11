@@ -156,6 +156,10 @@ def _create_strategy(strategy_type: str) -> BaseStrategy:
         from app.strategies.leveraged_regime import BenchmarkQqqHold
         return BenchmarkQqqHold()
 
+    elif strategy_type == "core_satellite":
+        from app.strategies.core_satellite import CoreSatellite
+        return CoreSatellite()
+
     elif strategy_type in ["cross_sectional_momentum", "xsec_momentum"]:
         from app.strategies.cross_sectional_momentum import CrossSectionalMomentum
         return CrossSectionalMomentum()
