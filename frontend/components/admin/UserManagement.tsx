@@ -36,11 +36,6 @@ interface BrokerCredentialMeta {
   credential_error: string | null;
 }
 
-interface EquityPoint {
-  timestamp: string;
-  total: number;
-}
-
 interface ManagedUser {
   id: number;
   username: string;
@@ -55,7 +50,7 @@ interface ManagedUser {
   strategy_type: string;
   strategy_name?: string;
   credentials: BrokerCredentialMeta[];
-  equity_curve?: EquityPoint[];
+  latest_snapshot_at?: string | null;
 }
 
 export function UserManagement() {
@@ -69,6 +64,29 @@ export function UserManagement() {
   const [sortByProfit, setSortByProfit] = useState<boolean>(true); // 기본적으로 수익률 기준 정렬 활성화
   const [currentPage, setCurrentPage] = useState<number>(1);
   const itemsPerPage = 10;
+
+  // 스냅샷 신선도 배지용 현재 시각 — 렌더 순수성 위해 타이머 콜백에서만 Date.now()를 읽는다
+  // (초기값도 setTimeout(0)으로 지연 설정해 SSR 하이드레이션 불일치 방지). SWR 폴링(15초)에 맞춤.
+  const [nowTs, setNowTs] = useState<number | null>(null);
+  useEffect(() => {
+    const initialId = setTimeout(() => setNowTs(Date.now()), 0);
+    const timerId = setInterval(() => setNowTs(Date.now()), 15_000);
+    return () => {
+      clearTimeout(initialId);
+      clearInterval(timerId);
+    };
+  }, []);
+
+  // 최신 스냅샷 시각이 90초 이상 낡았는지 판정. 관리자도 낡음을 숨기지 않는다.
+  const snapshotStaleness = (user: ManagedUser): { isStale: boolean; label: string } | null => {
+    if (!user.latest_snapshot_at || nowTs === null) return null;
+    const latestTs = new Date(user.latest_snapshot_at).getTime();
+    if (Number.isNaN(latestTs)) return null;
+    const ageSec = Math.floor((nowTs - latestTs) / 1000);
+    if (ageSec < 90) return { isStale: false, label: "" };
+    const label = ageSec >= 60 ? `${Math.floor(ageSec / 60)}분` : `${ageSec}초`;
+    return { isStale: true, label };
+  };
 
   // Esc key to close drawer
   useEffect(() => {
@@ -303,7 +321,17 @@ export function UserManagement() {
                         </div>
                       </td>
                       <td className="px-6 py-4 font-mono">
-                        {getReturnBadge(user.profit_rate)}
+                        <div className="flex flex-col items-start gap-1">
+                          {getReturnBadge(user.profit_rate)}
+                          {(() => {
+                            const stale = snapshotStaleness(user);
+                            return stale?.isStale ? (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border tracking-wide bg-zinc-500/15 text-zinc-400 border-zinc-500/30 whitespace-nowrap">
+                                ⚠️ {stale.label} 전 기준
+                              </span>
+                            ) : null;
+                          })()}
+                        </div>
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-end gap-2">

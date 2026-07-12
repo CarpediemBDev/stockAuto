@@ -44,7 +44,8 @@ export function AccountBalance({
   const [nowTs, setNowTs] = useState<number | null>(null);
   useEffect(() => {
     const initialId = setTimeout(() => setNowTs(Date.now()), 0);
-    const timerId = setInterval(() => setNowTs(Date.now()), 60_000);
+    // 낡음 배지 해상도를 위해 SWR 폴링(15초)에 맞춰 갱신
+    const timerId = setInterval(() => setNowTs(Date.now()), 15_000);
     return () => {
       clearTimeout(initialId);
       clearInterval(timerId);
@@ -94,11 +95,18 @@ export function AccountBalance({
   const isProfit = balance.profit_rate >= 0;
   const regime = balance.qqq_regime || "NEUTRAL";
 
-  // 스냅샷 신선도: 5분 이상 낡은 잔고는 사용자에게 기준 시각을 노출한다 (낡음을 숨기지 않는 원칙)
-  const capturedAgeMin = balance.captured_at && nowTs !== null
-    ? Math.floor((nowTs - new Date(balance.captured_at).getTime()) / 60000)
+  // 스냅샷 신선도: 90초 이상 낡은 잔고는 사용자에게 기준 시각을 노출한다 (낡음을 숨기지 않는 원칙).
+  // 백그라운드 갱신(SIM 10초·REAL 45초)과 1분 스케줄러가 정상이면 배지는 거의 뜨지 않으며,
+  // 뜬다는 것은 갱신 경로가 지연/정지됐다는 정직한 신호다.
+  const capturedAgeSec = balance.captured_at && nowTs !== null
+    ? Math.floor((nowTs - new Date(balance.captured_at).getTime()) / 1000)
     : null;
-  const isStaleSnapshot = capturedAgeMin !== null && capturedAgeMin >= 5;
+  const isStaleSnapshot = capturedAgeSec !== null && capturedAgeSec >= 90;
+  const capturedAgeLabel = capturedAgeSec === null
+    ? ""
+    : capturedAgeSec >= 60
+      ? `${Math.floor(capturedAgeSec / 60)}분`
+      : `${capturedAgeSec}초`;
 
   // 격리형 지갑 동적 분배 리스트 획득 및 폴백 처리
   const walletAllocations = balance.wallet_allocation
@@ -150,7 +158,7 @@ export function AccountBalance({
               </span>
               {isStaleSnapshot && (
                 <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wide bg-zinc-500/15 text-zinc-400 border-zinc-500/30">
-                  ⚠️ {capturedAgeMin}분 전 기준
+                  ⚠️ {capturedAgeLabel} 전 기준
                 </span>
               )}
             </div>

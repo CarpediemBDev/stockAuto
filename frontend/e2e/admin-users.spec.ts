@@ -40,7 +40,6 @@ test.describe("Admin User Management Dashboard", () => {
             profit_rate: null, // Edge case that previously caused the crash!
             strategy_type: "senior_simple",
             credentials: [],
-            equity_curve: [],
           },
           {
             id: 2,
@@ -51,7 +50,6 @@ test.describe("Admin User Management Dashboard", () => {
             profit_rate: "12.34", // Edge case: string instead of number
             strategy_type: "turtle_trading",
             credentials: [],
-            equity_curve: [],
           }
         ],
       });
