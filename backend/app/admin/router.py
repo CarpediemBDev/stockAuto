@@ -28,6 +28,9 @@ from app.core.models import (
     SystemSetting,
     User,
     UserSettings,
+    Strategy,
+    Holding,
+    UnfilledOrder,
     utc_now_aware,
 )
 from app.core.system_settings import (
@@ -45,6 +48,8 @@ class SettingsUpdateSchema(BaseModel):
     broker_provider: Optional[str] = None
     telegram_chat_id: Optional[str] = None
     telegram_enabled: Optional[bool] = False
+    strategy_type: Optional[str] = None
+
 
 class SystemSettingUpdateSchema(BaseModel):
     value: Any
@@ -207,9 +212,29 @@ def _credential_meta(cred: BrokerCredential) -> dict:
         "credential_error": crypto_error,
     }
 
-def _settings_response(db_settings: UserSettings) -> dict:
+def _settings_response(db_settings: UserSettings, db: Session = None) -> dict:
     import os
-    credentials = db_settings.credentials if db_settings else []
+    credentials = []
+    if db_settings:
+        if db:
+            try:
+                db_settings = db.merge(db_settings)
+                credentials = db_settings.credentials
+            except Exception:
+                credentials = getattr(db_settings, "credentials", [])
+        else:
+            try:
+                credentials = db_settings.credentials
+            except Exception:
+                credentials = []
+    
+    available_strategies = []
+    if db:
+        strategies = db.query(Strategy).filter(Strategy.is_active == True).all()
+        available_strategies = [
+            {"id": s.strategy_type, "name": s.name_ko} for s in strategies
+        ]
+        
     return {
         "id": getattr(db_settings, "id", None) if db_settings else None,
         "user_id": getattr(db_settings, "user_id", None) if db_settings else None,
@@ -223,6 +248,8 @@ def _settings_response(db_settings: UserSettings) -> dict:
         "available_trade_modes": list(TRADE_MODE_CATALOG),
         "available_brokers": get_broker_catalog(),
         "simulated_initial_cash_krw": app_settings.SIMULATED_INITIAL_CASH_KRW,
+        "strategy_type": getattr(db_settings, "strategy_type", "regime_switching") or "regime_switching",
+        "available_strategies": available_strategies,
     }
 
 def _system_setting_response(key: str, row: Optional[SystemSetting] = None) -> dict:
@@ -340,7 +367,7 @@ def get_user_settings(
         db.add(db_settings)
         db.commit()
         db.refresh(db_settings)
-    return _settings_response(db_settings)
+    return _settings_response(db_settings, db)
 
 @router.post("/", include_in_schema=False)
 @router.post("")
@@ -377,6 +404,36 @@ def update_user_settings(
                 detail=f"{trade_mode} 모드로 변경하려면 {provider} 인증정보가 사전에 검증(verified)되어 있어야 합니다.",
             )
 
+    # 신규 전략 변경 검증 및 적용
+    if payload.strategy_type:
+        new_strategy_type = payload.strategy_type.strip()
+        if new_strategy_type != db_settings.strategy_type:
+            # 1. 유효 전략 검증
+            strategy_exists = db.query(Strategy).filter(Strategy.strategy_type == new_strategy_type).first()
+            if not strategy_exists:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"존재하지 않거나 지원하지 않는 전략 코드입니다: {new_strategy_type}",
+                )
+            
+            # 2. 보유 포지션 또는 미체결 주문 검증 (with_for_update 동시성 락 및 소수점 오차 방어)
+            has_holdings = db.query(Holding).filter(
+                Holding.user_id == current_user.id, 
+                Holding.quantity > 0.000001
+            ).with_for_update().first()
+            
+            has_orders = db.query(UnfilledOrder).filter(
+                UnfilledOrder.user_id == current_user.id
+            ).with_for_update().first()
+            
+            if has_holdings or has_orders:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="현재 보유 중인 포지션 또는 미체결 주문이 있어 전략을 변경할 수 없습니다. 모든 포지션 청산 및 주문 취소 후 변경해 주세요.",
+                )
+            
+            db_settings.strategy_type = new_strategy_type
+
     db_settings.trade_mode = trade_mode
     db_settings.broker_provider = provider
     db_settings.telegram_chat_id = payload.telegram_chat_id
@@ -384,7 +441,7 @@ def update_user_settings(
 
     db.commit()
     db.refresh(db_settings)
-    return _settings_response(db_settings)
+    return _settings_response(db_settings, db)
 
 @router.get("/system-settings")
 def list_system_settings(
@@ -509,7 +566,7 @@ def save_credential(
     return {
         "success": True,
         "message": message,
-        "settings": _settings_response(db_settings),
+        "settings": _settings_response(db_settings, db),
     }
 
 @router.post("/credentials/verify-current")
@@ -561,7 +618,7 @@ def verify_current_credential(
     return {
         "success": success,
         "message": message,
-        "settings": _settings_response(db_settings),
+        "settings": _settings_response(db_settings, db),
     }
 
 @router.delete("/credentials/{broker_name}")
@@ -585,7 +642,7 @@ def delete_credential(
     return {
         "success": True,
         "message": f"{broker_name} 인증정보가 삭제되었습니다.",
-        "settings": _settings_response(db_settings),
+        "settings": _settings_response(db_settings, db),
     }
 
 @router.get("/users")
