@@ -115,7 +115,7 @@ export default function AdminPage() {
           </div>
 
           {/* 메인 콘텐츠 패널 */}
-          <div className="lg:col-span-3 space-y-6">
+          <div className="lg:col-span-3 space-y-6 min-w-0">
             {activeTab === "translation" && <TranslationManager />}
             {activeTab === "users" && <UserManagement />}
             {activeTab === "runtime_settings" && <SystemSettings />}
