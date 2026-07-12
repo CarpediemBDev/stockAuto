@@ -238,7 +238,7 @@ export function UserManagement() {
           ) : (
             <table className="min-w-full divide-y divide-zinc-800/60">
               <thead>
-                <tr className="text-left text-xs uppercase text-zinc-500 font-bold tracking-wider">
+                <tr className="text-left text-xs uppercase text-zinc-500 font-bold tracking-wider whitespace-nowrap">
                   <th className="px-6 py-3.5 text-center w-12">순위</th>
                   <th className="px-6 py-3.5">사용자명</th>
                   <th className="px-6 py-3.5">투자 모드</th>
@@ -249,7 +249,7 @@ export function UserManagement() {
                   <th className="px-6 py-3.5 text-right">관리</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/40 text-[15px]">
+              <tbody className="divide-y divide-zinc-800/40 text-[15px] whitespace-nowrap">
                 {paginatedUsers.map((user, index) => {
                   const rank = (currentPage - 1) * itemsPerPage + index + 1;
                   return (
