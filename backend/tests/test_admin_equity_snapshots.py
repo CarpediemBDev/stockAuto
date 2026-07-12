@@ -86,8 +86,9 @@ def test_admin_equity_curve_uses_persisted_balance_snapshots(tmp_path, monkeypat
         asyncio.run(scheduler.admin_balance_cache_sync())
         first_result = admin_router.list_users(current_user=admin, db=db)
 
-        assert first_result[0]["equity_curve"][0]["total"] == 10_250_000
-        assert first_result[0]["equity_curve"][0]["timestamp"].endswith("+00:00")
+        # 계약: list_users는 최신 스냅샷의 profit_rate와 latest_snapshot_at을 반환한다(equity_curve 폐지)
+        assert first_result[0]["profit_rate"] == 2.5
+        assert first_result[0]["latest_snapshot_at"].endswith("+00:00")
         assert db.query(AccountEquitySnapshot).count() == 1
 
         monkeypatch.setattr(
@@ -108,7 +109,7 @@ def test_admin_equity_curve_uses_persisted_balance_snapshots(tmp_path, monkeypat
         second_result = admin_router.list_users(current_user=admin, db=db)
 
         # Snapshot count is still 1 because less than 60 seconds passed
-        assert second_result[0]["equity_curve"] == first_result[0]["equity_curve"]
+        assert second_result[0]["latest_snapshot_at"] == first_result[0]["latest_snapshot_at"]
         # profit_rate is real-time (from broker directly) or fetched?
         # Actually, list_users might not fetch profit_rate from broker anymore?
         # wait! Does list_users fetch real-time profit_rate? 
@@ -169,12 +170,8 @@ def test_admin_equity_curve_isolated_by_trade_mode(tmp_path):
 
         result = admin_router.list_users(current_user=admin, db=db)
 
-        assert result[0]["equity_curve"] == [
-            {
-                "timestamp": "2026-06-15T01:00:00+00:00",
-                "total": 12_000_000,
-            }
-        ]
+        # 모드 격리: 사용자 trade_mode(REAL)의 최신 스냅샷만 반영되어야 한다(SIMULATED 무시)
+        assert result[0]["latest_snapshot_at"] == "2026-06-15T01:00:00+00:00"
         assert result[0]["profit_rate"] == 20.0
     finally:
         db.close()

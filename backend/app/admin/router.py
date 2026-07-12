@@ -650,36 +650,56 @@ def list_users(
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
 ):
-    users = db.query(User).all()
-    result = []
-
+    from sqlalchemy.orm import joinedload
+    from sqlalchemy import func
+    
+    users = db.query(User).options(
+        joinedload(User.settings).joinedload(UserSettings.credentials)
+    ).all()
+    
     from app.translations.translator import Translator
 
+    # 1. Fetch latest snapshot profit_rate for all users efficiently
+    latest_snapshot_subq = (
+        db.query(
+            AccountEquitySnapshot.user_id,
+            AccountEquitySnapshot.trade_mode,
+            func.max(AccountEquitySnapshot.captured_at).label('max_captured_at')
+        )
+        .group_by(AccountEquitySnapshot.user_id, AccountEquitySnapshot.trade_mode)
+        .subquery()
+    )
+    
+    latest_snapshots = (
+        db.query(AccountEquitySnapshot)
+        .join(
+            latest_snapshot_subq,
+            (AccountEquitySnapshot.user_id == latest_snapshot_subq.c.user_id) &
+            (AccountEquitySnapshot.trade_mode == latest_snapshot_subq.c.trade_mode) &
+            (AccountEquitySnapshot.captured_at == latest_snapshot_subq.c.max_captured_at)
+        )
+        .all()
+    )
+    
+    profit_rate_map = {
+        (s.user_id, s.trade_mode): {
+            "profit_rate": s.profit_rate,
+            "captured_at": s.captured_at
+        }
+        for s in latest_snapshots
+    }
+
+    result = []
     for user in users:
         settings = user.settings
+        trade_mode = settings.trade_mode if settings else "SIMULATED"
 
-        profit_rate = 0.0
         strategy_type = settings.strategy_type if settings else "regime_switching"
         strategy_name = Translator.translate_strategy(strategy_type, "ko")
 
-        snapshots = db.query(AccountEquitySnapshot).filter(
-            AccountEquitySnapshot.user_id == user.id,
-            AccountEquitySnapshot.trade_mode == (
-                settings.trade_mode if settings else "SIMULATED"
-            ),
-        ).order_by(AccountEquitySnapshot.captured_at.desc()).limit(500).all()
-        snapshots.reverse()
-        
-        if snapshots and snapshots[-1].profit_rate is not None:
-            profit_rate = snapshots[-1].profit_rate
-            
-        equity_curve = [
-            {
-                "timestamp": snapshot.captured_at.isoformat(),
-                "total": round(snapshot.total_asset, 2),
-            }
-            for snapshot in snapshots
-        ]
+        snapshot_info = profit_rate_map.get((user.id, trade_mode), {})
+        profit_rate = snapshot_info.get("profit_rate", 0.0)
+        latest_snapshot_at = snapshot_info.get("captured_at")
 
         result.append(
             {
@@ -687,16 +707,16 @@ def list_users(
                 "username": user.username,
                 "role": user.role,
                 "created_at": user.created_at,
-                "trade_mode": settings.trade_mode if settings else "SIMULATED",
+                "trade_mode": trade_mode,
                 "broker_provider": settings.broker_provider if settings else None,
                 "telegram_enabled": settings.telegram_enabled if settings else False,
                 "telegram_chat_id": settings.telegram_chat_id if settings else None,
                 "is_running": settings.is_running if settings else False,
                 "profit_rate": profit_rate,
+                "latest_snapshot_at": latest_snapshot_at.isoformat() if latest_snapshot_at else None,
                 "strategy_type": strategy_type,
                 "strategy_name": strategy_name,
                 "credentials": [_credential_meta(c) for c in settings.credentials] if settings else [],
-                "equity_curve": equity_curve,
             }
         )
     return result

@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+import threading
+import time
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.scanner.data_provider import fetch_ohlcv
 from uuid import uuid4
@@ -25,6 +28,40 @@ from app.core.locks import (
 from app.core.response import SuccessResponseRoute
 router = APIRouter(route_class=SuccessResponseRoute, tags=["Account"])
 
+# ── Stale-While-Revalidate: 통일 아키텍처 ────────────────────────────────────
+# 읽기 경로는 모드 무관하게 항상 스냅샷을 즉시 반환한다. 스냅샷이 임계값 이상 낡았을 때만
+# 응답을 보낸 "후에"(BackgroundTasks) 백그라운드 갱신을 발화한다. 모드 차이는 구조가 아니라
+# "얼마나 자주 다시 찍느냐" 임계값(초) 하나로만 흡수한다.
+#  - SIMULATED: 갱신이 로컬 DB 연산이라 싸므로 짧게
+#  - MOCK/REAL: 증권사 네트워크·rate-limit 방어를 위해 길게
+_SNAPSHOT_REFRESH_THRESHOLD_SEC = {
+    "SIMULATED": 10.0,
+    "MOCK": 45.0,
+    "REAL": 45.0,
+}
+_DEFAULT_REFRESH_THRESHOLD_SEC = 45.0
+
+# 두 화면(대시보드·봇시그널)이 각자 폴링해 동시에 트리거하는 스탬피드를 막는 유저·모드별 디바운스.
+# 인메모리 best-effort(멀티워커면 워커당 1회) — 과트리거 상한이 워커 수라 rate-limit엔 안전.
+_refresh_trigger_lock = threading.Lock()
+_last_refresh_trigger: dict[tuple[int, str], float] = {}
+
+
+def _should_trigger_refresh(user_id: int, trade_mode: str, snapshot_age_sec: float) -> bool:
+    """스냅샷이 모드별 임계값 이상 낡았고, 디바운스 창을 벗어났을 때만 True."""
+    threshold = _SNAPSHOT_REFRESH_THRESHOLD_SEC.get(trade_mode, _DEFAULT_REFRESH_THRESHOLD_SEC)
+    if snapshot_age_sec < threshold:
+        return False
+    now = time.monotonic()
+    key = (user_id, trade_mode)
+    with _refresh_trigger_lock:
+        last = _last_refresh_trigger.get(key)
+        if last is not None and (now - last) < threshold:
+            return False
+        _last_refresh_trigger[key] = now
+    return True
+
+
 def _provider_label(settings_row, trade_mode: str) -> str:
     """스냅샷 응답용 provider 라벨을 브로커 호출 없이 설정값에서 파생합니다."""
     if trade_mode == "SIMULATED":
@@ -39,6 +76,7 @@ def _provider_label(settings_row, trade_mode: str) -> str:
 
 @router.get("/balance")
 async def get_balance(
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -80,6 +118,15 @@ async def get_balance(
         }
         if snapshot.profit_loss is not None:
             balance["profit_loss"] = int(float(snapshot.profit_loss))
+
+        # Stale-While-Revalidate: 즉시 반환하되, 스냅샷이 낡았으면 응답 후 백그라운드로 새로 찍는다.
+        # 유저 요청 경로엔 어떤 지연도 실리지 않는다(BackgroundTasks는 응답 전송 후 실행).
+        if snapshot.captured_at is not None:
+            snapshot_age_sec = (utc_now_aware() - snapshot.captured_at).total_seconds()
+            if _should_trigger_refresh(current_user.id, trade_mode, snapshot_age_sec):
+                background_tasks.add_task(
+                    scheduler_mod.refresh_user_equity_snapshot, current_user.id
+                )
     else:
         # 구멍 1·2 폴백: 스냅샷이 없을 때만 최초 1회 직접 계산 (threadpool로 이벤트 루프 보호)
         # 계산 결과를 즉시 영속화하므로 두 번째 요청부터는 스냅샷 경로를 탄다.
