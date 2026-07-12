@@ -58,6 +58,8 @@ interface UserSettings {
   available_trade_modes: TradeModeOption[];
   available_brokers: BrokerOption[];
   simulated_initial_cash_krw: number;
+  strategy_type?: string;
+  available_strategies?: Array<{ id: string; name: string }>;
 }
 
 interface CredentialForm {
@@ -82,6 +84,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   available_trade_modes: [],
   available_brokers: [],
   simulated_initial_cash_krw: 0,
+  strategy_type: "regime_switching",
+  available_strategies: [],
 };
 
 const SETTINGS_ENDPOINT = "/admin";
@@ -154,6 +158,8 @@ export default function PersonalSettingsPage() {
       available_trade_modes: availableTradeModes,
       available_brokers: availableBrokers,
       simulated_initial_cash_krw: data.simulated_initial_cash_krw || 0,
+      strategy_type: data.strategy_type || "regime_switching",
+      available_strategies: data.available_strategies || [],
     });
     setForms(Object.fromEntries(
       availableBrokers.map((broker) => [broker.id, { ...EMPTY_FORM }])
@@ -326,6 +332,7 @@ export default function PersonalSettingsPage() {
         broker_provider: dbSettings.broker_provider,
         telegram_chat_id: dbSettings.telegram_chat_id,
         telegram_enabled: dbSettings.telegram_enabled,
+        strategy_type: dbSettings.strategy_type,
       };
 
       const res = await adminAPI.saveSettings(payload);
@@ -333,6 +340,9 @@ export default function PersonalSettingsPage() {
       toast.success("설정이 통합 저장되었습니다.");
     } catch (err) {
       toast.error((err as Error).message || "설정 저장에 실패했습니다.");
+      fetchSettings().catch(() => {
+        toast.error("설정 상태 동기화에 실패했습니다. 페이지를 새로고침해 주세요.");
+      });
     } finally {
       setIsSaving(false);
     }
@@ -528,6 +538,37 @@ export default function PersonalSettingsPage() {
                       })}
                     </div>
                   )}
+                </div>
+
+                <div className="space-y-4 pt-6 border-t border-zinc-900">
+                  <div className="flex flex-col gap-1.5 pb-2">
+                    <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                      <Server className="w-4 h-4 text-emerald-400" />
+                      Active Strategy (실행 전략)
+                    </h2>
+                    <p className="text-[10px] text-zinc-500">이 계정의 트레이딩 봇이 실행할 퀀트 매매 전략을 고릅니다.</p>
+                  </div>
+                  
+                  <div className="relative">
+                    <label className="block text-xs font-semibold text-zinc-400 mb-1.5">선택된 전략</label>
+                    {dbSettings.available_strategies && dbSettings.available_strategies.length > 0 ? (
+                      <select
+                        value={dbSettings.strategy_type || "regime_switching"}
+                        onChange={(e) => setDbSettings((prev) => ({ ...prev, strategy_type: e.target.value }))}
+                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-xs text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all cursor-pointer font-bold"
+                      >
+                        {dbSettings.available_strategies.map((strat) => (
+                          <option key={strat.id} value={strat.id} className="bg-zinc-950 text-white py-2">
+                            {strat.name} ({strat.id})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="w-full py-3 rounded-lg border border-red-500/20 bg-red-500/5 text-red-400/80 text-xs text-center">
+                        사용 가능한 전략 정보를 불러오지 못했습니다.
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="space-y-4 pt-6 border-t border-zinc-900">

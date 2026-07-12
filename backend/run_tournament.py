@@ -33,7 +33,9 @@ import io
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-TOURNAMENT_STRATEGIES = (
+# 백테스트 후보의 단일 원장(SSOT)은 DB strategies 테이블(활성 전략)이다.
+# 아래 튜플은 DB 조회가 불가능할 때만 쓰는 안전 폴백이다(직접 수정 지양).
+_FALLBACK_STRATEGIES = (
     "antigravity_surge",
     "regime_sniper",
     "phoenix_bounce",
@@ -52,6 +54,42 @@ TOURNAMENT_STRATEGIES = (
     "donchian_breakout",
     "opening_range_breakout",
 )
+
+# 백테스트 후보에서 제외할 비-전략 키.
+# benchmark_qqq_hold는 QQQ 단순보유(=벤치마크 그 자체)라 후보에서 뺀다.
+_NON_TRADEABLE_KEYS = frozenset({"benchmark_qqq_hold"})
+
+
+def load_tournament_strategies():
+    """토너먼트 후보 목록을 DB strategies 테이블(활성)에서 도출한다.
+
+    - 벤치마크 헬퍼(benchmark_qqq_hold)는 제외한다.
+    - DB 접근 실패/빈 테이블이면 _FALLBACK_STRATEGIES로 안전 폴백한다.
+    메인 프로세스에서 1회만 호출한다(자식 프로세스는 키를 인자로 전달받음).
+    """
+    try:
+        from app.core.database import SessionLocal
+        from app.core.models import Strategy
+
+        db = SessionLocal()
+        try:
+            rows = [
+                row[0]
+                for row in db.query(Strategy.strategy_type)
+                .filter(Strategy.is_active == True)  # noqa: E712
+                .all()
+            ]
+        finally:
+            db.close()
+
+        keys = tuple(sorted(k for k in rows if k and k not in _NON_TRADEABLE_KEYS))
+        if keys:
+            print(f" • 후보 소스: DB strategies 테이블 (활성 {len(keys)}종, 벤치마크 제외)")
+            return keys
+        print(" [⚠️] DB strategies 테이블이 비어 있어 폴백 목록을 사용합니다.")
+    except Exception as e:
+        print(f" [⚠️] DB 후보 로딩 실패({e}) → 폴백 목록({len(_FALLBACK_STRATEGIES)}종) 사용")
+    return _FALLBACK_STRATEGIES
 
 
 def run_single_strategy_sync(strategy_key, tickers, start_date, end_date, interval, cash, tickers_data, qqq_data):
@@ -154,6 +192,13 @@ async def main():
     
     if args.download_only:
         print("   ➔ [--download_only] 옵션이 활성화되었습니다. 수집 및 Parquet 캐싱을 성공적으로 마치고 프로그램을 종료합니다.")
+        # --result_json 이 주어지면 실제 로드된 유니버스(정제 목록)를 덤프한다.
+        # 소비자(사전 정제 러너)가 이 목록으로 죽은 티커를 걸러낸다.
+        if args.result_json:
+            os.makedirs(os.path.dirname(args.result_json) if os.path.dirname(args.result_json) else ".", exist_ok=True)
+            with open(args.result_json, "w", encoding="utf-8") as f:
+                json.dump({"universe": sorted(tickers_data.keys())}, f, ensure_ascii=False, indent=2)
+            print(f"   ➔ 로드된 유니버스 {len(tickers_data)}종을 {args.result_json} 에 저장했습니다.")
         return
         
     print(" ⏳ [2단계/3] 멀티프로세싱 CPU 병렬 백테스팅 가동 중...")
@@ -162,9 +207,12 @@ async def main():
     
     # CPU 논리 코어 개수에 맞춰 ProcessPoolExecutor 생성
     loop = asyncio.get_running_loop()
+    tournament_strategies = load_tournament_strategies()
+    print(f"   ➔ 이번 대항전 후보 전략 수: {len(tournament_strategies)}종")
+
     with ProcessPoolExecutor() as executor:
         tasks = []
-        for key in TOURNAMENT_STRATEGIES:
+        for key in tournament_strategies:
             # ProcessPoolExecutor의 동기 실행을 asyncio 비동기 세션으로 브릿징
             task = loop.run_in_executor(
                 executor,
@@ -282,6 +330,23 @@ async def main():
     if args.result_json and results:
         winner = results[0]
         alpha_rate = winner['total_return_rate'] - winner['qqq_bench_return_rate']
+        # 전체 리더보드(모든 전략의 알파)를 저장한다.
+        # 점수 우승자만이 아니라 "알파 1위"를 셀별로 뽑기 위해 소비자가 사용한다.
+        leaderboard = [
+            {
+                "key": r['key'],
+                "name": r['name'],
+                "total_return_rate": r['total_return_rate'],
+                "qqq_bench_return_rate": r['qqq_bench_return_rate'],
+                "alpha": r['total_return_rate'] - r['qqq_bench_return_rate'],
+                "sharpe_ratio": r['sharpe_ratio'],
+                "mdd": r['mdd'],
+                "selection_score": r['selection_score'],
+                "confidence_grade": r['confidence_grade'],
+                "selection_eligible": r['selection_eligible'],
+            }
+            for r in results
+        ]
         result_data = {
             "winner_key": winner['key'],
             "winner_name": winner['name'],
@@ -293,6 +358,7 @@ async def main():
             "selection_score": winner['selection_score'],
             "confidence_grade": winner['confidence_grade'],
             "selection_eligible": winner['selection_eligible'],
+            "leaderboard": leaderboard,
         }
         os.makedirs(os.path.dirname(args.result_json) if os.path.dirname(args.result_json) else ".", exist_ok=True)
         with open(args.result_json, "w", encoding="utf-8") as f:

@@ -869,7 +869,18 @@ class BacktestSimulator:
     def run(self):
         """정렬된 시간축을 순차적으로 흘려보내며 매수실패/체결/익절/손절 시나리오를 구동합니다."""
         logger.info("[Backtest] Simulation loop started.")
-        
+
+        # 정합성 가드: 다운로드 실패 등으로 tickers_data와 processed_metrics가 어긋나면
+        # 아래 루프의 self.processed_metrics[ticker] 접근이 KeyError로 백테스트 전체를 죽인다.
+        # 지표가 계산된(processed_metrics에 있는) 티커만 남겨 불일치를 사전 차단한다.
+        missing = [tk for tk in list(self.tickers_data) if tk not in self.processed_metrics]
+        if missing:
+            logger.warning(
+                f"[Backtest] processed_metrics에 없는 {len(missing)}개 티커를 정합성 가드로 제외합니다: {missing}"
+            )
+            for tk in missing:
+                self.tickers_data.pop(tk, None)
+
         for step, t in enumerate(self.timeline):
             qqq_row = self.qqq_metrics.loc[t]
             regime = qqq_row['regime']

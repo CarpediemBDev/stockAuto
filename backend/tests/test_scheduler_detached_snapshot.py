@@ -260,3 +260,68 @@ async def test_process_exit_signals_sells_both_holdings_with_trade_mode_and_hold
     finally:
         verify_db.close()
     assert remaining == 0, f"전량 매도 후에도 holdings가 {remaining}건 잔존"
+
+
+# ---------------------------------------------------------------------------
+# load=False 병합의 핵심 계약: version 비간섭 Core UPDATE(last_price)로 DB에만 반영해 둔
+#   값이, 이후 다른 micro_session의 auto-merge를 거쳐도 되돌아가지 않아야 한다.
+#   (auto-merge를 load=True로 되돌리면, DB를 재조정 flush하며 detached 원본의 낡은
+#   last_price=None을 되써 값이 조용히 revert되고 version_id가 올라 StaleData를 유발한다.
+#   이 테스트는 그 회귀를 last_price 보존·version 일관으로 직접 고정한다.)
+# ---------------------------------------------------------------------------
+
+
+def test_core_update_survives_subsequent_auto_merge_flush(session_factory, monkeypatch):
+    from datetime import datetime, timezone
+    from decimal import Decimal
+
+    db = session_factory()
+    user = User(username="core-update-user", hashed_password="x")
+    db.add(user)
+    db.flush()
+    db.add(UserSettings(user_id=user.id, trade_mode="SIMULATED", is_running=True))
+    holding = Holding(
+        user_id=user.id, ticker="CPAY", ticker_name="Corpay", strategy_type="swing",
+        quantity=10, avg_price=100.0,
+    )
+    db.add(holding)
+    db.commit()
+    db.refresh(holding)
+    settings = db.query(UserSettings).filter_by(user_id=user.id).first()
+    trade_mode_snapshot = settings.trade_mode
+    user_id = user.id
+    db.expunge_all()
+    db.close()
+
+    monkeypatch.setattr(scheduler, "SessionLocal", session_factory)
+    ctx = _make_ctx(settings, holding, trade_mode_snapshot)
+
+    # A) process_exit_signals가 하듯, last_price를 version 비간섭 Core UPDATE로 DB에만 반영.
+    with scheduler.micro_session(ctx) as db:
+        db.query(Holding).filter(Holding.id == holding.id).update(
+            {
+                Holding.last_price: Decimal("123.45"),
+                Holding.last_price_updated_at: datetime.now(timezone.utc),
+            },
+            synchronize_session=False,
+        )
+        db.commit()
+
+    # B) 다음 micro_session이 detached holdings를 auto-merge(load=False)로 재부착한 뒤
+    #    실제 변경(quantity)을 flush. load=False가 아니면 여기서 StaleDataError가 나거나
+    #    last_price가 None으로 revert된다.
+    with scheduler.micro_session(ctx) as db:
+        ctx.holdings[0].quantity = 7
+        db.commit()
+
+    verify_db = session_factory()
+    try:
+        row = verify_db.query(Holding).filter_by(id=holding.id).first()
+        # 핵심: Core UPDATE로 쓴 last_price가 auto-merge에 되돌려지지 않고 보존됨.
+        assert row.last_price == Decimal("123.45"), f"last_price가 revert됨: {row.last_price}"
+        # 실제 변경(quantity)은 정상 반영.
+        assert row.quantity == 7, f"quantity 미반영: {row.quantity}"
+        # version_id는 실제 ORM 변경(quantity) 1회에만 상승 — Core UPDATE·재부착은 비간섭.
+        assert row.version_id == 2, f"version_id 불일치(예상 2): {row.version_id}"
+    finally:
+        verify_db.close()
