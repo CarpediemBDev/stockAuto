@@ -21,8 +21,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "/api/v1";
 const MAX_BACKOFF_MS = 30_000;
 const INITIAL_BACKOFF_MS = 1_000;
 
-/** SSE 전역 스위치. off(기본)면 컴포넌트는 기존 폴링을 그대로 쓴다(회귀 0). */
-export const SSE_ENABLED = process.env.NEXT_PUBLIC_SSE_ENABLED === "true";
+/** SSE 전역 스위치. 기본 on(opt-out) — NEXT_PUBLIC_SSE_ENABLED="false"로만 끈다(폴링 복귀). */
+export const SSE_ENABLED = process.env.NEXT_PUBLIC_SSE_ENABLED !== "false";
 
 /**
  * SWR refreshInterval 헬퍼.

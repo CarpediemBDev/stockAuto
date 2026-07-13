@@ -100,17 +100,21 @@ EVENT_AFTER_HOURS = "after_hours"
 EVENT_MARKET = "market"
 
 
-def notify_user_equity(user_id: int, trade_event: bool = False) -> None:
-    """유저 잔고/보유(및 관리자 랭킹)가 바뀌었음을 알린다(invalidate).
+def notify_user_equity(user_id: int) -> None:
+    """유저 잔고/보유가 갱신됐음을 해당 유저 채널로 알린다(invalidate).
 
-    스냅샷이 실제로 기록됐을 때만 호출한다. trade_event=True(체결·청산·리셋)면 거래 로그도 함께 무효화.
-    동기 컨텍스트(record_equity_snapshot 등)에서 호출되므로 publish_sync를 쓴다.
+    스냅샷이 실제로 기록됐을 때만 호출한다(record_equity_snapshot 성공 경로).
+    관리자 목록은 과다 무효화를 피하기 위해 여기서 쏘지 않고, 1분 벌크 동기
+    (admin_balance_cache_sync)와 이산 이벤트(봇 토글·유저 삭제)에서만 무효화한다.
+    동기 컨텍스트에서 호출되므로 publish_sync를 쓴다.
     """
     user_ch = channel_user(user_id)
     publish_sync(user_ch, EVENT_BALANCE, None)
     publish_sync(user_ch, EVENT_HOLDINGS, None)
-    if trade_event:
-        publish_sync(user_ch, EVENT_TRADES, None)
+
+
+def notify_admin_users() -> None:
+    """관리자 사용자 목록(실시간 랭킹) 무효화. 1분 벌크 동기·이산 이벤트에서만 호출."""
     publish_sync(CHANNEL_ADMIN, EVENT_ADMIN_USERS, None)
 
 
