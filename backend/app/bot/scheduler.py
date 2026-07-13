@@ -2113,10 +2113,9 @@ def record_equity_snapshot(
             snapshot_db.delete(expired_snapshot)
         snapshot_db.commit()
 
-        # SSE(Phase 3): 스냅샷이 실제로 기록됐을 때만 invalidate 발행. force=True면 체결·청산·리셋 등
-        # 거래 이벤트로 보고 거래 로그도 함께 무효화한다. best-effort(실패해도 전송만 누락).
+        # SSE: 스냅샷이 실제로 기록됐을 때만 유저 채널로 잔고/보유 invalidate 발행(best-effort).
         from app.core import sse
-        sse.notify_user_equity(user_id, trade_event=force)
+        sse.notify_user_equity(user_id)
         return True
     except Exception:
         snapshot_db.rollback()
@@ -2216,6 +2215,10 @@ async def admin_balance_cache_sync():
             record_equity_snapshot(target["user_id"], target["trade_mode"], balance, exchange_rate)
         except Exception as exc:
             logger.warning(f"[Admin Cache Sync] Error for user {target['username']}: {exc}")
+
+    # SSE: 1분 벌크 동기 후 관리자 랭킹을 한 번만 무효화(유저별 발행과 분리해 과다 refetch 방지).
+    from app.core import sse
+    await sse.publish(sse.CHANNEL_ADMIN, sse.EVENT_ADMIN_USERS, None)
 
 def admin_balance_cache_wrapper():
     try:

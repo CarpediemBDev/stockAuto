@@ -33,6 +33,8 @@ export default defineConfig({
       NEXT_DIST_DIR: ".next-e2e",
       NEXT_PUBLIC_API_BASE: "/api/v1",
       BACKEND_API_ORIGIN: "http://127.0.0.1:8000",
+      // E2E는 기존 플로우를 결정적으로 검증. SSE는 별도 통합 테스트로 검증하므로 여기선 끈다.
+      NEXT_PUBLIC_SSE_ENABLED: "false",
     },
   },
 });
