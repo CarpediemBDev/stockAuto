@@ -47,6 +47,8 @@ def start_bot(
         settings.is_running = True
         settings.updated_at = utc_now_aware()
     db.commit()
+    from app.core import sse
+    sse.notify_bot_status(current_user.id)
     return {"message": "Bot started", "is_running": True}
 
 @router.post("/stop")
@@ -62,4 +64,6 @@ def stop_bot(
         settings.is_running = False
         settings.updated_at = utc_now_aware()
     db.commit()
+    from app.core import sse
+    sse.notify_bot_status(current_user.id)
     return {"message": "Bot stopped", "is_running": False}

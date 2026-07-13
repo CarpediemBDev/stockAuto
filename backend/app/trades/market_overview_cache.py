@@ -204,6 +204,9 @@ async def refresh_market_overview_snapshot(db: Session | None = None) -> dict:
 
         data = _snapshot_to_response(snapshot)
         _set_memory_cache(data)
+        # SSE(Phase 2): 공용 시장 개요가 갱신됐음을 브로드캐스트(invalidate).
+        from app.core import sse
+        await sse.publish(sse.CHANNEL_PUBLIC, sse.EVENT_MARKET, None)
         return data
     except Exception:
         session.rollback()

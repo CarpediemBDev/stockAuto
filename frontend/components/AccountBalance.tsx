@@ -1,9 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback } from "react";
 import { Wallet, TrendingUp, DollarSign, PieChart, ShieldAlert, Zap, Crown, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import useSWR from "swr";
+import { pollInterval } from "@/lib/sse";
+import { useFreshness } from "@/hooks/useFreshness";
+import { useSseConnection } from "@/providers/EventStreamProvider";
 import { fetcher } from "@/lib/api";
 
 interface WalletSlot {
@@ -35,22 +38,14 @@ export function AccountBalance({
   displayCurrency?: "KRW" | "USD";
   onTotalAssetClick?: () => void;
 }) {
-  const { data: balanceData, error: swrError } = useSWR('/account/balance', fetcher, { refreshInterval: 15000 });
+  const { data: balanceData, error: swrError } = useSWR('/account/balance', fetcher, { refreshInterval: pollInterval(15000) });
   const balance: BalanceData | null = balanceData || null;
   const error = swrError ? (swrError.message || "Failed to fetch account balance") : null;
 
-  // 스냅샷 신선도 배지용 현재 시각 — 렌더 순수성 규칙상 Date.now()는 타이머 콜백에서만 읽는다
-  // (초기값도 setTimeout(0)으로 지연 설정해 SSR 하이드레이션 불일치를 함께 방지)
-  const [nowTs, setNowTs] = useState<number | null>(null);
-  useEffect(() => {
-    const initialId = setTimeout(() => setNowTs(Date.now()), 0);
-    // 낡음 배지 해상도를 위해 SWR 폴링(15초)에 맞춰 갱신
-    const timerId = setInterval(() => setNowTs(Date.now()), 15_000);
-    return () => {
-      clearTimeout(initialId);
-      clearInterval(timerId);
-    };
-  }, []);
+  // 스냅샷 신선도: 공유 클럭 기반 useFreshness로 나이·낡음을 계산한다(컴포넌트별 타이머 제거).
+  // SSE connected에서 산출한 서버 오프셋으로 clock-skew를 보정한다(플래그 off면 offset=0).
+  const { serverOffsetMs } = useSseConnection();
+  const freshness = useFreshness(balance?.captured_at, { staleAfterSec: 90, serverOffsetMs });
 
   const formatMoney = useCallback((amount: number) => {
     if (!balance) return "";
@@ -95,18 +90,9 @@ export function AccountBalance({
   const isProfit = balance.profit_rate >= 0;
   const regime = balance.qqq_regime || "NEUTRAL";
 
-  // 스냅샷 신선도: 90초 이상 낡은 잔고는 사용자에게 기준 시각을 노출한다 (낡음을 숨기지 않는 원칙).
-  // 백그라운드 갱신(SIM 10초·REAL 45초)과 1분 스케줄러가 정상이면 배지는 거의 뜨지 않으며,
-  // 뜬다는 것은 갱신 경로가 지연/정지됐다는 정직한 신호다.
-  const capturedAgeSec = balance.captured_at && nowTs !== null
-    ? Math.floor((nowTs - new Date(balance.captured_at).getTime()) / 1000)
-    : null;
-  const isStaleSnapshot = capturedAgeSec !== null && capturedAgeSec >= 90;
-  const capturedAgeLabel = capturedAgeSec === null
-    ? ""
-    : capturedAgeSec >= 60
-      ? `${Math.floor(capturedAgeSec / 60)}분`
-      : `${capturedAgeSec}초`;
+  // 스냅샷 신선도: 90초 이상 낡은 잔고는 기준 시각을 노출한다(낡음을 숨기지 않는 원칙).
+  const isStaleSnapshot = freshness.isStale;
+  const capturedAgeLabel = freshness.label;
 
   // 격리형 지갑 동적 분배 리스트 획득 및 폴백 처리
   const walletAllocations = balance.wallet_allocation

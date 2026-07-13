@@ -1859,6 +1859,9 @@ async def refresh_scanner_cache(force: bool = False) -> bool:
             len(signals),
             len(latest_watchlist_signals),
         )
+        # SSE(Phase 2): 공용 스캐너 결과가 갱신됐음을 브로드캐스트(invalidate) → 구독자 일괄 재조회.
+        from app.core import sse
+        await sse.publish(sse.CHANNEL_PUBLIC, sse.EVENT_SCANNER_LATEST, None)
         return True
     except Exception as e:
         logger.exception("[Scanner Cache] ERROR during market scan")
@@ -2109,6 +2112,11 @@ def record_equity_snapshot(
         for expired_snapshot in expired_snapshots:
             snapshot_db.delete(expired_snapshot)
         snapshot_db.commit()
+
+        # SSE(Phase 3): 스냅샷이 실제로 기록됐을 때만 invalidate 발행. force=True면 체결·청산·리셋 등
+        # 거래 이벤트로 보고 거래 로그도 함께 무효화한다. best-effort(실패해도 전송만 누락).
+        from app.core import sse
+        sse.notify_user_equity(user_id, trade_event=force)
         return True
     except Exception:
         snapshot_db.rollback()

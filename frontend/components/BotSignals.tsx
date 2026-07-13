@@ -4,6 +4,7 @@ import React from 'react';
 import { Zap } from 'lucide-react';
 
 import useSWR from 'swr';
+import { pollInterval } from '@/lib/sse';
 import { fetcher } from '@/lib/api';
 
 interface Signal {
@@ -22,8 +23,8 @@ interface BotSignalsProps {
 }
 
 const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
-  const { data: signalsData, isLoading: isLoadingSignals } = useSWR('/scanner/latest', fetcher, { refreshInterval: 15000 });
-  const { data: balanceData, isLoading: isLoadingBalance } = useSWR('/account/balance', fetcher, { refreshInterval: 15000 });
+  const { data: signalsData, isLoading: isLoadingSignals } = useSWR('/scanner/latest', fetcher, { refreshInterval: pollInterval(15000) });
+  const { data: balanceData, isLoading: isLoadingBalance } = useSWR('/account/balance', fetcher, { refreshInterval: pollInterval(15000) });
 
   const signals: Signal[] = React.useMemo(() => {
     if (!signalsData) return [];

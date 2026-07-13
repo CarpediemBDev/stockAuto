@@ -5,6 +5,7 @@ import { Compass, ShieldCheck, Flame, Layers, TrendingUp, TrendingDown, HelpCirc
 
 import { scannerAPI, translationAPI } from '@/lib/api';
 import useSWR from 'swr';
+import { pollInterval } from '@/lib/sse';
 import { fetcher } from '@/lib/api';
 import { useTimezone } from '@/store/timezoneStore';
 import { toast } from 'sonner';
@@ -36,7 +37,7 @@ interface SwingPredictionResponse {
 }
 
 export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingPredictorCardProps) {
-  const { data: swrData, isLoading: swrLoading, mutate: mutateSwing } = useSWR('/scanner/swing-predict', fetcher, { refreshInterval: 15000 });
+  const { data: swrData, isLoading: swrLoading, mutate: mutateSwing } = useSWR('/scanner/swing-predict', fetcher, { refreshInterval: pollInterval(15000) });
   const payload: SwingPredictionResponse = swrData || { candidates: [], scope: "global", sync_status: "empty", updated_at: null };
   const candidates = payload.candidates;
   const syncStatus = payload.sync_status;

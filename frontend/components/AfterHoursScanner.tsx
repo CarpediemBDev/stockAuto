@@ -2,6 +2,7 @@
 
 import React, { useCallback, useState } from 'react';
 import useSWR from 'swr';
+import { pollInterval } from '@/lib/sse';
 import { Activity, AlertTriangle, Moon, RefreshCw, ShieldCheck, Star, TrendingUp, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -65,7 +66,7 @@ export function AfterHoursScanner({
   watchlistTickers = [],
 }: AfterHoursScannerProps) {
   const { data: swrData, isLoading, mutate } = useSWR('/scanner/after-hours-candidates', fetcher, {
-    refreshInterval: 15000,
+    refreshInterval: pollInterval(15000),
   });
   const payload: AfterHoursResponse = swrData || {
     candidates: [],
