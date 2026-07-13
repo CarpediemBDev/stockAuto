@@ -5,6 +5,7 @@ import { Eye, Plus, Trash2, Bot } from 'lucide-react';
 import BotSignals from '@/components/BotSignals';
 import { translationAPI } from '@/lib/api';
 import useSWR from 'swr';
+import { pollInterval } from '@/lib/sse';
 import { fetcher } from '@/lib/api';
 import { reportHandledError, getScoreColor, getScoreBarColor } from '@/lib/utils';
 import { useWatchlistActions } from '@/hooks/useWatchlistActions';
@@ -28,7 +29,7 @@ const ManualWatchList = () => {
     deleteFromWatchlist,
     deletingId,
   } = useWatchlistActions();
-  const { data: scannerData, isLoading: scannerLoading } = useSWR('/scanner/latest', fetcher, { refreshInterval: 15000 });
+  const { data: scannerData, isLoading: scannerLoading } = useSWR('/scanner/latest', fetcher, { refreshInterval: pollInterval(15000) });
 
   const signals: ScannerSignal[] = Array.isArray(scannerData) ? scannerData : (scannerData?.signals || []);
   

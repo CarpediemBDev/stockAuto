@@ -18,6 +18,7 @@ const geistMono = Geist_Mono({
 
 import { EnvironmentBadge } from "@/components/EnvironmentBadge";
 import { AuthProvider } from "@/components/AuthProvider";
+import { EventStreamProvider } from "@/providers/EventStreamProvider";
 
 export const metadata: Metadata = {
   title: "StockAuto - 자동매매 대시보드",
@@ -36,13 +37,15 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-black text-white relative text-[14px] leading-relaxed">
         <AuthProvider>
-          {/* 글로벌 상단 네비게이션 바 */}
-          <NavBar />
+          <EventStreamProvider>
+            {/* 글로벌 상단 네비게이션 바 */}
+            <NavBar />
 
-          {/* 메인 컨텐츠 영역 */}
-          <div className="flex-1 w-full">
-            {children}
-          </div>
+            {/* 메인 컨텐츠 영역 */}
+            <div className="flex-1 w-full">
+              {children}
+            </div>
+          </EventStreamProvider>
         </AuthProvider>
 
         {/* 환경 식별 뱃지 (좌측 하단 띠) */}

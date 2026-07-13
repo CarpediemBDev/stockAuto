@@ -223,6 +223,9 @@ async def refresh_swing_prediction_cache(
         response = snapshot_to_swing_response(snapshot)
         write_swing_prediction_cache(cache_key, response["candidates"], response["sync_status"], response["updated_at"])
         logger.info("[SwingPrediction] Refresh complete. Cached %s candidates.", len(candidates))
+        # SSE(Phase 2): 공용 스윙 후보가 갱신됐음을 브로드캐스트(invalidate).
+        from app.core import sse
+        await sse.publish(sse.CHANNEL_PUBLIC, sse.EVENT_SWING, None)
         return response
     except Exception:
         session.rollback()

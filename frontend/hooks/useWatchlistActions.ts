@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import useSWR from "swr";
+import { pollInterval } from "@/lib/sse";
 import { toast } from "sonner";
 
 import { fetcher, watchlistAPI } from "@/lib/api";
@@ -31,7 +32,7 @@ export function useWatchlistActions(enabled = true) {
     isLoading,
     mutate: mutateWatchlist,
   } = useSWR<WatchlistPayload>(enabled ? "/watchlist" : null, fetcher, {
-    refreshInterval: 15000,
+    refreshInterval: pollInterval(15000),
   });
 
   const items = useMemo(() => normalizeWatchlist(data), [data]);

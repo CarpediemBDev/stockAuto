@@ -6,6 +6,7 @@ import {
   TrendingUp, TrendingDown, Newspaper, ArrowUpRight, ArrowDownRight, Info, ShieldAlert
 } from 'lucide-react';
 import useSWR from 'swr';
+import { pollInterval } from '@/lib/sse';
 import { fetcher } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -158,10 +159,10 @@ function NewsModal({
 const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | "USD" }) => {
   const [activeNewsItem, setActiveNewsItem] = useState<{ ticker: string; name: string; news: NewsInfo } | null>(null);
 
-  const { data: holdingsData, isLoading } = useSWR('/account/holdings', fetcher, { refreshInterval: 15000 });
+  const { data: holdingsData, isLoading } = useSWR('/account/holdings', fetcher, { refreshInterval: pollInterval(15000) });
   const holdings: Holding[] = holdingsData || [];
 
-  const { data: scannerData } = useSWR('/scanner/latest', fetcher, { refreshInterval: 60000 });
+  const { data: scannerData } = useSWR('/scanner/latest', fetcher, { refreshInterval: pollInterval(60000) });
 
   const newsMap = React.useMemo(() => {
     const map: Record<string, NewsInfo> = {};

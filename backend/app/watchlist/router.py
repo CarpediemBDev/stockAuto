@@ -38,13 +38,16 @@ async def add_to_watchlist(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    return await add_watchlist_item(
+    result = await add_watchlist_item(
         db,
         current_user,
         item.ticker,
         item.ticker_name,
         ticker_validator=fetch_ohlcv,
     )
+    from app.core import sse
+    sse.notify_watchlist(current_user.id)
+    return result
 
 @router.delete("/{item_id_or_ticker}")
 def delete_from_watchlist(
@@ -53,4 +56,6 @@ def delete_from_watchlist(
     db: Session = Depends(get_db)
 ):
     delete_watchlist_item(db, current_user, item_id_or_ticker)
+    from app.core import sse
+    sse.notify_watchlist(current_user.id)
     return {"message": f"Watchlist item '{item_id_or_ticker}' deleted successfully"}

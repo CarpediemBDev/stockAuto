@@ -8,11 +8,12 @@ import { AssetTrendChart } from "./AssetTrendChart";
 import { LiveTradeTicker } from "./LiveTradeTicker";
 
 import useSWR from "swr";
+import { pollInterval } from "@/lib/sse";
 import { fetcher } from "@/lib/api";
 
 export function Dashboard() {
-  const { data: statusData } = useSWR('/bot/status', fetcher, { refreshInterval: 15000 });
-  const { data: logsData } = useSWR('/trades', fetcher, { refreshInterval: 15000 });
+  const { data: statusData } = useSWR('/bot/status', fetcher, { refreshInterval: pollInterval(15000) });
+  const { data: logsData } = useSWR('/trades', fetcher, { refreshInterval: pollInterval(15000) });
 
   const isBotRunning = statusData?.is_running || false;
   const isReal = statusData?.is_real || false;

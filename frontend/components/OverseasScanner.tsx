@@ -21,6 +21,7 @@ import {
 import { cn, reportHandledError } from "@/lib/utils";
 import { scannerAPI } from "@/lib/api";
 import useSWR from "swr";
+import { pollInterval } from "@/lib/sse";
 import { fetcher } from "@/lib/api";
 import { toast } from "sonner";
 import { useTimezone } from "@/store/timezoneStore";
@@ -117,7 +118,7 @@ export function OverseasScanner({
   const wasScanningRef = React.useRef(false);
   
   const { data: swrData, isLoading: swrLoading, mutate: mutateScan } = useSWR('/scanner/latest', fetcher, { 
-    refreshInterval: 15000,
+    refreshInterval: pollInterval(15000),
     onSuccess: () => setLastUpdated(new Date())
   });
   

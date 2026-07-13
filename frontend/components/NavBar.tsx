@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 
 import useSWR from "swr";
+import { pollInterval } from "@/lib/sse";
 import { cn } from "@/lib/utils";
 import { authAPI, botAPI, fetcher } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
@@ -48,7 +49,7 @@ export function NavBar() {
   const { data: statusData, mutate } = useSWR(
     accessToken ? '/bot/status' : null,
     fetcher,
-    { refreshInterval: 15000 }
+    { refreshInterval: pollInterval(15000) }
   );
 
   const tradeMode = statusData?.trade_mode || "VIRTUAL";

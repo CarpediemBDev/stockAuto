@@ -740,6 +740,9 @@ def toggle_user_bot(
     db.commit()
     db.refresh(target_settings)
 
+    from app.core import sse
+    sse.notify_bot_status(user_id)
+
     action = "started" if target_settings.is_running else "stopped"
     return {"message": f"Successfully {action} bot for user {user_id}", "is_running": target_settings.is_running}
 

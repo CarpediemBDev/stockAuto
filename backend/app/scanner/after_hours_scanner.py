@@ -426,6 +426,9 @@ async def refresh_after_hours_candidate_cache(
         }
         with _cache_lock:
             _after_hours_cache.update(response)
+        # SSE(Phase 2): 공용 에프터장 후보가 갱신됐음을 브로드캐스트(invalidate).
+        from app.core import sse
+        await sse.publish(sse.CHANNEL_PUBLIC, sse.EVENT_AFTER_HOURS, None)
         return response
     except Exception:
         logger.exception("[AfterHoursScanner] Refresh failed")

@@ -3,6 +3,7 @@
 import React from 'react';
 import { TrendingUp, TrendingDown, DollarSign, Activity } from 'lucide-react';
 import useSWR from 'swr';
+import { pollInterval } from '@/lib/sse';
 import { fetcher } from '@/lib/api';
 
 interface MarketData {
@@ -20,7 +21,7 @@ interface MarketOverview {
 }
 
 const MarketHeader = () => {
-  const { data: marketData, isLoading } = useSWR('/market/overview', fetcher, { refreshInterval: 15000 });
+  const { data: marketData, isLoading } = useSWR('/market/overview', fetcher, { refreshInterval: pollInterval(15000) });
   const data: MarketOverview | null = marketData || null;
 
   if (isLoading && !data) return <div className="h-14 bg-[#0f172a] border-b border-slate-800 animate-pulse"></div>;

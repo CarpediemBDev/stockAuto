@@ -21,6 +21,9 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 
 import useSWR from 'swr';
+import { pollInterval } from '@/lib/sse';
+import { useNow } from '@/hooks/useFreshness';
+import { useSseConnection } from '@/providers/EventStreamProvider';
 import { adminAPI, fetcher } from '@/lib/api';
 import { toast } from "sonner";
 import { getErrorMessage } from '@/lib/utils';
@@ -54,7 +57,7 @@ interface ManagedUser {
 }
 
 export function UserManagement() {
-  const { data: swrData, isLoading, mutate } = useSWR('/admin/users', fetcher, { refreshInterval: 15000 });
+  const { data: swrData, isLoading, mutate } = useSWR('/admin/users', fetcher, { refreshInterval: pollInterval(15000) });
   const usersList: ManagedUser[] = Array.isArray(swrData) ? swrData : (swrData?.data || []);
   const loading = isLoading;
 
@@ -65,24 +68,16 @@ export function UserManagement() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const itemsPerPage = 10;
 
-  // 스냅샷 신선도 배지용 현재 시각 — 렌더 순수성 위해 타이머 콜백에서만 Date.now()를 읽는다
-  // (초기값도 setTimeout(0)으로 지연 설정해 SSR 하이드레이션 불일치 방지). SWR 폴링(15초)에 맞춤.
-  const [nowTs, setNowTs] = useState<number | null>(null);
-  useEffect(() => {
-    const initialId = setTimeout(() => setNowTs(Date.now()), 0);
-    const timerId = setInterval(() => setNowTs(Date.now()), 15_000);
-    return () => {
-      clearTimeout(initialId);
-      clearInterval(timerId);
-    };
-  }, []);
+  // 스냅샷 신선도: 공유 클럭(useNow) + SSE 서버 오프셋(clock-skew 보정). 컴포넌트별 타이머 제거.
+  const now = useNow();
+  const { serverOffsetMs } = useSseConnection();
 
   // 최신 스냅샷 시각이 90초 이상 낡았는지 판정. 관리자도 낡음을 숨기지 않는다.
   const snapshotStaleness = (user: ManagedUser): { isStale: boolean; label: string } | null => {
-    if (!user.latest_snapshot_at || nowTs === null) return null;
+    if (!user.latest_snapshot_at || now === 0) return null;
     const latestTs = new Date(user.latest_snapshot_at).getTime();
     if (Number.isNaN(latestTs)) return null;
-    const ageSec = Math.floor((nowTs - latestTs) / 1000);
+    const ageSec = Math.floor((now + serverOffsetMs - latestTs) / 1000);
     if (ageSec < 90) return { isStale: false, label: "" };
     const label = ageSec >= 60 ? `${Math.floor(ageSec / 60)}분` : `${ageSec}초`;
     return { isStale: true, label };
