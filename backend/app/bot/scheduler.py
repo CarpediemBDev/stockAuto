@@ -340,14 +340,18 @@ def halt_trading_for_order_review(
     )
     with micro_session(ctx) as db:
         log_action(db, ctx.user_id, message, "ERROR")
+
+    side_kr = "매도" if side == "SELL" else "매수"
+    status_kr = {"SUBMITTED": "제출됨(미체결)", "FILLED": "체결됨", "PARTIAL": "부분체결", "REJECTED": "거부됨"}.get(status, status)
+
     send_message_async(
         ctx.user_id,
-        f"*Order Reconciliation Required*\n"
-        f"Side: `{side}`\n"
-        f"Ticker: `{ticker}`\n"
-        f"Status: `{status}`\n"
-        f"Order No: `{order_no or 'UNKNOWN'}`\n\n"
-        "The system will keep checking the broker. Your bot start/stop preference will not be changed."
+        f"⚠️ *[미체결 주문 대기]*\n"
+        f"• *종목:* `{ticker}`\n"
+        f"• *구분:* `{side_kr}`\n"
+        f"• *상태:* `{status_kr} ({status})`\n"
+        f"• *주문번호:* `{order_no or 'UNKNOWN'}`\n\n"
+        "주문이 접수되었으나 아직 체결되지 않았습니다. 체결 완료 여부를 실시간으로 추적하는 중이며, 봇의 시작/정지 설정은 유지됩니다."
     )
 
 
