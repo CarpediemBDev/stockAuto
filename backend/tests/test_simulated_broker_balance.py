@@ -1,3 +1,4 @@
+from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
 
 from sqlalchemy import create_engine
@@ -5,9 +6,10 @@ from sqlalchemy.orm import sessionmaker
 
 import app.bot.simulated_broker as simulated_broker_module
 from app.bot.simulated_broker import LocalSimulatedBroker
+from app.bot.trade_calculations import to_decimal
 from app.core.config import settings
 from app.core.database import Base
-from app.core.models import Holding, User
+from app.core.models import Holding, TradeLog, User
 
 
 def test_simulated_balance_keeps_uninvested_cash_fx_neutral(tmp_path, monkeypatch):
@@ -141,3 +143,65 @@ def test_simulated_balance_falls_back_to_avg_price_without_last_price(tmp_path, 
     assert balance["profit_loss"] == 0
     assert balance["profit_rate"] == 0.0
     assert balance["total_asset"] == int(settings.SIMULATED_INITIAL_CASH_KRW)
+
+
+def test_simulated_realized_pnl_sql_sum_matches_python_sum(tmp_path, monkeypatch):
+    """누적 실현손익을 DB SQL SUM으로 집계해도 파이썬 Decimal 합산(구 방식)과 동일해야 한다.
+
+    소수점 scale4·음수 손익을 섞고, 다른 유저 손익·BUY 로그·realized_pnl NULL은
+    집계에서 제외되는지까지 강제해 전량 스캔 제거 리팩터의 행동 보존을 방어한다.
+    """
+    engine = create_engine(f"sqlite:///{tmp_path / 'simulated_realized.db'}")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    monkeypatch.setattr(simulated_broker_module, "SessionLocal", session_factory)
+
+    realized_values = [Decimal("100.1234"), Decimal("50.5000"), Decimal("-30.2500")]
+
+    db = session_factory()
+    try:
+        seller = User(username="seller", hashed_password="hash")
+        other = User(username="other", hashed_password="hash")
+        db.add_all([seller, other])
+        db.commit()
+        db.refresh(seller)
+        db.refresh(other)
+
+        for value in realized_values:
+            db.add(TradeLog(
+                user_id=seller.id, ticker="AAPL", ticker_name="Apple",
+                trade_type="SELL", price=100.0, quantity=1,
+                realized_pnl=value, strategy_type="regime_switching",
+            ))
+        # 다른 유저의 매도 손익은 집계에 섞이면 안 됨(유저 격리)
+        db.add(TradeLog(
+            user_id=other.id, ticker="TSLA", ticker_name="Tesla",
+            trade_type="SELL", price=100.0, quantity=1,
+            realized_pnl=Decimal("9999.9999"), strategy_type="regime_switching",
+        ))
+        # BUY 로그와 realized_pnl NULL은 집계에서 제외돼야 함
+        db.add(TradeLog(
+            user_id=seller.id, ticker="AAPL", ticker_name="Apple",
+            trade_type="BUY", price=100.0, quantity=1,
+            realized_pnl=None, strategy_type="regime_switching",
+        ))
+        db.commit()
+        seller_id = seller.id
+    finally:
+        db.close()
+
+    balance = LocalSimulatedBroker(
+        db_settings=SimpleNamespace(user_id=seller_id)
+    ).get_account_balance(exchange_rate=1_400.0)
+
+    # 기준값: 파이썬 Decimal 합산(구 방식)으로 직접 계산한 profit_loss(KRW)
+    expected_realized_usd = sum(realized_values)  # 120.3734
+    expected_profit_loss = int(
+        (expected_realized_usd * to_decimal(settings.SIMULATED_INITIAL_FX_RATE)).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
+    assert balance["stock_balance"] == 0
+    assert balance["profit_loss"] == expected_profit_loss
+
+    engine.dispose()
