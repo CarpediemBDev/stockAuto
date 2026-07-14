@@ -45,6 +45,7 @@
 
 | 문서 | 소유 주제 |
 |---|---|
+| [plans/cross_platform_synergy_blueprint.md](plans/cross_platform_synergy_blueprint.md) | PC-모바일 통합 시너지 및 인프라 개선 마스터 플랜 |
 | [plans/product_specification.md](plans/product_specification.md) | 제품 사양·요구사항 |
 | [plans/project_roadmap.md](plans/project_roadmap.md) | 프로젝트 로드맵·우선순위 |
 | [plans/backend_core_stability.md](plans/backend_core_stability.md) | 백엔드 코어 안정성 계획 |
