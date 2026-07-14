@@ -15,7 +15,10 @@ import app.core.models  # noqa: F401
 config = context.config
 
 # Interpret the config file for Python logging.
-fileConfig(config.config_file_name)
+# disable_existing_loggers=False: 기본값(True)이면 앱 기동 중 이미 생성된
+# stockauto 로거가 통째로 비활성화되어 마이그레이션 이후 파일 로그가 끊긴다.
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Set SQLAlchemy URL from the application database configuration by default.
 # Tests may provide a temporary database URL through config.attributes.

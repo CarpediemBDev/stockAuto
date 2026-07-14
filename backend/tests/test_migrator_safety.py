@@ -51,6 +51,21 @@ def test_unversioned_baseline_database_is_upgraded_to_head(tmp_path, monkeypatch
         legacy_engine.dispose()
 
 
+def test_migration_keeps_stockauto_logger_alive(tmp_path):
+    # 알렘빅 env.py의 fileConfig가 disable_existing_loggers 기본값(True)으로 돌면
+    # 서버 기동 중 이미 만들어진 stockauto 로거가 비활성화되어
+    # 마이그레이션 이후 모든 파일 로그가 유실된다. (2026-07-15 회귀 방지)
+    from app.core.logging import logger as stockauto_logger
+
+    db_url = f"sqlite:///{tmp_path / 'logger_alive.db'}"
+    handlers_before = list(stockauto_logger.handlers)
+
+    command.upgrade(make_alembic_config(db_url), "head")
+
+    assert stockauto_logger.disabled is False
+    assert stockauto_logger.handlers == handlers_before
+
+
 def test_competitive_seed_preserves_existing_user_settings(tmp_path, monkeypatch):
     db_path = tmp_path / "seed_preserves_settings.db"
     engine = create_engine(f"sqlite:///{db_path}")
