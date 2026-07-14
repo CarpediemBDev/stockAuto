@@ -7,8 +7,8 @@
  * → 컴포넌트는 기존 useSWR(key)를 그대로 쓰되, refreshInterval을 pollInterval()로 감싸
  *   SSE on일 때만 폴링이 멈추고 push로 갱신된다(전송 계층 교체, 컴포넌트 로직 무변경).
  *
- * 회귀 0 원칙: NEXT_PUBLIC_SSE_ENABLED === "true" 일 때만 연결을 연다.
- * 기본(off)에서는 아무 것도 하지 않아 기존 폴링 동작·E2E에 영향이 없다.
+ * SSE는 기본 on(opt-out): NEXT_PUBLIC_SSE_ENABLED="false"일 때만 연결을 열지 않고
+ * 기존 폴링으로 복귀한다(롤백 스위치). E2E는 결정성을 위해 off로 고정해 돌린다.
  *
  * 또한 연결 상태와 서버 시계 오프셋을 컨텍스트로 노출한다(Phase 4 useFreshness가 소비).
  */

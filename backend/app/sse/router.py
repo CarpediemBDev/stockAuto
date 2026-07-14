@@ -126,7 +126,10 @@ async def stream_events(
                 logger.warning("[SSE] pubsub cleanup failed for user=%s", user_id, exc_info=True)
 
     headers = {
-        "Cache-Control": "no-cache",
+        # no-transform 필수: Next.js rewrite 프록시(및 표준 compression 미들웨어)가
+        # 이 지시가 없으면 SSE 응답을 gzip 버퍼에 잡아둬 프레임이 클라이언트에 도달하지 않는다
+        # (로컬 실측: 프록시 경유 시 connected 프레임조차 미도달 → no-transform으로 즉시 통과).
+        "Cache-Control": "no-cache, no-transform",
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",  # nginx 버퍼링 비활성화(즉시 flush)
     }

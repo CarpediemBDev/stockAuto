@@ -25,9 +25,11 @@ from app.core.locks import (
 from app.core.response import SuccessResponseRoute
 router = APIRouter(route_class=SuccessResponseRoute, tags=["Account"])
 
-# 참고: 기존 폴링 기반 view-trigger(stale-while-revalidate)는 SSE 구독 라이프사이클 기반
-# 갱신(app/sse/router.py: 구독 유지 동안 모드별 주기로 refresh_user_equity_snapshot)으로
-# 이전되어 제거됨. 읽기 경로는 이제 스냅샷을 즉시 반환만 한다(트리거 없음).
+# 참고: 기존 폴링 기반 view-trigger(stale-while-revalidate)는 제거됨. 읽기 경로는 이제
+# 스냅샷을 즉시 반환만 한다(트리거 없음). 신선도는 1분 스케줄러(admin_balance_cache_sync)와
+# 거래 이벤트 스냅샷이 담당하고, 그 변경을 SSE가 push한다. 구독 라이프사이클 기반 주기
+# 갱신은 스트림 내부 구현이 불안정해 미채택 — 후속 과제(스트림 밖 백그라운드 잡)로 남아 있음
+# (docs/tasks/2026-07-14.md 인수인계 참조).
 def _provider_label(settings_row, trade_mode: str) -> str:
     """스냅샷 응답용 provider 라벨을 브로커 호출 없이 설정값에서 파생합니다."""
     if trade_mode == "SIMULATED":
