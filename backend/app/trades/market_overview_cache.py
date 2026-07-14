@@ -204,9 +204,10 @@ async def refresh_market_overview_snapshot(db: Session | None = None) -> dict:
 
         data = _snapshot_to_response(snapshot)
         _set_memory_cache(data)
-        # SSE(Phase 2): 공용 시장 개요가 갱신됐음을 브로드캐스트(invalidate).
+        # SSE: 공용 시장 개요가 갱신됐음을 브로드캐스트(invalidate).
+        # publish_sync 고정 — 스케줄러의 asyncio.run 일회용 루프에서도 돌므로 async 클라이언트 금지.
         from app.core import sse
-        await sse.publish(sse.CHANNEL_PUBLIC, sse.EVENT_MARKET, None)
+        sse.publish_sync(sse.CHANNEL_PUBLIC, sse.EVENT_MARKET, None)
         return data
     except Exception:
         session.rollback()

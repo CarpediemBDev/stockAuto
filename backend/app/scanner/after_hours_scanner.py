@@ -426,9 +426,10 @@ async def refresh_after_hours_candidate_cache(
         }
         with _cache_lock:
             _after_hours_cache.update(response)
-        # SSE(Phase 2): 공용 에프터장 후보가 갱신됐음을 브로드캐스트(invalidate).
+        # SSE: 공용 에프터장 후보가 갱신됐음을 브로드캐스트(invalidate).
+        # publish_sync 고정 — 스케줄러의 asyncio.run 일회용 루프에서도 돌므로 async 클라이언트 금지.
         from app.core import sse
-        await sse.publish(sse.CHANNEL_PUBLIC, sse.EVENT_AFTER_HOURS, None)
+        sse.publish_sync(sse.CHANNEL_PUBLIC, sse.EVENT_AFTER_HOURS, None)
         return response
     except Exception:
         logger.exception("[AfterHoursScanner] Refresh failed")

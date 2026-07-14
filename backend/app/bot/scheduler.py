@@ -1859,9 +1859,10 @@ async def refresh_scanner_cache(force: bool = False) -> bool:
             len(signals),
             len(latest_watchlist_signals),
         )
-        # SSE(Phase 2): 공용 스캐너 결과가 갱신됐음을 브로드캐스트(invalidate) → 구독자 일괄 재조회.
+        # SSE: 공용 스캐너 결과가 갱신됐음을 브로드캐스트(invalidate) → 구독자 일괄 재조회.
+        # publish_sync 고정 — 이 함수는 asyncio.run 일회용 루프에서도 돌므로 async 클라이언트 금지.
         from app.core import sse
-        await sse.publish(sse.CHANNEL_PUBLIC, sse.EVENT_SCANNER_LATEST, None)
+        sse.publish_sync(sse.CHANNEL_PUBLIC, sse.EVENT_SCANNER_LATEST, None)
         return True
     except Exception as e:
         logger.exception("[Scanner Cache] ERROR during market scan")
@@ -2060,7 +2061,7 @@ def record_equity_snapshot(
 ) -> bool:
     """
     잔고 dict를 AccountEquitySnapshot으로 영속화합니다.
-    force=True면 60초 dedup을 우회합니다(체결 직후 즉시 갱신용).
+    force=True면 dedup을 우회합니다(체결 직후 즉시 갱신용).
     """
     total_asset = balance.get("total_asset")
     if total_asset is None or not math.isfinite(float(total_asset)):
@@ -2078,10 +2079,13 @@ def record_equity_snapshot(
             .order_by(AccountEquitySnapshot.captured_at.desc())
             .first()
         )
+        # dedup 임계는 55초: 1분 벌크 잡(admin_balance_cache_sync)의 도착 시각이 59.x초로
+        # 흔들리면 그 사이클이 통째로 skip되어 스냅샷 공백이 최대 2분으로 벌어지고,
+        # 프론트 90초 stale 배지가 정상 상태에서 깜빡인다. 60초 정합 대신 5초 완충을 둔다.
         should_record = (
             force
             or latest_snapshot is None
-            or (captured_at - latest_snapshot.captured_at).total_seconds() >= 60
+            or (captured_at - latest_snapshot.captured_at).total_seconds() >= 55
         )
         if not should_record:
             return False
@@ -2113,9 +2117,10 @@ def record_equity_snapshot(
             snapshot_db.delete(expired_snapshot)
         snapshot_db.commit()
 
-        # SSE: 스냅샷이 실제로 기록됐을 때만 유저 채널로 잔고/보유 invalidate 발행(best-effort).
+        # SSE: 스냅샷이 실제로 기록됐을 때만 유저 채널로 invalidate 발행(best-effort).
+        # force=True는 체결·청산·리셋 등 거래 이벤트이므로 거래 로그(/trades)도 함께 무효화.
         from app.core import sse
-        sse.notify_user_equity(user_id)
+        sse.notify_user_equity(user_id, trade_event=force)
         return True
     except Exception:
         snapshot_db.rollback()
@@ -2218,7 +2223,7 @@ async def admin_balance_cache_sync():
 
     # SSE: 1분 벌크 동기 후 관리자 랭킹을 한 번만 무효화(유저별 발행과 분리해 과다 refetch 방지).
     from app.core import sse
-    await sse.publish(sse.CHANNEL_ADMIN, sse.EVENT_ADMIN_USERS, None)
+    sse.notify_admin_users()
 
 def admin_balance_cache_wrapper():
     try:
