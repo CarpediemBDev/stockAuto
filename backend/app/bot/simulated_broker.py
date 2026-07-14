@@ -1,4 +1,5 @@
 import pandas as pd
+from sqlalchemy import func
 from app.scanner.data_provider import fetch_bulk_ohlcv_sync, fetch_ohlcv_sync
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
@@ -24,19 +25,22 @@ class LocalSimulatedBroker(BaseBroker):
     def get_account_balance(self, exchange_rate: float | None = None) -> dict:
         db = SessionLocal()
         try:
+            # 누적 실현 손익: SELL TradeLog를 전량 로드해 파이썬 sum 하던 것을 DB SQL SUM 스칼라
+            # 집계로 대체한다. 행을 로드하지 않고 합계 하나만 받으므로 거래 이력이 쌓여도 비용이 일정하다.
+            # realized_pnl은 Numeric(20,4)이라 집계도 Decimal 정밀 연산이며, scale 4로 양자화해
+            # SQLite(float 경유)에서도 프로덕션(Decimal)과 동일한 결과를 보장한다.
+            realized_pnl_query = db.query(func.sum(TradeLog.realized_pnl)).filter(
+                TradeLog.trade_type == "SELL",
+                TradeLog.realized_pnl != None,
+            )
             if self.user_id:
                 holdings = db.query(Holding).filter(Holding.user_id == self.user_id).all()
-                trade_logs = db.query(TradeLog).filter(
-                    TradeLog.user_id == self.user_id,
-                    TradeLog.trade_type == "SELL",
-                    TradeLog.realized_pnl != None
-                ).all()
+                realized_pnl_query = realized_pnl_query.filter(TradeLog.user_id == self.user_id)
             else:
                 holdings = db.query(Holding).all()
-                trade_logs = db.query(TradeLog).filter(
-                    TradeLog.trade_type == "SELL",
-                    TradeLog.realized_pnl != None
-                ).all()
+            total_realized_pnl_usd = to_decimal(realized_pnl_query.scalar()).quantize(
+                Decimal('0.0001'), rounding=ROUND_HALF_UP
+            )
         finally:
             db.close()
 
@@ -46,9 +50,6 @@ class LocalSimulatedBroker(BaseBroker):
         dec_exchange_rate = to_decimal(exchange_rate)
         if dec_exchange_rate <= 0:
             raise ValueError("환율은 0보다 커야 합니다.")
-
-        # 누적 실현 손익 계산 (TradeLog 기준 매매 누적 성과 - USD 기준)
-        total_realized_pnl_usd = sum(to_decimal(log.realized_pnl) for log in trade_logs) if trade_logs else Decimal('0.0000')
 
         total_purchase_usd = Decimal('0.0000')
         total_eval_usd = Decimal('0.0000')
