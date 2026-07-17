@@ -6,6 +6,7 @@ import { AccountBalance } from "./AccountBalance";
 import PortfolioView from "./PortfolioView";
 import { AssetTrendChart } from "./AssetTrendChart";
 import { LiveTradeTicker } from "./LiveTradeTicker";
+import { StrategyCatalog } from "./StrategyCatalog";
 
 import useSWR from "swr";
 import { pollInterval } from "@/lib/sse";
@@ -70,6 +71,17 @@ export function Dashboard() {
             실시간 포트폴리오 (Portfolio)
           </h2>
           <PortfolioView displayCurrency={displayCurrency} />
+        </div>
+        
+        <div className="mb-12">
+          <h2 className="text-xl font-bold text-slate-100 mb-4 flex items-center">
+            <div className="w-1.5 h-6 bg-indigo-500 rounded-full mr-3"></div>
+            전략 카탈로그 (Strategy Catalog)
+          </h2>
+          <p className="text-zinc-400 text-sm mb-6 max-w-3xl leading-relaxed">
+            StockAuto의 다양한 매매 전략을 확인하고 즉시 적용할 수 있습니다. 각 전략은 특정 장세에 최적화되어 있거나 모든 상황에 유연하게 대처할 수 있도록 설계되었습니다.
+          </p>
+          <StrategyCatalog />
         </div>
       </div>
 

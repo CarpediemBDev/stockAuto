@@ -31,6 +31,40 @@ export function reportHandledError(context: string, error: unknown): string {
 }
 
 /**
+ * 환율 폴백 기본값(1 USD = 1350원). 서버가 fx_rate를 주지 못할 때만 사용하는 SSOT 상수.
+ * 이 값을 여기 한 곳에서만 관리하고, 컴포넌트에 매직넘버로 흩뿌리지 않는다.
+ */
+export const DEFAULT_FX_RATE = 1350;
+
+/**
+ * 유효한 환율(양수)이면 그대로, 아니면 기본 폴백(DEFAULT_FX_RATE)을 반환한다.
+ */
+export function resolveFxRate(fxRate?: number | null): number {
+  return fxRate && fxRate > 0 ? fxRate : DEFAULT_FX_RATE;
+}
+
+/**
+ * USD 금액을 원화로 환산한다(미국 주식 가격 등 → 원화 표시).
+ */
+export function usdToKrw(usdAmount: number, fxRate?: number | null): number {
+  return usdAmount * resolveFxRate(fxRate);
+}
+
+/**
+ * 원화 금액을 USD로 환산한다(원화로 저장된 총자산 등 → USD 표시).
+ */
+export function krwToUsd(krwAmount: number, fxRate?: number | null): number {
+  return krwAmount / resolveFxRate(fxRate);
+}
+
+/**
+ * 원화 금액을 "1,234,567원" 형식 문자열로 포맷한다(소수점 절사).
+ */
+export function formatKrw(krwAmount: number): string {
+  return `${krwAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`;
+}
+
+/**
  * 시그널 스코어에 따른 텍스트/보더 색상 테마 반환 (80점 이상: rose/indigo, 60점 이상: amber, 기타: blue/zinc 계열)
  */
 export function getScoreColor(score: number): string {

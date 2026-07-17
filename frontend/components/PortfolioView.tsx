@@ -8,7 +8,7 @@ import {
 import useSWR from 'swr';
 import { pollInterval } from '@/lib/sse';
 import { fetcher } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { cn, usdToKrw, formatKrw } from '@/lib/utils';
 
 interface Holding {
   id: number;
@@ -231,7 +231,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                     <span className={`text-xs font-bold font-mono shrink-0 ${profitRate >= 0 ? 'text-rose-400' : 'text-blue-400'}`}>
                       {displayCurrency === "USD"
                         ? `$${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
-                        : `${(h.fx_rate ? currentPrice * h.fx_rate : currentPrice * 1350).toLocaleString(undefined, { maximumFractionDigits: 0 })}원`
+                        : formatKrw(usdToKrw(currentPrice, h.fx_rate))
                       }
                     </span>
                   </div>
@@ -280,7 +280,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                       <span className="text-slate-200 font-mono font-medium">
                         {displayCurrency === "USD"
                           ? `$${h.avg_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
-                          : `${(h.fx_rate ? h.avg_price * h.fx_rate : h.avg_price * 1350).toLocaleString(undefined, { maximumFractionDigits: 0 })}원`
+                          : formatKrw(usdToKrw(h.avg_price, h.fx_rate))
                         }
                       </span>
                     </div>
@@ -293,7 +293,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                       <span className="text-slate-400 font-mono font-medium">
                         {displayCurrency === "USD"
                           ? `$${(h.avg_price * h.quantity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : `${((h.avg_price * h.quantity) * (h.fx_rate || 1350)).toLocaleString(undefined, { maximumFractionDigits: 0 })}원`
+                          : formatKrw(usdToKrw(h.avg_price * h.quantity, h.fx_rate))
                         }
                       </span>
                     </div>
@@ -302,7 +302,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                       <span className={`font-mono font-bold ${profitRate >= 0 ? 'text-rose-400' : 'text-blue-400'}`}>
                         {displayCurrency === "USD"
                           ? `$${(currentPrice * h.quantity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : `${((currentPrice * h.quantity) * (h.fx_rate || 1350)).toLocaleString(undefined, { maximumFractionDigits: 0 })}원`
+                          : formatKrw(usdToKrw(currentPrice * h.quantity, h.fx_rate))
                         }
                       </span>
                     </div>
@@ -345,7 +345,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                     <span className="text-sm font-bold text-slate-300">
                       {displayCurrency === "USD"
                         ? `$${h.highest_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
-                        : `${(h.fx_rate ? h.highest_price * h.fx_rate : h.highest_price * 1350).toLocaleString(undefined, { maximumFractionDigits: 0 })}원`
+                        : formatKrw(usdToKrw(h.highest_price, h.fx_rate))
                       }
                     </span>
                   </div>

@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { TradeLog } from "./TradeLogs";
 import { accountAPI, isCancel } from "@/lib/api";
-import { reportHandledError } from "@/lib/utils";
+import { reportHandledError, DEFAULT_FX_RATE, krwToUsd, usdToKrw } from "@/lib/utils";
 
 interface AssetTrendChartProps {
   displayCurrency: "KRW" | "USD";
@@ -14,7 +14,7 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [realTotalAsset, setRealTotalAsset] = useState<number | null>(null);
-  const [fxRate, setFxRate] = useState<number>(1350);
+  const [fxRate, setFxRate] = useState<number>(DEFAULT_FX_RATE);
   const [historyData, setHistoryData] = useState<{ timestamp: string; total: number }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -56,7 +56,7 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
     if (realTotalAsset === null) return [];
 
     // 최신 환율 기준 실시간 총 자산 (달러 환산 기준점으로 통일 후 프론트에서 가변 포맷팅)
-    const currentAssetUsd = realTotalAsset / fxRate;
+    const currentAssetUsd = krwToUsd(realTotalAsset, fxRate);
 
     // 만약 실제 스냅샷 이력이 전혀 없는 신규 계좌일 경우:
     // 현재 실제 자산 가치 그대로 수평선을 그려 "거래 변동 없는 투명한 잔고"를 표현
@@ -80,7 +80,7 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
       const dateStr = `${String(logDate.getMonth() + 1).padStart(2, "0")}-${String(logDate.getDate()).padStart(2, "0")}`;
       return {
         date: dateStr,
-        usd: Math.round(s.total / fxRate),
+        usd: Math.round(krwToUsd(s.total, fxRate)),
         isRealTx: true,
       };
     });
@@ -89,7 +89,7 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
     if (historyPoints.length < 7) {
       const needed = 7 - historyPoints.length;
       const firstTxDate = new Date(historyData[0].timestamp);
-      const startUsd = Math.round(historyData[0].total / fxRate);
+      const startUsd = Math.round(krwToUsd(historyData[0].total, fxRate));
 
       const fillPoints = Array.from({ length: needed }).map((_, i) => {
         const d = new Date(firstTxDate);
@@ -156,7 +156,7 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
     if (displayCurrency === "USD") {
       return `$${usdVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     } else {
-      const krwVal = Math.round(usdVal * fxRate);
+      const krwVal = Math.round(usdToKrw(usdVal, fxRate));
       return `${krwVal.toLocaleString()}원`;
     }
   };
