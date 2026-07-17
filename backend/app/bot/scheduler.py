@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 import asyncio
 import threading
 import socket
+import weakref
 import httpx
 from requests.exceptions import RequestException as RequestsRequestException
 from app.core.logging import logger
@@ -95,14 +96,36 @@ latest_scanned_signals = [] # 글로벌 실시간 마켓 스캔 시그널 캐시
 latest_watchlist_signals = {} # 사용자별 라우팅 전에만 사용하는 관심종목 분석 캐시
 
 # 💡 KIS API 동시성 제어 세마포어 (초당 최대 15회 호출로 자동 제한 - 429 차단 철벽 방어)
-kis_semaphore = asyncio.Semaphore(15)
+# asyncio.Semaphore는 경합 시점의 이벤트 루프에 바인딩된다. 이 프로세스는 메인 uvicorn 루프 외에도
+# APScheduler 잡들이 asyncio.run으로 만드는 단명 루프를 매 사이클 생성하므로, 단일 전역 인스턴스를
+# 공유하면 "bound to a different event loop" RuntimeError로 유저 트레이딩 사이클이 통째로 중단된다.
+# 루프별 인스턴스를 발급해 실제 동시성이 몰리는 동일 루프 내 gather 경합은 그대로 15로 제한한다.
+# (scanner.get_sentiment_lock도 동일 패턴 — id 재사용 충돌과 누수를 막기 위해
+#  WeakKeyDictionary로 루프 수명에 자동 연동한다. 루프 간 총합 상한은 브로커 rate limiter가 재차 방어)
+KIS_MAX_CONCURRENT_CALLS = 15
+_kis_semaphores: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
+_kis_semaphores_lock = threading.Lock()
+
+
+def get_kis_semaphore() -> asyncio.Semaphore:
+    """현재 실행 중인 이벤트 루프 전용 KIS 동시성 세마포어를 반환합니다 (루프별 1개, 루프 소멸 시 자동 회수)."""
+    loop = asyncio.get_running_loop()
+    sem = _kis_semaphores.get(loop)
+    if sem is None:
+        with _kis_semaphores_lock:
+            sem = _kis_semaphores.get(loop)
+            if sem is None:
+                sem = asyncio.Semaphore(KIS_MAX_CONCURRENT_CALLS)
+                _kis_semaphores[loop] = sem
+    return sem
+
 
 async def safe_broker_call(func, *args, **kwargs):
     """
     KIS API의 초당 호출 제한(Rate Limit)을 철저히 준수하기 위해 동시성 세마포어 가드 하에
     동기식 브로커 함수를 비동기 스레드 풀(asyncio.to_thread)에서 안전하게 지연 호출합니다.
     """
-    async with kis_semaphore:
+    async with get_kis_semaphore():
         # 호출 사이에 아주 미세한 지연(40ms)을 주어 고르게 배분
         await asyncio.sleep(0.04)
         return await asyncio.to_thread(func, *args, **kwargs)

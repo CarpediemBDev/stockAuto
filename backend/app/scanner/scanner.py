@@ -2,6 +2,8 @@ import pandas as pd
 import asyncio
 import numpy as np
 import inspect
+import threading
+import weakref
 from app.core.config import settings
 from app.core.logging import logger
 
@@ -86,19 +88,28 @@ _sentiment_cache = {"value": None, "timestamp": 0}
 SENTIMENT_TTL = 300  # 5분 (API 호출 빈도 대폭 감소)
 
 # 💡 동시 호출 방지용 비동기 락 (이벤트 루프 종속성 이슈 해결을 위해 per-loop 로 관리)
-_sentiment_locks = {}
+# id(loop) 키 dict는 죽은 루프 항목이 정리되지 않아 무한 증식하고, GC로 id가 재사용되면
+# 다른 루프에 바인딩됐던 락을 새 루프가 넘겨받아 "bound to a different event loop"가 재발한다.
+# scheduler.get_kis_semaphore와 동일하게 WeakKeyDictionary로 루프 수명에 자동 연동한다.
+_sentiment_locks: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = weakref.WeakKeyDictionary()
+_sentiment_locks_lock = threading.Lock()
 
 def get_sentiment_lock() -> asyncio.Lock:
+    """현재 실행 중인 이벤트 루프 전용 sentiment 락을 반환합니다 (루프별 1개, 루프 소멸 시 자동 회수)."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         # 이벤트 루프가 없는 상황 (일부 테스트 환경 등)
         return asyncio.Lock()
-    
-    loop_id = id(loop)
-    if loop_id not in _sentiment_locks:
-        _sentiment_locks[loop_id] = asyncio.Lock()
-    return _sentiment_locks[loop_id]
+
+    lock = _sentiment_locks.get(loop)
+    if lock is None:
+        with _sentiment_locks_lock:
+            lock = _sentiment_locks.get(loop)
+            if lock is None:
+                lock = asyncio.Lock()
+                _sentiment_locks[loop] = lock
+    return lock
 
 def calculate_strategy_score(strategy_instance, row, regime: str, is_entry: bool = True, score_card: list | None = None) -> float:
     """세부 채점표를 지원하는 전략에만 score_card를 전달합니다."""
