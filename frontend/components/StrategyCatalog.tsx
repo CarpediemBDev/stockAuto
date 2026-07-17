@@ -27,14 +27,18 @@ export function StrategyCatalog() {
   const currentStrategy = adminSettings?.strategy_type || "regime_switching";
 
   const handleSelectStrategy = async (strategyId: string) => {
+    if (!adminSettings) return;
     if (strategyId === currentStrategy) return;
     
     setIsUpdating(true);
     setSelectedId(strategyId);
     
     try {
-      await adminAPI.saveSettings({ strategy_type: strategyId });
-      
+      await adminAPI.saveSettings({ 
+        ...adminSettings,
+        trade_mode: adminSettings.trade_mode || "SIMULATED",
+        strategy_type: strategyId 
+      });
       await mutateSettings();
     } catch (err) {
       console.error(err);
@@ -49,7 +53,7 @@ export function StrategyCatalog() {
     return <div className="p-4 bg-red-950/20 text-red-400 rounded-xl border border-red-900/30">전략 카탈로그를 불러올 수 없습니다.</div>;
   }
 
-  if (!strategies) {
+  if (!strategies || !adminSettings) {
     return (
       <div className="flex items-center justify-center p-12 bg-zinc-900/20 rounded-2xl border border-zinc-800">
         <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
