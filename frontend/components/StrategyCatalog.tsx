@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import useSWR from "swr";
-import { fetcher } from "@/lib/api";
+import { fetcher, adminAPI } from "@/lib/api";
 import { Loader2, CheckCircle2, Shield, Zap, TrendingUp, Target } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 
@@ -19,7 +19,7 @@ interface Strategy {
 
 export function StrategyCatalog() {
   const { data: strategies, error } = useSWR<Strategy[]>('/strategies/catalog', fetcher);
-  const { data: adminSettings, mutate: mutateSettings } = useSWR('/admin/settings', fetcher);
+  const { data: adminSettings, mutate: mutateSettings } = useSWR('/admin', fetcher);
   
   const [isUpdating, setIsUpdating] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -33,18 +33,7 @@ export function StrategyCatalog() {
     setSelectedId(strategyId);
     
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api/v1'}/admin/settings`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('auth_token') || '' : ''}`
-        },
-        body: JSON.stringify({ strategy_type: strategyId })
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to update strategy');
-      }
+      await adminAPI.saveSettings({ strategy_type: strategyId });
       
       await mutateSettings();
     } catch (err) {
