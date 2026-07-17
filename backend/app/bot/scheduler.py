@@ -1095,6 +1095,8 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     res = await safe_broker_call(
                         broker.sell_order, clean_ticker, h.quantity,
                         price=current_price, session=ctx.session,
+                        strategy_type=slot_key,
+                        regime_mode=sentiment, signal_score=current_score,
                         **({"client_order_id": order_intent.intent_id} if order_intent else {}),
                     )
             except Exception as exc:
@@ -1659,6 +1661,8 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                     res = await safe_broker_call(
                         ctx.broker.buy_order, clean_ticker, final_qty,
                         price=current_price, session=ctx.session,
+                        strategy_type=slot_key, buy_stage=next_stage,
+                        regime_mode=ctx.sentiment, signal_score=score,
                         **({"client_order_id": order_intent.intent_id} if order_intent else {}),
                     )
             except Exception as exc:

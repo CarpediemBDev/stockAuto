@@ -170,7 +170,7 @@ def test_simulated_broker_limit_order_fake_execution(isolated_simulated_broker_d
     # Current behavior: Naive broker fills it immediately at $105.0 or $100.0.
     
     with patch.object(broker, "_get_live_price", return_value=105.0):
-        buy_res = broker.buy_order(ticker="AAPL", quantity=10, price=100.0)
+        buy_res = broker.buy_order(ticker="AAPL", quantity=10, price=100.0, strategy_type="regime_switching")
         print(f"\n[LIMIT ORDER TEST] Buy Limit order ($100.0) when market is $105.0: Filled={buy_res.get('status')} at price {buy_res.get('filled_price')}")
         
         # Verify that the order is safely submitted as pending instead of instantly filled
@@ -182,7 +182,7 @@ def test_simulated_broker_limit_order_fake_execution(isolated_simulated_broker_d
     # Live Market Price = $105.0
     # Expected behavior: Sell order should NOT fill since market price ($105.0) is lower than limit ($110.0).
     with patch.object(broker, "_get_live_price", return_value=105.0):
-        sell_res = broker.sell_order(ticker="AAPL", quantity=10, price=110.0)
+        sell_res = broker.sell_order(ticker="AAPL", quantity=10, price=110.0, strategy_type="regime_switching")
         print(f"\n[LIMIT ORDER TEST] Sell Limit order ($110.0) when market is $105.0: Filled={sell_res.get('status')} at price {sell_res.get('filled_price')}")
         
         # Verify that the order is safely submitted as pending instead of instantly filled
@@ -203,7 +203,7 @@ def test_simulated_broker_immediate_sell_rejects_insufficient_holding(isolated_s
     broker = LocalSimulatedBroker(db_settings=SimpleNamespace(user_id=user_id))
 
     with patch.object(broker, "_get_live_price", return_value=120.0):
-        no_holding = broker.sell_order(ticker="AAPL", quantity=1, price=100.0)
+        no_holding = broker.sell_order(ticker="AAPL", quantity=1, price=100.0, strategy_type="regime_switching")
 
     assert no_holding["success"] is False
     assert no_holding["status"] == "REJECTED"
@@ -227,8 +227,8 @@ def test_simulated_broker_immediate_sell_rejects_insufficient_holding(isolated_s
         db.close()
 
     with patch.object(broker, "_get_live_price", return_value=120.0):
-        too_many = broker.sell_order(ticker="AAPL", quantity=2, price=100.0)
-        valid = broker.sell_order(ticker="AAPL", quantity=1, price=100.0)
+        too_many = broker.sell_order(ticker="AAPL", quantity=2, price=100.0, strategy_type="regime_switching")
+        valid = broker.sell_order(ticker="AAPL", quantity=1, price=100.0, strategy_type="regime_switching")
 
     assert too_many["success"] is False
     assert too_many["status"] == "REJECTED"
