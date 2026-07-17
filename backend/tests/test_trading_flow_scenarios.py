@@ -111,12 +111,12 @@ class FakeBroker:
     def get_order_metadata(self, ticker, session):
         return {"exchange_code": "NASD", "order_division": "00"}
 
-    def buy_order(self, ticker, quantity, price=None, session="REGULAR_MARKET"):
-        self.buy_calls.append((ticker, quantity, price))
+    def buy_order(self, ticker, quantity, price=None, session="REGULAR_MARKET", **kwargs):
+        self.buy_calls.append((ticker, quantity, price, kwargs.get("strategy_type")))
         return dict(self.buy_result)
 
-    def sell_order(self, ticker, quantity, price=None, session="REGULAR_MARKET"):
-        self.sell_calls.append((ticker, quantity, price))
+    def sell_order(self, ticker, quantity, price=None, session="REGULAR_MARKET", **kwargs):
+        self.sell_calls.append((ticker, quantity, price, kwargs.get("strategy_type")))
         return dict(self.sell_result)
 
 
@@ -226,7 +226,7 @@ async def test_run_user_trading_flow_records_successful_new_buy(monkeypatch):
         session="REGULAR_MARKET",
     )
 
-    assert fake_broker.buy_calls == [("AAPL", 10, 100.0)]
+    assert fake_broker.buy_calls == [("AAPL", 10, 100.0, "slot")]
     assert fake_broker.sell_calls == []
     assert fake_db.closed is True
     assert fake_db.rollback_count == 0
@@ -264,7 +264,7 @@ async def test_run_user_trading_flow_skips_holding_write_when_buy_fails(monkeypa
         session="REGULAR_MARKET",
     )
 
-    assert fake_broker.buy_calls == [("AAPL", 10, 100.0)]
+    assert fake_broker.buy_calls == [("AAPL", 10, 100.0, "slot")]
     assert fake_db.holdings == []
     assert not any(isinstance(item, Holding) for item in fake_db.added)
     assert messages == []
@@ -384,7 +384,7 @@ async def test_run_user_trading_flow_records_successful_sell(monkeypatch):
     finally:
         scheduler.BREACH_COUNT_CACHE.pop((1, "AAPL", "slot"), None)
 
-    assert fake_broker.sell_calls == [("AAPL", 3, 100.0)]
+    assert fake_broker.sell_calls == [("AAPL", 3, 100.0, "slot")]
     assert fake_broker.buy_calls == []
     assert fake_db.holdings == []
     assert fake_db.deleted == [holding]
