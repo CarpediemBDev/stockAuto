@@ -18,8 +18,8 @@ interface Strategy {
 }
 
 export function StrategyCatalog() {
-  const { data: strategies, error } = useSWR<Strategy[]>('/strategies/catalog', fetcher);
-  const { data: adminSettings, mutate: mutateSettings } = useSWR('/admin', fetcher);
+  const { data: strategies, error: strategiesError } = useSWR<Strategy[]>('/strategies/catalog', fetcher);
+  const { data: adminSettings, error: adminError, mutate: mutateSettings } = useSWR('/admin', fetcher);
   
   const [isUpdating, setIsUpdating] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -28,6 +28,7 @@ export function StrategyCatalog() {
 
   const handleSelectStrategy = async (strategyId: string) => {
     if (!adminSettings) return;
+    if (isUpdating) return;
     if (strategyId === currentStrategy) return;
     
     setIsUpdating(true);
@@ -36,7 +37,7 @@ export function StrategyCatalog() {
     try {
       await adminAPI.saveSettings({ 
         ...adminSettings,
-        trade_mode: adminSettings.trade_mode || "SIMULATED",
+        trade_mode: adminSettings.trade_mode ?? "SIMULATED",
         strategy_type: strategyId 
       });
       await mutateSettings();
@@ -49,8 +50,8 @@ export function StrategyCatalog() {
     }
   };
 
-  if (error) {
-    return <div className="p-4 bg-red-950/20 text-red-400 rounded-xl border border-red-900/30">전략 카탈로그를 불러올 수 없습니다.</div>;
+  if (strategiesError || adminError) {
+    return <div className="p-4 bg-red-950/20 text-red-400 rounded-xl border border-red-900/30">설정 데이터를 불러올 수 없습니다.</div>;
   }
 
   if (!strategies || !adminSettings) {
