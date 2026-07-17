@@ -431,6 +431,9 @@ async def force_liquidate(
                     quantity=holding.quantity,
                     price=price,
                     session=market_session,
+                    strategy_type=holding.strategy_type,
+                    regime_mode="LIQUIDATE",
+                    signal_score=0,
                 )
                 if not result.get("success"):
                     continue
