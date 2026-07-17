@@ -190,5 +190,12 @@ class Settings:
     SIMULATED_FEE_RATE = 0.0010   # 0.10% 가상 시뮬 수수료율 (실거래 Toss 미국주식 현행 표준 위탁수수료율과 일치, 2025-12-01 0.25%→0.10% 인하 반영)
     SEC_FEE_RATE = 0.0000278      # 0.00278% 미국 매도 제비용 (SEC Fee)
 
+    # [자산곡선 스냅샷] 관리자 차트 경량화를 위한 (user_id, trade_mode)별 롤링 보존 상한.
+    # record_equity_snapshot(scheduler.py)이 이 값을 넘는 오래된 스냅샷을 삭제한다.
+    EQUITY_SNAPSHOT_RETENTION_LIMIT = 500
+    # 장기 관찰/벤치마크 계정은 위 롤링 컷에서 제외해 자산곡선 전 구간을 무제한 보존한다.
+    # (username 프리픽스가 마커 — obs_qqq_hold / obs_core / obs_aggressive 등)
+    OBSERVATION_ACCOUNT_PREFIX = "obs_"
+
 settings = Settings()
 logger.info(f"[*] Active Profile: {settings.PROFILE.upper()} | Trade Mode: {settings.TRADE_MODE} | Real-Trading Ready: {settings.IS_REAL}")

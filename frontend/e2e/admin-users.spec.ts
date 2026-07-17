@@ -29,7 +29,6 @@ test.describe("Admin User Management Dashboard", () => {
     await page.route("**/api/v1/admin/users", async (route) => {
       await route.fulfill({
         status: 200,
-        // Using an array response to mock the backend
         json: [
           {
             id: 1,
@@ -37,7 +36,7 @@ test.describe("Admin User Management Dashboard", () => {
             role: "USER",
             trade_mode: "MOCK",
             is_running: true,
-            profit_rate: null, // Edge case that previously caused the crash!
+            profit_rate: null,
             strategy_type: "senior_simple",
             credentials: [],
           },
@@ -47,8 +46,18 @@ test.describe("Admin User Management Dashboard", () => {
             role: "USER",
             trade_mode: "REAL",
             is_running: false,
-            profit_rate: "12.34", // Edge case: string instead of number
+            profit_rate: "12.34",
             strategy_type: "turtle_trading",
+            credentials: [],
+          },
+          {
+            id: 3,
+            username: "obs_qqq_hold",
+            role: "USER",
+            trade_mode: "SIMULATED",
+            is_running: true,
+            profit_rate: 3.45,
+            strategy_type: "benchmark_qqq_hold",
             credentials: [],
           }
         ],
@@ -57,24 +66,20 @@ test.describe("Admin User Management Dashboard", () => {
   });
 
   test("should render the total user management screen without crashing", async ({ page }) => {
-    // Navigate directly to admin since /auth/refresh is now mocked
     await page.goto("/admin");
 
-    // Click the users management menu tab
     const userTab = page.locator('button', { hasText: '전체 사용자 관리' });
     await userTab.waitFor({ state: "visible" });
     await userTab.click();
 
-    // Verify the page actually renders the table and doesn't white-screen
-    // Wait for the "testuser" to appear in the table
     const tableRow = page.locator('td', { hasText: 'testuser' }).first();
     await expect(tableRow).toBeVisible();
 
-    // Verify that the profit rate edge cases rendered correctly instead of crashing
-    // For profit_rate: null, it should render "-"
     await expect(page.locator('td:has-text("-")').first()).toBeVisible();
-    
-    // For profit_rate: "12.34", it should correctly cast and render "12.34%"
     await expect(page.locator('td:has-text("12.34%")').first()).toBeVisible();
+
+    // Verify that the observation account (obs_qqq_hold) renders the "EXEMPT" badge
+    const exemptBadge = page.locator('tr:has-text("obs_qqq_hold")').locator('span:has-text("EXEMPT")');
+    await expect(exemptBadge).toBeVisible();
   });
 });
