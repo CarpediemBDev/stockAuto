@@ -18,7 +18,7 @@ interface Strategy {
 }
 
 export function StrategyCatalog() {
-  const { data: strategies, error } = useSWR<Strategy[]>('/strategy_catalog/strategies', fetcher);
+  const { data: strategies, error } = useSWR<Strategy[]>('/strategies/catalog', fetcher);
   const { data: adminSettings, mutate: mutateSettings } = useSWR('/admin/settings', fetcher);
   
   const [isUpdating, setIsUpdating] = useState(false);

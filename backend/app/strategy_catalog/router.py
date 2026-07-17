@@ -3,10 +3,11 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import Strategy
 from typing import List, Dict, Any
+from app.core.response import SuccessResponseRoute
 
-router = APIRouter()
+router = APIRouter(route_class=SuccessResponseRoute)
 
-@router.get("/strategies", summary="Get Selectable Strategy Catalog")
+@router.get("/catalog", summary="Get Selectable Strategy Catalog")
 async def get_strategies(
     db: Session = Depends(get_db)
 ):

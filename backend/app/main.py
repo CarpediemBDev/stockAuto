@@ -126,7 +126,7 @@ app.include_router(backtest_router, prefix="/api/v1/backtest", tags=["Backtest"]
 app.include_router(mcp_router, prefix="/api/v1/mcp", tags=["MCP Command Sourcing"])
 app.include_router(system_router, prefix="/api/v1/system", tags=["System Health"])
 app.include_router(sse_router, prefix="/api/v1/events", tags=["SSE Stream"])
-app.include_router(strategy_catalog_router, prefix="/api/v1/strategy_catalog", tags=["Strategy Catalog"])
+app.include_router(strategy_catalog_router, prefix="/api/v1/strategies", tags=["Strategy Catalog"])
 
 @app.get("/")
 def read_root():
