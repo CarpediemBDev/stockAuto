@@ -311,14 +311,11 @@ def _process_command(user_id: int, text: str):
             except Exception as e:
                 logger.exception(f"[TelegramBot User {user_id}] Account balance fetch failed. Using fallback snapshot.")
                 # 데이터베이스 내 가장 최신의 자산 스냅샷 정보를 조회하여 대체 제공
-                from app.core.models import AccountEquitySnapshot
+                from app.core.equity_repository import get_latest_equity_snapshot
                 snapshot_db = SessionLocal()
                 try:
                     # 현재 trade_mode의 스냅샷만 조회 (모드 전환 시 다른 모드 잔고가 섞이는 버그 방지)
-                    snapshot = snapshot_db.query(AccountEquitySnapshot).filter(
-                        AccountEquitySnapshot.user_id == user_id,
-                        AccountEquitySnapshot.trade_mode == mode,
-                    ).order_by(AccountEquitySnapshot.captured_at.desc()).first()
+                    snapshot = get_latest_equity_snapshot(snapshot_db, user_id, mode)
                 finally:
                     snapshot_db.close()
                 if snapshot:

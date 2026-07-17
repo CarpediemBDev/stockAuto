@@ -25,6 +25,10 @@ class FakeBroker:
 
 import asyncio
 import app.bot.scheduler as scheduler
+# record_equity_snapshot과 관찰계정 캐시(_OBSERVATION_USER_IDS)는 trades/equity_snapshot로
+# 격리됨. scheduler는 이를 re-export하지만, 스냅샷 함수 내부의 SessionLocal/캐시 조회는
+# equity_snapshot 모듈의 전역을 참조하므로 테스트 주입도 그 모듈을 함께 패치한다.
+import app.trades.equity_snapshot as equity_snapshot
 
 def test_admin_equity_curve_uses_persisted_balance_snapshots(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'admin_equity.db'}")
@@ -68,6 +72,7 @@ def test_admin_equity_curve_uses_persisted_balance_snapshots(tmp_path, monkeypat
             assert session_closed_before_broker is True
 
         monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+        monkeypatch.setattr(equity_snapshot, "SessionLocal", lambda: db)
         monkeypatch.setattr(
             scheduler,
             "get_broker_client",
@@ -220,6 +225,7 @@ def test_admin_equity_snapshot_retention_limit(tmp_path, monkeypatch):
         db.refresh(admin)
 
         monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+        monkeypatch.setattr(equity_snapshot, "SessionLocal", lambda: db)
         monkeypatch.setattr(
             scheduler,
             "utc_now_aware",
@@ -300,8 +306,9 @@ def test_observation_account_exempt_from_retention_prune(tmp_path, monkeypatch):
         db.refresh(obs)
 
         # 전역 캐시 무효화 (이전 테스트 영향 배제)
-        monkeypatch.setattr(scheduler, "_OBSERVATION_USER_IDS", {})
+        monkeypatch.setattr(equity_snapshot, "_OBSERVATION_USER_IDS", {})
         monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+        monkeypatch.setattr(equity_snapshot, "SessionLocal", lambda: db)
         monkeypatch.setattr(
             scheduler,
             "utc_now_aware",
@@ -382,8 +389,9 @@ def test_observation_account_exempt_from_retention_prune_case_insensitive(tmp_pa
 
         # 전역 캐시 무효화 및 주입
         test_cache = {}
-        monkeypatch.setattr(scheduler, "_OBSERVATION_USER_IDS", test_cache)
+        monkeypatch.setattr(equity_snapshot, "_OBSERVATION_USER_IDS", test_cache)
         monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+        monkeypatch.setattr(equity_snapshot, "SessionLocal", lambda: db)
         monkeypatch.setattr(
             scheduler,
             "utc_now_aware",
@@ -445,8 +453,9 @@ def test_observation_account_missing_user_defensive_guard(tmp_path, monkeypatch)
         )
         db.commit()
 
-        monkeypatch.setattr(scheduler, "_OBSERVATION_USER_IDS", {})
+        monkeypatch.setattr(equity_snapshot, "_OBSERVATION_USER_IDS", {})
         monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+        monkeypatch.setattr(equity_snapshot, "SessionLocal", lambda: db)
         
         # record_equity_snapshot 직접 호출하여 검증
         balance = {
