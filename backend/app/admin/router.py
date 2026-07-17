@@ -66,7 +66,8 @@ class VerifyCurrentSchema(BaseModel):
     broker_name: str
 
 EQUITY_SNAPSHOT_INTERVAL_SECONDS = 60
-EQUITY_SNAPSHOT_RETENTION_LIMIT = 500
+# 보존 상한 SSOT는 config.settings로 이관됨(record_equity_snapshot이 실제 집행). 하위 호환용 별칭.
+EQUITY_SNAPSHOT_RETENTION_LIMIT = app_settings.EQUITY_SNAPSHOT_RETENTION_LIMIT
 BACKTEST_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 BACKTEST_TICKER_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.-]{0,14}$")
 CREDENTIAL_KEY_ONLY_MODE = "KEY_ONLY"

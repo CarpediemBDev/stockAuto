@@ -286,6 +286,11 @@ export function UserManagement() {
                               ADMIN
                             </span>
                           )}
+                          {user.username.toLowerCase().startsWith('obs_') && (
+                            <span className="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded font-black">
+                              EXEMPT
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4">
