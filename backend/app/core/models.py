@@ -35,6 +35,12 @@ class Strategy(Base):
     name_en = Column(String, nullable=True)
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    
+    tier = Column(String, default="single") # gold, silver, bronze, sandbox, single
+    regime = Column(String, default="ALL") # ALL, BULLISH, BEARISH, NEUTRAL
+    summary_ko = Column(Text, nullable=True)
+    sort_order = Column(Integer, default=0)
+    is_selectable = Column(Boolean, default=True)
 
 class User(Base):
     __tablename__ = "users"

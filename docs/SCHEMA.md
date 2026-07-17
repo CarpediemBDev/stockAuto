@@ -22,6 +22,19 @@ erDiagram
         datetime created_at
     }
 
+    strategies {
+        string strategy_type PK
+        string name_ko
+        string name_en
+        string description
+        boolean is_active
+        string tier
+        string regime
+        string summary_ko
+        int sort_order
+        boolean is_selectable
+    }
+
     user_settings {
         int id PK
         int user_id FK
@@ -99,7 +112,20 @@ erDiagram
 * `hashed_password` (VARCHAR): Bcrypt 암호화 처리된 비밀번호 해시값
 * `created_at` (DATETIME): 가입 일시
 
-### ② `user_settings` (사용자별 통합 설정)
+### ② `strategies` (전략 카탈로그 메타데이터)
+사용자가 선택할 수 있는 자동매매 전략 목록과 속성을 관리합니다.
+* `strategy_type` (VARCHAR, PK, Index): 전략 고유 키 (예: `complex`, `senior_simple`)
+* `name_ko` (VARCHAR): 전략 한글 표시명
+* `name_en` (VARCHAR, Nullable): 전략 영문 표시명
+* `description` (TEXT, Nullable): 전략 상세 설명 (Markdown)
+* `is_active` (BOOLEAN, Default: True): 전략 사용 가능 여부 (전역 비활성화 스위치)
+* `tier` (VARCHAR, Default: 'single'): 전략 등급 (`gold`, `silver`, `bronze`, `sandbox`, `single`)
+* `regime` (VARCHAR, Default: 'ALL'): 활성 장세 (`ALL`, `BULLISH`, `BEARISH`, `NEUTRAL`)
+* `summary_ko` (TEXT, Nullable): UI 카드에 표시될 한 줄 요약
+* `sort_order` (INTEGER, Default: 0): 카탈로그 화면 정렬 순서
+* `is_selectable` (BOOLEAN, Default: True): 카탈로그 화면에 사용자 선택용으로 노출할지 여부 (슬롯형이나 내부용은 False)
+
+### ③ `user_settings` (사용자별 통합 설정)
 사용자 개인별 트레이딩 모드, 증권사 API Key, 텔레그램 연동 및 봇 기동 제어 스위치를 관리합니다.
 * `id` (INTEGER, PK): 기본 키
 * `user_id` (INTEGER, FK -> `users.id`, Unique): 사용자 외래 키 (1:1 관계, CASCADE 삭제)

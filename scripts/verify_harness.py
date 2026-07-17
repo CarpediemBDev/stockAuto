@@ -333,6 +333,7 @@ def check_release_risk_invariants(root: Path) -> bool:
         root / "scripts" / "check_process_invariants.py",
         root / "scripts" / "check_chaos_fuzzing.py",
         root / "scripts" / "auto_rollback_guard.py",
+        root / "scripts" / "check_strategy_consistency.py",
     )
 
 

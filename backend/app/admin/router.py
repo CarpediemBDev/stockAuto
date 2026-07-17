@@ -410,7 +410,11 @@ def update_user_settings(
         new_strategy_type = payload.strategy_type.strip()
         if new_strategy_type != db_settings.strategy_type:
             # 1. 유효 전략 검증
-            strategy_exists = db.query(Strategy).filter(Strategy.strategy_type == new_strategy_type).first()
+            strategy_exists = db.query(Strategy).filter(
+                Strategy.strategy_type == new_strategy_type,
+                Strategy.is_active == True,
+                Strategy.is_selectable == True
+            ).first()
             if not strategy_exists:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

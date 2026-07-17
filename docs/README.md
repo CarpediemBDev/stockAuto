@@ -52,6 +52,8 @@
 | [plans/backend_data_ai_strategy.md](plans/backend_data_ai_strategy.md) | 데이터·AI 전략 계획 |
 | [plans/cloud_infrastructure_architecture.md](plans/cloud_infrastructure_architecture.md) | 클라우드 인프라 아키텍처 |
 | [plans/design_guidelines.md](plans/design_guidelines.md) | 프론트 UX/UI 디자인 가이드라인 |
+| [plans/strategy_catalog_screen_and_subscription.md](plans/strategy_catalog_screen_and_subscription.md) | 전략 카탈로그 화면화·구독 티어 게이팅 설계안 |
+| [plans/strategy_catalog_antigravity_handoff.md](plans/strategy_catalog_antigravity_handoff.md) | 위 설계의 Antigravity 개발 실행 지시서(S0~S3, 구독 제외) |
 
 ## 🗂️ 진행 중 계획 문서 (Living Plan)
 

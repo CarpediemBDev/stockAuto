@@ -2,7 +2,7 @@
 
 import React, { useCallback } from "react";
 import { Wallet, TrendingUp, DollarSign, PieChart, ShieldAlert, Zap, Crown, Activity } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, krwToUsd } from "@/lib/utils";
 import useSWR from "swr";
 import { pollInterval } from "@/lib/sse";
 import { useFreshness } from "@/hooks/useFreshness";
@@ -52,9 +52,7 @@ export function AccountBalance({
     if (displayCurrency === "KRW") {
       return `${amount.toLocaleString()}원`;
     } else {
-      const usdAmount = balance.fx_rate && balance.fx_rate > 0 
-        ? amount / balance.fx_rate 
-        : amount / 1350;
+      const usdAmount = krwToUsd(amount, balance.fx_rate);
       return `$${usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
   }, [balance, displayCurrency]);
