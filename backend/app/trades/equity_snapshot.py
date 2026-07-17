@@ -10,6 +10,7 @@ from app.core.database import SessionLocal
 from app.core.models import AccountEquitySnapshot, User, utc_now_aware
 from app.core.config import settings
 from app.core.logging import logger
+from app.core.equity_repository import get_latest_equity_snapshot
 
 # 유저별 관찰계정(obs_ 프리픽스) 여부 캐시. record_equity_snapshot이 매 스냅샷마다
 # User 테이블을 재조회하지 않도록 하는 인메모리 메모이제이션(프로세스 수명 동안 유지).
@@ -34,15 +35,7 @@ def record_equity_snapshot(
     captured_at = utc_now_aware()
     snapshot_db = SessionLocal()
     try:
-        latest_snapshot = (
-            snapshot_db.query(AccountEquitySnapshot)
-            .filter(
-                AccountEquitySnapshot.user_id == user_id,
-                AccountEquitySnapshot.trade_mode == trade_mode,
-            )
-            .order_by(AccountEquitySnapshot.captured_at.desc())
-            .first()
-        )
+        latest_snapshot = get_latest_equity_snapshot(snapshot_db, user_id, trade_mode)
         # dedup 임계는 55초: 1분 벌크 잡(admin_balance_cache_sync)의 도착 시각이 59.x초로
         # 흔들리면 그 사이클이 통째로 skip되어 스냅샷 공백이 최대 2분으로 벌어지고,
         # 프론트 90초 stale 배지가 정상 상태에서 깜빡인다. 60초 정합 대신 5초 완충을 둔다.

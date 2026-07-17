@@ -14,6 +14,7 @@ from app.bot.order_reconciler import (
 from app.bot.trade_calculations import calculate_realized_pnl, fee_rate_for_trade_mode
 import app.bot.scheduler as scheduler_mod
 from app.trades.equity_snapshot import record_equity_snapshot
+from app.core.equity_repository import get_latest_equity_snapshot
 from fastapi.concurrency import run_in_threadpool
 from app.core.dependencies import get_current_user
 from app.core.models import User, Holding, TradeLog, ActionLog
@@ -59,20 +60,12 @@ async def get_balance(
     from app.scanner.scanner import get_cached_market_sentiment
     from app.bot.multi_strategy_manager import MultiStrategyManager
     import app.bot.scheduler as scheduler_mod
-    from app.core.models import AccountEquitySnapshot, MarketOverviewSnapshot, utc_now_aware
+    from app.core.models import MarketOverviewSnapshot, utc_now_aware
 
     settings_row = current_user.settings
     trade_mode = ((settings_row.trade_mode if settings_row else None) or "SIMULATED").upper()
 
-    snapshot = (
-        db.query(AccountEquitySnapshot)
-        .filter(
-            AccountEquitySnapshot.user_id == current_user.id,
-            AccountEquitySnapshot.trade_mode == trade_mode,
-        )
-        .order_by(AccountEquitySnapshot.captured_at.desc())
-        .first()
-    )
+    snapshot = get_latest_equity_snapshot(db, current_user.id, trade_mode)
 
     if snapshot is not None:
         balance = {
