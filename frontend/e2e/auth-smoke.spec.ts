@@ -132,6 +132,8 @@ test("HttpOnly refresh cookie survives different local ports and reload", async 
       exchange_rate: null,
     }),
   );
+  await page.route("**/api/v1/strategies/catalog", (route) => fulfillSuccess(route, []));
+  await page.route("**/api/v1/admin", (route) => fulfillProtected(route, { strategy_type: "regime_switching" }));
 
   await page.route("**/api/v1/auth/login", async (route) => {
     await route.fulfill({

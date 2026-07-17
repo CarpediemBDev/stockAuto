@@ -18,8 +18,8 @@ interface Strategy {
 }
 
 export function StrategyCatalog() {
-  const { data: strategies, error } = useSWR<Strategy[]>('/strategies/catalog', fetcher);
-  const { data: adminSettings, mutate: mutateSettings } = useSWR('/admin', fetcher);
+  const { data: strategies, error: strategiesError } = useSWR<Strategy[]>('/strategies/catalog', fetcher);
+  const { data: adminSettings, error: adminError, mutate: mutateSettings } = useSWR('/admin', fetcher);
   
   const [isUpdating, setIsUpdating] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -27,14 +27,19 @@ export function StrategyCatalog() {
   const currentStrategy = adminSettings?.strategy_type || "regime_switching";
 
   const handleSelectStrategy = async (strategyId: string) => {
+    if (!adminSettings) return;
+    if (isUpdating) return;
     if (strategyId === currentStrategy) return;
     
     setIsUpdating(true);
     setSelectedId(strategyId);
     
     try {
-      await adminAPI.saveSettings({ strategy_type: strategyId });
-      
+      await adminAPI.saveSettings({ 
+        ...adminSettings,
+        trade_mode: adminSettings.trade_mode ?? "SIMULATED",
+        strategy_type: strategyId 
+      });
       await mutateSettings();
     } catch (err) {
       console.error(err);
@@ -45,11 +50,11 @@ export function StrategyCatalog() {
     }
   };
 
-  if (error) {
-    return <div className="p-4 bg-red-950/20 text-red-400 rounded-xl border border-red-900/30">전략 카탈로그를 불러올 수 없습니다.</div>;
+  if (strategiesError || adminError) {
+    return <div className="p-4 bg-red-950/20 text-red-400 rounded-xl border border-red-900/30">설정 데이터를 불러올 수 없습니다.</div>;
   }
 
-  if (!strategies) {
+  if (!strategies || !adminSettings) {
     return (
       <div className="flex items-center justify-center p-12 bg-zinc-900/20 rounded-2xl border border-zinc-800">
         <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
