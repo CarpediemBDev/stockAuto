@@ -12,6 +12,8 @@ from app.bot.order_reconciler import (
     has_unresolved_orders,
 )
 from app.bot.trade_calculations import calculate_realized_pnl, fee_rate_for_trade_mode
+import app.bot.scheduler as scheduler_mod
+from app.trades.equity_snapshot import record_equity_snapshot
 from fastapi.concurrency import run_in_threadpool
 from app.core.dependencies import get_current_user
 from app.core.models import User, Holding, TradeLog, ActionLog
@@ -93,7 +95,7 @@ async def get_balance(
         balance["captured_at"] = utc_now_aware().isoformat()
         try:
             await run_in_threadpool(
-                scheduler_mod.record_equity_snapshot,
+                record_equity_snapshot,
                 current_user.id, trade_mode, balance, None, True,
             )
         except Exception as persist_error:
@@ -261,10 +263,9 @@ def reset_balance(
 
         # 초기화 직후 대시보드에 낡은 스냅샷이 보이지 않도록 즉시 재계산·영속화 (dedup 우회)
         try:
-            import app.bot.scheduler as scheduler_mod
             fresh_balance = get_broker_client(settings).get_account_balance()
             if isinstance(fresh_balance, dict):
-                scheduler_mod.record_equity_snapshot(current_user.id, "SIMULATED", fresh_balance, None, True)
+                record_equity_snapshot(current_user.id, "SIMULATED", fresh_balance, None, True)
         except Exception as snapshot_error:
             print(f"[Reset Balance] Snapshot refresh failed: {snapshot_error}")
 
@@ -491,11 +492,10 @@ async def force_liquidate(
 
         # 청산 직후 대시보드에 낡은 잔고가 보이지 않도록 스냅샷 즉시 갱신 (dedup 우회)
         try:
-            import app.bot.scheduler as scheduler_mod
             fresh_balance = await run_in_threadpool(broker.get_account_balance)
             if isinstance(fresh_balance, dict):
                 await run_in_threadpool(
-                    scheduler_mod.record_equity_snapshot,
+                    record_equity_snapshot,
                     current_user.id, trade_mode, fresh_balance, None, True,
                 )
         except Exception as snapshot_error:
