@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Literal, Optional
@@ -5,6 +7,19 @@ from datetime import datetime
 from app.core.dependencies import get_current_user
 from app.core.models import User
 from app.bot.backtest_engine import BacktestSimulator
+
+
+def _execute_backtest_blocking(sim: BacktestSimulator) -> Optional[dict]:
+    """데이터 준비와 시뮬레이션 전체를 워커 스레드 안에서 수행합니다.
+
+    prepare_data(비동기 다운로드)와 run(동기 CPU 연산) 모두 pandas 중연산을 포함하므로
+    메인 이벤트 루프에서 실행하면 실행 시간 동안 전체 API가 무응답이 된다.
+    워커 스레드 전용 이벤트 루프(asyncio.run)에서 격리 실행하는 이 구조를 유지할 것.
+    """
+    asyncio.run(sim.prepare_data())
+    if not sim.tickers_data:
+        return None
+    return sim.run()
 
 from app.core.response import SuccessResponseRoute
 router = APIRouter(route_class=SuccessResponseRoute)
@@ -38,16 +53,14 @@ async def run_backtest(
             initial_cash=req.initial_cash
         )
         
-        await sim.prepare_data()
-        
-        if not sim.tickers_data:
+        report = await asyncio.to_thread(_execute_backtest_blocking, sim)
+
+        if report is None:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail="지정된 기간 내에 데이터가 존재하는 종목이 없습니다."
             )
-            
-        report = sim.run()
-        
+
         if "error" in report:
             raise HTTPException(status_code=500, detail=report["error"])
             

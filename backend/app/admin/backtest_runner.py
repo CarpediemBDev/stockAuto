@@ -482,11 +482,18 @@ def check_tournament_cache(start_date: str, end_date: str, tickers_list: List[st
             logger.warning(f"Cache loading failed, falling back to live calc: {e}")
     return None
 
-async def run_dynamic_tournament_task(start_date: str, end_date: str, tickers_list: List[str], lock_path: Path):
+def run_dynamic_tournament_task(start_date: str, end_date: str, tickers_list: List[str], lock_path: Path):
+    """의도적으로 동기 함수로 유지할 것 (async 금지).
+
+    Starlette BackgroundTask는 동기 함수를 스레드풀에서 실행하지만, 코루틴 함수는
+    메인 이벤트 루프에서 그대로 await한다. 토너먼트는 수 시간짜리 pandas 중연산이라
+    async로 되돌리면 실행 내내 전체 API가 무응답이 된다(2026-07-16 QA 결함 1 재발).
+    내부 코루틴은 이 워커 스레드 전용 루프(asyncio.run)에서 격리 실행한다.
+    """
     try:
         # Create lock
         lock_path.touch(exist_ok=True)
-        results = await _run_dynamic_tournament_internal(start_date, end_date, tickers_list)
+        results = asyncio.run(_run_dynamic_tournament_internal(start_date, end_date, tickers_list))
         return results
     except Exception as e:
         logger.error(f"Error in background tournament: {e}", exc_info=True)
