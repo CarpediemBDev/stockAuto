@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.bot import kis_api
+from app.brokers import kis_api
 from app.brokers.kis_api import KISClient
 
 
