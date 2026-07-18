@@ -4,8 +4,8 @@ import json
 import pandas as pd
 from pathlib import Path
 from typing import List, Dict, Any
-from app.bot.backtest_engine import BacktestSimulator
-from app.bot.backtest_metrics import (
+from app.backtests.backtest_engine import BacktestSimulator
+from app.backtests.backtest_metrics import (
     assess_strategy_report,
     calculate_performance_metrics,
 )

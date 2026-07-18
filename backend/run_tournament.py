@@ -22,8 +22,8 @@ import pandas as pd
 from datetime import datetime
 import argparse
 from concurrent.futures import ProcessPoolExecutor
-from app.bot.backtest_engine import BacktestSimulator
-from app.bot.backtest_metrics import assess_strategy_report
+from app.backtests.backtest_engine import BacktestSimulator
+from app.backtests.backtest_metrics import assess_strategy_report
 from app.translations.translator import Translator
 
 

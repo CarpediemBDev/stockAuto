@@ -6,7 +6,7 @@ from typing import List, Literal, Optional
 from datetime import datetime
 from app.core.dependencies import get_current_user
 from app.core.models import User
-from app.bot.backtest_engine import BacktestSimulator
+from app.backtests.backtest_engine import BacktestSimulator
 
 
 def _execute_backtest_blocking(sim: BacktestSimulator) -> Optional[dict]:

@@ -9,7 +9,7 @@ from app.scanner.indicators import (
     calculate_double_bb_reversion_signals, calculate_connors_rsi
 )
 from app.core.logging import logger
-from app.bot.backtest_metrics import calculate_performance_metrics
+from app.backtests.backtest_metrics import calculate_performance_metrics
 from app.bot.trade_calculations import calculate_buy_total, calculate_realized_pnl
 
 from app.core.config import settings

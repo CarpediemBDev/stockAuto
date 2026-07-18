@@ -111,7 +111,7 @@ def test_tournament_background_task_stays_sync():
 
 def test_run_backtest_offloads_simulation_to_worker_thread():
     """AST 가드: run_backtest 핸들러가 sim.run/prepare_data를 직접 호출하면 실패한다."""
-    import app.bot.router_backtest as router_backtest
+    import app.backtests.router_backtest as router_backtest
 
     tree = ast.parse(Path(router_backtest.__file__).read_text(encoding="utf-8"))
     handler = next(

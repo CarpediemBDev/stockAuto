@@ -4,8 +4,8 @@ import json
 from datetime import date
 from pathlib import Path
 
-from app.bot.backtest_engine import BacktestSimulator
-from app.bot.walk_forward import WalkForwardConfig, run_walk_forward_evaluation
+from app.backtests.backtest_engine import BacktestSimulator
+from app.backtests.walk_forward import WalkForwardConfig, run_walk_forward_evaluation
 from run_tournament import TOURNAMENT_STRATEGIES
 
 
