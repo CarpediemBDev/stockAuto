@@ -307,7 +307,7 @@ async def force_liquidate(
 
         from app.bot.market_session import MarketSession
         if is_kis_order:
-            from app.bot.scheduler import get_market_session
+            from app.bot.market_session import get_market_session
 
             market_session = get_market_session()
             if market_session == MarketSession.CLOSED:
