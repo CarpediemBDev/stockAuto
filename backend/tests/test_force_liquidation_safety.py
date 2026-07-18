@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-import app.bot.scheduler as scheduler
+import app.bot.market_session as market_session
 import app.trades.router_account as account_router
 from app.core.database import Base
 from app.core.models import BrokerOrder, Holding, User, UserSettings, BrokerCredential
@@ -62,7 +62,7 @@ def test_kis_force_liquidation_keeps_holdings_and_bot_preference_when_ack_is_unk
         lambda _settings: UnknownAckBroker(),
     )
     monkeypatch.setattr(account_router, "fetch_ohlcv", fail_price_lookup)
-    monkeypatch.setattr(scheduler, "get_market_session", lambda: "REGULAR_MARKET")
+    monkeypatch.setattr(market_session, "get_market_session", lambda: "REGULAR_MARKET")
 
     response = asyncio.run(account_router.force_liquidate(current_user=user, db=db))
 
