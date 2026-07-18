@@ -2,10 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import app.bot.kis_api as kis_api_module
-import app.bot.toss_api as toss_api_module
-from app.bot.kis_api import KISClient
-from app.bot.toss_api import TossClient
+import app.brokers.kis_api as kis_api_module
+import app.brokers.toss_api as toss_api_module
+from app.brokers.kis_api import KISClient
+from app.brokers.toss_api import TossClient
 from app.core.exceptions import StockAutoException
 
 

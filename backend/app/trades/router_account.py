@@ -4,7 +4,7 @@ from app.scanner.data_provider import fetch_ohlcv
 from uuid import uuid4
 
 from app.core.database import get_db
-from app.bot.broker_factory import get_broker_client
+from app.brokers.broker_factory import get_broker_client
 from app.bot.order_reconciler import (
     begin_order_submission,
     create_order_intent,

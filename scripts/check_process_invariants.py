@@ -186,7 +186,7 @@ def check_source_process_boundaries(root: Path, errors: list[str]) -> None:
         require_order_intents_after_symbol_locks(scheduler_text, errors)
         require_user_lock_before_session(scheduler_text, errors)
 
-    broker_factory_text = require_file(root, "backend/app/bot/broker_factory.py", errors)
+    broker_factory_text = require_file(root, "backend/app/brokers/broker_factory.py", errors)
     if broker_factory_text:
         require_markers(
             broker_factory_text,

@@ -8,8 +8,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-import app.bot.simulated_broker as simulated_broker
-from app.bot.simulated_broker import LocalSimulatedBroker
+import app.brokers.simulated_broker as simulated_broker
+from app.brokers.simulated_broker import LocalSimulatedBroker
 from app.core.database import Base
 from app.core.models import Holding, UnfilledOrder, User
 import app.scanner.data_provider as data_provider

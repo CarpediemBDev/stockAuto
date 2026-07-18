@@ -1,5 +1,5 @@
-from app.bot.base_broker import BaseBroker
-from app.bot.kis_api import KISClient
+from app.brokers.base_broker import BaseBroker
+from app.brokers.kis_api import KISClient
 from app.core.logging import logger
 import time
 

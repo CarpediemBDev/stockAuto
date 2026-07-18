@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 import pytest
 import requests
-from app.bot.toss_api import TossClient
-from app.bot.toss_broker import TossBroker
+from app.brokers.toss_api import TossClient
+from app.brokers.toss_broker import TossBroker
 from app.core.exceptions import StockAutoException
 
 class MockDbCredential:
@@ -14,7 +14,7 @@ class MockDbCredential:
 
 @pytest.fixture
 def mock_decrypt(mocker):
-    return mocker.patch("app.bot.toss_api.decrypt_credential", side_effect=lambda x: x)
+    return mocker.patch("app.brokers.toss_api.decrypt_credential", side_effect=lambda x: x)
 
 def test_toss_client_initialization_no_credential():
     with pytest.raises(StockAutoException) as excinfo:

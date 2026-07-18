@@ -1,6 +1,6 @@
 import pytest
 import requests
-from app.bot.toss_api import TossClient
+from app.brokers.toss_api import TossClient
 from app.core.exceptions import StockAutoException
 
 def test_toss_api_timeout_raises_stockauto_exception(mocker):
@@ -9,7 +9,7 @@ def test_toss_api_timeout_raises_stockauto_exception(mocker):
     토스증권 등 외부 API 호출 시 응답이 오랫동안 지연(Timeout)될 경우,
     시스템이 멈추지 않고 적절한 StockAutoException으로 감싸서 예외를 던지는지 검증합니다.
     """
-    mocker.patch("app.bot.toss_api.decrypt_credential", return_value="dummy")
+    mocker.patch("app.brokers.toss_api.decrypt_credential", return_value="dummy")
     db_cred = mocker.Mock(user_id=1, app_key="k", app_secret="s", account_no="n")
     api = TossClient(db_credential=db_cred, trade_mode="REAL")
     
@@ -32,7 +32,7 @@ def test_toss_api_503_service_unavailable(mocker):
     외부 API 서버가 점검 중이거나 다운되어 HTTP 503(Service Unavailable) 에러를 반환할 때,
     잘못된 JSON 파싱 등으로 크래시나지 않고 StockAutoException을 통해 안전하게 처리되는지 검증합니다.
     """
-    mocker.patch("app.bot.toss_api.decrypt_credential", return_value="dummy")
+    mocker.patch("app.brokers.toss_api.decrypt_credential", return_value="dummy")
     db_cred = mocker.Mock(user_id=1, app_key="k", app_secret="s", account_no="n")
     api = TossClient(db_credential=db_cred, trade_mode="REAL")
     

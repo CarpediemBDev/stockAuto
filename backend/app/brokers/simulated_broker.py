@@ -3,7 +3,7 @@ from sqlalchemy import func
 from app.scanner.data_provider import fetch_bulk_ohlcv_sync, fetch_ohlcv_sync
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
-from app.bot.base_broker import BaseBroker
+from app.brokers.base_broker import BaseBroker
 from app.core.database import SessionLocal
 from app.core.models import Holding, TradeLog, UnfilledOrder
 from app.core.config import settings
