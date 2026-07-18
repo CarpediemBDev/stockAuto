@@ -1,4 +1,4 @@
-from app.bot.backtest_metrics import (
+from app.backtests.backtest_metrics import (
     assess_strategy_report,
     calculate_performance_metrics,
 )

@@ -2,7 +2,7 @@ import pytest
 import pandas as pd
 from datetime import datetime
 from unittest.mock import MagicMock
-from app.bot.backtest_engine import BacktestSimulator
+from app.backtests.backtest_engine import BacktestSimulator
 
 def test_backtest_simulator_variants_initialization():
     # 1. BASE 변형 초기화 검증

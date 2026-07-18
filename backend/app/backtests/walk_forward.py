@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from statistics import mean, median
 from typing import Any, Awaitable, Callable, Iterable
 
-from app.bot.backtest_metrics import assess_strategy_report
+from app.backtests.backtest_metrics import assess_strategy_report
 
 
 SimulationRunner = Callable[

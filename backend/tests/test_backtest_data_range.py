@@ -2,7 +2,7 @@ import asyncio
 
 import pandas as pd
 
-from app.bot.backtest_engine import BacktestSimulator
+from app.backtests.backtest_engine import BacktestSimulator
 from app.scanner import data_provider
 from app.scanner.indicators import calculate_vwap
 

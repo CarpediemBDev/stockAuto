@@ -3,7 +3,7 @@ import asyncio
 import os
 import pandas as pd
 from datetime import datetime
-from app.bot.backtest_engine import BacktestSimulator
+from app.backtests.backtest_engine import BacktestSimulator
 
 # UTF-8 출력 보장 (한글 깨짐 방지)
 import sys

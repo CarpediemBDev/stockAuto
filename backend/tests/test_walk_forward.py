@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 
-from app.bot.walk_forward import (
+from app.backtests.walk_forward import (
     WalkForwardConfig,
     build_walk_forward_windows,
     run_walk_forward_evaluation,

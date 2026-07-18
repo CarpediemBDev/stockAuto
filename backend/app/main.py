@@ -23,7 +23,7 @@ from app.trades.router_market import router as market_router
 from app.translations.router import router as translations_router
 from app.admin.router import router as admin_router
 from app.report.router import router as report_router
-from app.bot.router_backtest import router as backtest_router
+from app.backtests.router_backtest import router as backtest_router
 from app.mcp.router import router as mcp_router
 from app.system.router import router as system_router
 from app.sse.router import router as sse_router
