@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.admin.router as admin_router
-import app.bot.broker_factory as broker_factory
+import app.brokers.broker_factory as broker_factory
 from app.core.database import Base
 from app.core.models import AccountEquitySnapshot, Strategy, User, UserSettings
 

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.bot.kis_broker import KISBroker
+from app.brokers.kis_broker import KISBroker
 
 
 class FakeClient:

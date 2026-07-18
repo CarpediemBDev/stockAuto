@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.bot.order_reconciler as reconciler
-from app.bot.simulated_broker import LocalSimulatedBroker
+from app.brokers.simulated_broker import LocalSimulatedBroker
 from app.core.database import Base
 from app.core.models import BrokerOrder, Holding, User, UserSettings
 
@@ -48,11 +48,11 @@ def test_partial_buy_balance_uses_only_applied_fill_delta(
     db, db_settings = create_user_settings(session_factory)
 
     monkeypatch.setattr(
-        "app.bot.simulated_broker.settings.SIMULATED_INITIAL_CASH_KRW",
+        "app.brokers.simulated_broker.settings.SIMULATED_INITIAL_CASH_KRW",
         14_000_000.0,
     )
     monkeypatch.setattr(
-        "app.bot.simulated_broker.settings.SIMULATED_INITIAL_FX_RATE",
+        "app.brokers.simulated_broker.settings.SIMULATED_INITIAL_FX_RATE",
         1_400.0,
     )
     monkeypatch.setattr(
@@ -61,7 +61,7 @@ def test_partial_buy_balance_uses_only_applied_fill_delta(
     )
     monkeypatch.setattr("app.bot.scheduler.latest_watchlist_signals", {})
     monkeypatch.setattr(
-        "app.bot.simulated_broker.SessionLocal",
+        "app.brokers.simulated_broker.SessionLocal",
         session_factory,
     )
 

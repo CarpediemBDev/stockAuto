@@ -4,7 +4,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
-from app.bot.broker_factory import get_broker_client
+from app.brokers.broker_factory import get_broker_client
 from decimal import Decimal, ROUND_HALF_UP
 from app.bot.trade_calculations import (
     calculate_realized_pnl,

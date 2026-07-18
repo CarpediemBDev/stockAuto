@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.bot.broker_factory import (
+from app.brokers.broker_factory import (
     BROKER_REGISTRY,
     ensure_broker_supports_trade_mode,
     get_broker_catalog,

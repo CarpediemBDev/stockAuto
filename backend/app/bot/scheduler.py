@@ -1,5 +1,5 @@
 from apscheduler.schedulers.background import BackgroundScheduler
-from app.bot.broker_factory import get_broker_client
+from app.brokers.broker_factory import get_broker_client
 from app.core.database import SessionLocal
 from sqlalchemy.orm import selectinload
 from app.watchlist.services import load_watchlist_tickers_by_user, load_all_watchlist_tickers_by_user
@@ -1938,7 +1938,7 @@ async def async_trading_loop():
         for u in active_users:
             trade_mode = getattr(u, "trade_mode", "SIMULATED") or "SIMULATED"
             if trade_mode.upper() == "SIMULATED":
-                from app.bot.simulated_broker import LocalSimulatedBroker
+                from app.brokers.simulated_broker import LocalSimulatedBroker
                 sim_broker = LocalSimulatedBroker(db_settings=u)
                 sim_broker.process_unfilled_orders(db)
 

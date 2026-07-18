@@ -3,7 +3,7 @@ import threading
 import httpx
 from concurrent.futures import ThreadPoolExecutor
 from app.core.config import settings
-from app.bot.broker_factory import get_broker_client
+from app.brokers.broker_factory import get_broker_client
 from app.core.database import SessionLocal
 from app.core.models import UserSettings, Holding
 from app.bot.fx_cache import FXRateCache

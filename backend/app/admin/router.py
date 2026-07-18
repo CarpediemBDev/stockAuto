@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.bot.broker_factory import (
+from app.brokers.broker_factory import (
     create_broker_verification_client,
     ensure_broker_supports_trade_mode,
     get_broker_catalog,

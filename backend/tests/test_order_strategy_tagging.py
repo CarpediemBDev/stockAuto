@@ -17,8 +17,8 @@ import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-import app.bot.simulated_broker as simulated_broker_module
-from app.bot.simulated_broker import LocalSimulatedBroker
+import app.brokers.simulated_broker as simulated_broker_module
+from app.brokers.simulated_broker import LocalSimulatedBroker
 from app.core.database import Base
 from app.core.models import Holding, TradeLog, UnfilledOrder, User
 
