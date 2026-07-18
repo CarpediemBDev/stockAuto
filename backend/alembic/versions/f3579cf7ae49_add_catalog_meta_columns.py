@@ -80,8 +80,8 @@ def upgrade() -> None:
     # phoenix_bounce
     op.execute("UPDATE strategies SET regime='BEARISH', sort_order=210, summary_ko='주도주 기습낙주반등. 12개월 상대강도가 강한 대장주가 단기 악재로 15분봉 RSI 20 이하의 과매도에 진입 시, 양봉 출현과 함께 OBV가 반등할 때 기습 진입' WHERE strategy_type='phoenix_bounce'")
 
-    # Hide slot strategies (only core_satellite, not the multi_slots)
-    op.execute("UPDATE strategies SET is_selectable=0 WHERE strategy_type IN ('core_satellite')")
+    # Hide slot strategies
+    op.execute("UPDATE strategies SET is_selectable=0 WHERE strategy_type IN ('multi_slot', 'multi_slot_3', 'three_slot', 'core_satellite')")
     # ### end Alembic commands ###
 
 
