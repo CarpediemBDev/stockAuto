@@ -425,5 +425,28 @@ def get_me(current_user: User = Depends(get_current_user)) -> dict:
         "role": current_user.role,
         "trade_mode": current_user.settings.trade_mode if current_user.settings else "SIMULATED",
         "broker_provider": current_user.settings.broker_provider if current_user.settings else None,
-        "telegram_enabled": current_user.settings.telegram_enabled if current_user.settings else False
+        "telegram_enabled": current_user.settings.telegram_enabled if current_user.settings else False,
+        "language": current_user.settings.language if current_user.settings else "ko"
     }
+
+class LanguageUpdateSchema(BaseModel):
+    language: str
+
+@router.put("/me/language")
+def update_my_language(
+    payload: LanguageUpdateSchema,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    현재 로그인된 사용자의 다국어 설정을 변경합니다.
+    """
+    if current_user.settings:
+        current_user.settings.language = payload.language
+    else:
+        from app.core.models import UserSettings
+        new_settings = UserSettings(user_id=current_user.id, language=payload.language)
+        db.add(new_settings)
+    
+    db.commit()
+    return {"success": True, "language": payload.language}

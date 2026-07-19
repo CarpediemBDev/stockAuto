@@ -197,13 +197,21 @@ def discover_orphan_orders_once(session_factory=SessionLocal) -> int:
                     f"applied={application.applied_qty}."
                 ),
             ))
-            notifications.append((
-                order.user_id,
-                f"*Orphan Order Recovered*\n"
-                f"Side: `{order.side}`\nTicker: `{order.ticker}`\n"
-                f"Order No: `{order.broker_order_no}`\nStatus: `{order.status}`\n"
-                "Bot preference unchanged.",
-            ))
+            from app.core.i18n import I18n
+            
+            # TODO: Get user's preferred language from DB, for now default to 'ko'
+            user_lang = "ko"
+            
+            msg = I18n.get_msg(
+                user_lang, 
+                "telegram.orphan_order_recovered", 
+                side=order.side, 
+                ticker=order.ticker, 
+                broker_order_no=order.broker_order_no, 
+                status=order.status
+            )
+            
+            notifications.append((order.user_id, msg))
 
         db.commit()
     except Exception:

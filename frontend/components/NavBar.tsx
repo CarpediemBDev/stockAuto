@@ -26,13 +26,25 @@ export function NavBar() {
   const [isTogglingBot, setIsTogglingBot] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isTimezoneMenuOpen, setIsTimezoneMenuOpen] = useState(false);
+  const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
   const { accessToken, username, role, clearAuth } = useAuthStore();
   const { selectedTimezone, timezoneOptions, setTimezone } = useTimezone();
+  const [currentLang, setCurrentLang] = useState("ko"); // 기본 언어
 
   const userMenuRef = useRef<HTMLDivElement>(null);
   const timezoneMenuRef = useRef<HTMLDivElement>(null);
+  const langMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // 초기 로드 시 쿠키에서 언어 읽기
+    const match = document.cookie.match(new RegExp('(^| )NEXT_LOCALE=([^;]+)'));
+    if (match) {
+      setCurrentLang(match[2]);
+    } else {
+      // 쿠키가 없다면 브라우저 언어로 fallback 렌더링 동기화
+      setCurrentLang(navigator.language.toLowerCase().includes('ko') ? 'ko' : 'en');
+    }
+
     const handleClickOutside = (event: MouseEvent) => {
       if (isUserMenuOpen && userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
         setIsUserMenuOpen(false);
@@ -40,11 +52,14 @@ export function NavBar() {
       if (isTimezoneMenuOpen && timezoneMenuRef.current && !timezoneMenuRef.current.contains(event.target as Node)) {
         setIsTimezoneMenuOpen(false);
       }
+      if (isLangMenuOpen && langMenuRef.current && !langMenuRef.current.contains(event.target as Node)) {
+        setIsLangMenuOpen(false);
+      }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isUserMenuOpen, isTimezoneMenuOpen]);
+  }, [isUserMenuOpen, isTimezoneMenuOpen, isLangMenuOpen]);
 
   const { data: statusData, mutate } = useSWR(
     accessToken ? '/bot/status' : null,
@@ -72,7 +87,30 @@ export function NavBar() {
     } finally {
       setIsTogglingBot(false);
     }
+  };
 
+  const handleLanguageChange = async (lang: string) => {
+    try {
+      // 1. 쿠키 설정 (1년)
+      document.cookie = `NEXT_LOCALE=${lang}; path=/; max-age=31536000`;
+      setCurrentLang(lang);
+      
+      // 2. 백엔드 DB 연동 (실패해도 화면 언어는 바뀌도록 await 하지 않고 백그라운드 처리 권장, 하지만 안전하게 await 처리)
+      await fetcher('/auth/me/language', {
+        method: 'PUT',
+        body: JSON.stringify({ language: lang })
+      });
+      
+      // 3. 화면 새로고침 (Next.js App Router가 새 언어 JSON을 불러오도록 강제)
+      router.refresh();
+      setIsLangMenuOpen(false);
+      toast.success(lang === 'ko' ? "한국어로 변경되었습니다." : "Language changed to English.");
+    } catch (e) {
+      console.error(e);
+      // DB 연동 실패해도 쿠키는 바뀜
+      router.refresh();
+      setIsLangMenuOpen(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -148,15 +186,61 @@ export function NavBar() {
                 })}
               </div>
 
-              {/* 사용자 계정 프로필 및 타임존 드롭다운 */}
+              {/* 사용자 계정 프로필 및 타임존/언어 드롭다운 */}
               {username && (
                 <div className="flex items-center space-x-2 md:space-x-4 border-l border-zinc-800 pl-2 md:pl-6">
+                  {/* 언어 스위처 */}
+                  <div ref={langMenuRef} className="relative flex items-center">
+                    <button
+                      onClick={() => {
+                        setIsLangMenuOpen(!isLangMenuOpen);
+                        setIsUserMenuOpen(false);
+                        setIsTimezoneMenuOpen(false);
+                      }}
+                      className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-zinc-800/50 text-zinc-400 hover:text-white transition-colors duration-200 text-xs font-bold uppercase"
+                      title="언어 변경"
+                    >
+                      {currentLang}
+                    </button>
+                    
+                    {isLangMenuOpen && (
+                      <div className="absolute right-0 top-10 mt-2 w-32 rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 shadow-2xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                        <div className="px-3 pb-2 border-b border-zinc-800/60 mb-1">
+                          <p className="text-[11px] text-zinc-500 font-bold uppercase tracking-wider">Language</p>
+                        </div>
+                        <div className="px-1.5 space-y-0.5">
+                          {[
+                            { id: 'ko', label: '한국어 (KR)' },
+                            { id: 'en', label: 'English (US)' }
+                          ].map((lang) => (
+                            <button
+                              key={lang.id}
+                              onClick={() => handleLanguageChange(lang.id)}
+                              className={cn(
+                                "w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-200",
+                                currentLang === lang.id 
+                                  ? "bg-indigo-500/20 text-indigo-400" 
+                                  : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                              )}
+                            >
+                              <span>{lang.label}</span>
+                              {currentLang === lang.id && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]"></span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {/* 타임존 스위처 */}
                   <div ref={timezoneMenuRef} className="relative flex items-center">
                     <button
                       onClick={() => {
                         setIsTimezoneMenuOpen(!isTimezoneMenuOpen);
                         setIsUserMenuOpen(false);
+                        setIsLangMenuOpen(false);
                       }}
                       className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-zinc-800/50 text-zinc-400 hover:text-white transition-colors duration-200"
                       title="타임존 변경"
@@ -203,6 +287,7 @@ export function NavBar() {
                       onClick={() => {
                         setIsUserMenuOpen(!isUserMenuOpen);
                         setIsTimezoneMenuOpen(false);
+                        setIsLangMenuOpen(false);
                       }}
                       className="flex items-center space-x-2.5 px-3.5 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 hover:bg-zinc-900/50 text-white font-semibold text-xs tracking-tight transition-all duration-200 active:scale-[0.98] cursor-pointer"
                     >
