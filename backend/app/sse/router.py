@@ -15,6 +15,8 @@ import json
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.core import sse
 from app.core.database import SessionLocal
@@ -85,8 +87,9 @@ async def stream_events(
 
     async def event_generator():
         pubsub = sse.get_async_redis().pubsub()
-        await pubsub.subscribe(*channels)
         try:
+            # subscribe도 try 안에서 수행해 실패 시에도 finally의 aclose가 커넥션을 회수한다.
+            await pubsub.subscribe(*channels)
             # connected: 서버 시각을 동봉해 클라이언트가 clock-skew 오프셋을 1회 산출하게 한다.
             # (낡음 배지가 now(클라)-captured_at(서버)을 계산할 때 시계 차이를 보정하기 위함)
             yield _sse_frame(
@@ -96,10 +99,16 @@ async def stream_events(
             while True:
                 if await request.is_disconnected():
                     break
-                message = await pubsub.get_message(
-                    ignore_subscribe_messages=True,
-                    timeout=PING_INTERVAL_SEC,
-                )
+                try:
+                    message = await pubsub.get_message(
+                        ignore_subscribe_messages=True,
+                        timeout=PING_INTERVAL_SEC,
+                    )
+                except (RedisConnectionError, RedisTimeoutError):
+                    # Redis 순단 시 스트림을 조용히 닫는다. 프론트 fetch 클라이언트는
+                    # 스트림 종료를 감지해 지터 백오프로 재연결하므로 예외 전파가 불필요하다.
+                    logger.warning("[SSE] Redis connection lost mid-stream for user=%s; closing stream", user_id)
+                    break
                 if message is None:
                     # keep-alive 주석 프레임(이벤트로 파싱되지 않음)
                     yield ": ping\n\n"
@@ -119,11 +128,17 @@ async def stream_events(
         except asyncio.CancelledError:
             raise
         finally:
+            # unsubscribe 실패(이미 끊긴 커넥션 등)와 무관하게 aclose는 반드시 실행해
+            # pubsub 커넥션이 풀 밖에 잔류하는 누수를 막는다.
             try:
                 await pubsub.unsubscribe(*channels)
-                await pubsub.aclose()
             except Exception:  # noqa: BLE001
-                logger.warning("[SSE] pubsub cleanup failed for user=%s", user_id, exc_info=True)
+                logger.warning("[SSE] pubsub unsubscribe failed for user=%s", user_id, exc_info=True)
+            finally:
+                try:
+                    await pubsub.aclose()
+                except Exception:  # noqa: BLE001
+                    logger.warning("[SSE] pubsub close failed for user=%s", user_id, exc_info=True)
 
     headers = {
         # no-transform 필수: Next.js rewrite 프록시(및 표준 compression 미들웨어)가
