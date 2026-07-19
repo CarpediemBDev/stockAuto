@@ -178,6 +178,7 @@ export const authAPI = {
     { old_password: oldPassword, new_password: newPassword },
   ),
   getMe: (config?: AxiosRequestConfig) => api.get('/auth/me', config),
+  updateLanguage: (language: string) => api.put('/auth/me/language', { language }),
 };
 
 export const botAPI = {

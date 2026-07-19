@@ -39,6 +39,7 @@ export function NavBar() {
     // 초기 로드 시 쿠키에서 언어 읽기
     const match = document.cookie.match(new RegExp('(^| )NEXT_LOCALE=([^;]+)'));
     if (match) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentLang(match[2]);
     } else {
       // 쿠키가 없다면 브라우저 언어로 fallback 렌더링 동기화
@@ -92,16 +93,14 @@ export function NavBar() {
   const handleLanguageChange = async (lang: string) => {
     try {
       // 1. 쿠키 설정 (1년)
+      // eslint-disable-next-line react-hooks/immutability
       document.cookie = `NEXT_LOCALE=${lang}; path=/; max-age=31536000`;
       setCurrentLang(lang);
       
       // 2. 백엔드 DB 연동 (실패해도 화면 언어는 바뀌도록 await 하지 않고 백그라운드 처리 권장, 하지만 안전하게 await 처리)
-      await fetcher('/auth/me/language', {
-        method: 'PUT',
-        body: JSON.stringify({ language: lang })
-      });
+      await authAPI.updateLanguage(lang);
       
-      // 3. 화면 새로고침 (Next.js App Router가 새 언어 JSON을 불러오도록 강제)
+      // 3. 페이지 새로고침하여 서버 컴포넌트들 재렌더링
       router.refresh();
       setIsLangMenuOpen(false);
       toast.success(lang === 'ko' ? "한국어로 변경되었습니다." : "Language changed to English.");
