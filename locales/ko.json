@@ -1,0 +1,10 @@
+{
+  "telegram": {
+    "orphan_order_recovered": "🛡️ *[미아 주문 복구 안내]*\n• *방향:* {side}\n• *종목:* {ticker}\n• *주문번호:* {broker_order_no}\n• *상태:* {status}\n주문 내역이 봇과 성공적으로 재연결되었습니다.",
+    "order_reconciled": "🔄 *[주문 체결 상태 업데이트]*\n• *방향:* {side}\n• *종목:* {ticker}\n• *상태:* {status}\n• *체결량:* {cumulative}/{requested}{resolution_text}",
+    "order_stale": "⚠️ *[주문 체결 확인 지연 안내]*\n• *방향:* {side}\n• *종목:* {ticker}\n• *상태:* {status}\n• *오류:* {error}\n\n주문 체결 여부가 최종 확인될 때까지 신규 매매 사이클이 일시 대기합니다.",
+    "regime_exit": "🔴 *[{strategy_name} 레짐 이탈 자동매도]*\n종목: {asset}\n• *체결 단가:* ${filled_price:,.2f}\n• *체결 수량:* {filled_qty}주\n• *매도 사유:* SMA{sma_period} 하향 이탈 {confirm_days}일 연속 확정 → 현금 대피\n\n{pnl_emoji} *실수익률:* {pnl_sign}{return_rate:.2f}%\n💰 *실현 실수익:* {pnl_sign}\n• *주문 번호:* {order_no}"
+  },
+  "exception": {},
+  "ui": {}
+}
