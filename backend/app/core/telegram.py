@@ -173,52 +173,60 @@ def _process_global_message(msg_chat_id: str, text: str):
     direct_message = None
     db = SessionLocal()
     try:
-        # 1. 이미 이 챗 ID를 사용하는 유저가 있는지 조회
-        db_settings = db.query(UserSettings).filter(UserSettings.telegram_chat_id == msg_chat_id).first()
+        # 1. 딥링크 연동 시도 (/start username) 우선 처리
+        if cmd == "/start" and len(parts) > 1:
+            auth_username = parts[1].strip()
+            from app.core.models import User
+            user = db.query(User).filter(User.username == auth_username).first()
+            if user:
+                # 동일한 chat_id를 가지고 있던 다른 계정들의 연동 해제 및 정리 (1:1 매핑 보장)
+                existing_others = db.query(UserSettings).filter(
+                    UserSettings.telegram_chat_id == msg_chat_id,
+                    UserSettings.user_id != user.id
+                ).all()
+                for other_setting in existing_others:
+                    other_setting.telegram_chat_id = ""
+                    other_setting.telegram_enabled = False
 
-        if not db_settings:
-            # 미연동 유저의 딥링크 가입 시도 (/start username)
-            if cmd == "/start" and len(parts) > 1:
-                auth_username = parts[1].strip()
-                from app.core.models import User
-                user = db.query(User).filter(User.username == auth_username).first()
-                if user:
-                    u_settings = db.query(UserSettings).filter(UserSettings.user_id == user.id).first()
-                    if not u_settings:
-                        u_settings = UserSettings(user_id=user.id)
-                        db.add(u_settings)
+                u_settings = db.query(UserSettings).filter(UserSettings.user_id == user.id).first()
+                if not u_settings:
+                    u_settings = UserSettings(user_id=user.id)
+                    db.add(u_settings)
 
-                    u_settings.telegram_chat_id = msg_chat_id
-                    u_settings.telegram_enabled = True
-                    db.commit()
+                u_settings.telegram_chat_id = msg_chat_id
+                u_settings.telegram_enabled = True
+                db.commit()
 
-                    msg = (
-                        f"🎉 *연동 성공!*\n\n"
-                        f"`{user.username}`님 계정과 텔레그램 연동이 정상 완료되었습니다.\n"
-                        f"이제 시스템 자동매매 매수/매도 알림이 실시간으로 발송됩니다.\n\n"
-                        f"🤖 *사용 가능 원격 명령어:*\n"
-                        f"• `/status` - 현재 시스템 동작 모드 및 포트폴리오 조회\n"
-                        f"• `/run` - 자율 트레이딩 자동매매 루프 가동\n"
-                        f"• `/stop` - 자율 트레이딩 자동매매 루프 정지"
-                    )
-                    direct_message = msg
-                    logger.info(f"[TelegramBot] Successfully linked Chat ID {msg_chat_id} to User: {user.username}")
-                else:
-                    direct_message = "⚠️ 존재하지 않는 사용자명입니다. 웹의 연동 시작 링크를 통해 다시 접속해 주세요."
-            else:
-                # 일반적인 /start 호출 등 가입되지 않은 경우 안내
                 msg = (
-                    "👋 *안녕하세요! StockAuto 트레이딩 브릿지입니다.*\n\n"
-                    "아직 본 계정의 텔레그램 연동이 완료되지 않았습니다.\n"
-                    "우리 주식 자동매매 웹 페이지의 **개인 투자 설정 ➔ Telegram Bridge** 탭에서 제공하는 "
-                    "**[🔗 텔레그램 연동 시작]** 버튼을 클릭하여 간편하게 연동을 마무리해 주세요!"
+                    f"🎉 *연동 성공!*\n\n"
+                    f"`{user.username}`님 계정과 텔레그램 연동이 정상 완료되었습니다.\n"
+                    f"이제 시스템 자동매매 매수/매도 알림이 실시간으로 발송됩니다.\n\n"
+                    f"🤖 *사용 가능 원격 명령어:*\n"
+                    f"• `/status` - 현재 시스템 동작 모드 및 포트폴리오 조회\n"
+                    f"• `/run` - 자율 트레이딩 자동매매 루프 가동\n"
+                    f"• `/stop` - 자율 트레이딩 자동매매 루프 정지"
                 )
                 direct_message = msg
+                logger.info(f"[TelegramBot] Successfully linked Chat ID {msg_chat_id} to User: {user.username}")
+            else:
+                direct_message = "⚠️ 존재하지 않는 사용자명입니다. 웹의 연동 시작 링크를 통해 다시 접속해 주세요."
             return
 
-        # 2. 이미 연동된 유저의 경우 활성화 여부(telegram_enabled) 검증
-        if not db_settings.telegram_enabled:
-            direct_message = "⚠️ 텔레그램 알림 연동이 비활성화 상태입니다. 웹 페이지의 개인 투자 설정에서 활성화해 주세요."
+        # 2. 일반 명령어 수신 시: 텔레그램 연동이 활성화(telegram_enabled=True)된 유저만 조회
+        db_settings = db.query(UserSettings).filter(
+            UserSettings.telegram_chat_id == msg_chat_id,
+            UserSettings.telegram_enabled == True
+        ).first()
+
+        if not db_settings:
+            # 미연동 또는 비활성화 유저의 명령어 수신 시 안내
+            msg = (
+                "👋 *안녕하세요! StockAuto 트레이딩 브릿지입니다.*\n\n"
+                "아직 본 계정의 텔레그램 연동이 완료되지 않았거나 비활성화 상태입니다.\n"
+                "우리 주식 자동매매 웹 페이지의 **개인 투자 설정 ➔ Telegram Bridge** 탭에서 제공하는 "
+                "**[🔗 텔레그램 연동 시작]** 버튼을 클릭하여 간편하게 연동을 마무리해 주세요!"
+            )
+            direct_message = msg
             return
 
         command_user_id = db_settings.user_id

@@ -27,6 +27,7 @@ import { useSseConnection } from '@/providers/EventStreamProvider';
 import { adminAPI, fetcher } from '@/lib/api';
 import { toast } from "sonner";
 import { getErrorMessage } from '@/lib/utils';
+import { useTranslations } from 'next-intl';
 
 // ... (기존 인터페이스들 유지)
 interface BrokerCredentialMeta {
@@ -204,16 +205,19 @@ export function UserManagement() {
 
 
 
+  const t = useTranslations('admin.users');
+  const tTrans = useTranslations('admin.translation');
+
   return (
     <div className="space-y-6">
 
 
       {/* 사용자 관리 테이블 보드 */}
-      <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl space-y-4">
+      <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-4 md:p-6 shadow-xl space-y-4">
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <Users size={18} className="text-blue-400" />
-            사용자 관리 & 실시간 아레나
+            {t('title')} & 실시간 아레나
           </h2>
           <div className="flex items-center gap-3">
             {/* 랭킹 정렬 토글 스위치 */}
@@ -229,7 +233,7 @@ export function UserManagement() {
               }`}
             >
               <Trophy size={13} className={sortByProfit ? 'text-amber-400 animate-pulse' : 'text-zinc-500'} />
-              수익률 랭킹순
+              {t('sort_profit')}
             </button>
             <span className="text-[10px] text-zinc-400 font-semibold bg-zinc-800 px-2 py-0.5 rounded">
               TOTAL: {usersList.length} USERS
@@ -237,29 +241,29 @@ export function UserManagement() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="w-full overflow-x-auto">
           {loading ? (
             <div className="py-20 flex flex-col items-center justify-center gap-3">
               <Loader2 size={36} className="animate-spin text-zinc-500" />
-              <span className="text-xs text-zinc-500 font-semibold">사용자 데이터 로딩 중...</span>
+              <span className="text-xs text-zinc-500 font-semibold">{tTrans('loading')}</span>
             </div>
           ) : usersList.length === 0 ? (
             <div className="py-16 text-center">
               <Users size={48} className="mx-auto text-zinc-700 mb-3" />
-              <p className="text-sm font-semibold text-zinc-500">가입된 사용자가 없습니다.</p>
+              <p className="text-sm font-semibold text-zinc-500">{tTrans('no_data')}</p>
             </div>
           ) : (
-            <table className="min-w-full divide-y divide-zinc-800/60">
+            <table className="w-full divide-y divide-zinc-800/60">
               <thead>
                 <tr className="text-left text-xs uppercase text-zinc-500 font-bold tracking-wider whitespace-nowrap">
-                  <th className="px-6 py-3.5 text-center w-12">순위</th>
-                  <th className="px-6 py-3.5">사용자명</th>
-                  <th className="px-6 py-3.5">투자 모드</th>
-                  <th className="px-6 py-3.5">연동 전략</th>
-                  <th className="px-6 py-3.5">텔레그램</th>
-                  <th className="px-6 py-3.5">봇 상태</th>
-                  <th className="px-6 py-3.5">실시간 수익률</th>
-                  <th className="px-6 py-3.5 text-right">관리</th>
+                  <th className="px-2 md:px-3 py-3 text-center w-10">순위</th>
+                  <th className="px-2 md:px-3 py-3">사용자명</th>
+                  <th className="px-2 md:px-3 py-3">투자 모드</th>
+                  <th className="px-2 md:px-3 py-3">연동 전략</th>
+                  <th className="px-2 md:px-3 py-3">텔레그램</th>
+                  <th className="px-2 md:px-3 py-3">봇 상태</th>
+                  <th className="px-2 md:px-3 py-3">실시간 수익률</th>
+                  <th className="px-2 md:px-3 py-3 text-right">관리</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/40 text-[15px] whitespace-nowrap">
@@ -271,14 +275,14 @@ export function UserManagement() {
                       onClick={() => setSelectedUserId(user.id)}
                       className={`transition-colors duration-150 cursor-pointer hover:bg-zinc-800/20 ${selectedUser?.id === user.id ? 'bg-zinc-800/35' : ''}`}
                     >
-                      <td className="px-6 py-4 text-center">
+                      <td className="px-2 md:px-3 py-3 text-center">
                         <div className="flex justify-center">
                           {sortByProfit ? getRankBadge(rank) : (
                             <span className="text-xs font-mono text-zinc-500 font-bold">{user.id}</span>
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-4 font-bold text-slate-300">
+                      <td className="px-2 md:px-3 py-3 font-bold text-slate-300">
                         <div className="flex items-center gap-2">
                           {user.username}
                           {user.role === 'ADMIN' && (
@@ -293,7 +297,7 @@ export function UserManagement() {
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-2 md:px-3 py-3">
                         <span className={`px-2 py-1 rounded text-[10px] font-bold border ${
                           user.trade_mode === 'REAL' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
                           user.trade_mode === 'MOCK' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
@@ -302,17 +306,17 @@ export function UserManagement() {
                           {user.trade_mode}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-slate-400 font-semibold text-xs">
+                      <td className="px-2 md:px-3 py-3 text-slate-400 font-semibold text-xs">
                         {user.strategy_name || user.strategy_type?.replace(/_/g, ' ')}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-2 md:px-3 py-3">
                         <span className={`px-2 py-1 rounded text-[10px] font-bold ${
                           user.telegram_enabled ? 'bg-indigo-500/10 text-indigo-400' : 'bg-zinc-800 text-zinc-500'
                         }`}>
                           {user.telegram_enabled ? 'ON' : 'OFF'}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-2 md:px-3 py-3">
                         <div className="flex items-center gap-1.5">
                           <span className={`w-2 h-2 rounded-full ${user.is_running ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-600'}`}></span>
                           <span className={`text-[10px] font-bold ${user.is_running ? 'text-emerald-400' : 'text-zinc-500'}`}>
@@ -320,7 +324,7 @@ export function UserManagement() {
                           </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 font-mono">
+                      <td className="px-2 md:px-3 py-3 font-mono">
                         <div className="flex flex-col items-start gap-1">
                           {getReturnBadge(user.profit_rate)}
                           {(() => {
@@ -333,8 +337,8 @@ export function UserManagement() {
                           })()}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="px-2 md:px-3 py-3">
+                        <div className="flex items-center justify-end gap-1.5">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleToggleUserBot(user.id); }}
                             disabled={actionUserId === user.id}
