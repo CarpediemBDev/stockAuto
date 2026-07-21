@@ -11,6 +11,12 @@ class BaseStrategy(ABC):
     # 스케줄러의 전용 경로(process_autonomous_slots)가 직접 집행합니다.
     is_autonomous = False
 
+    # 롤링 박스 트레일링 스탑: 최근 N봉 저점 박스 하단(래칫 단조 증가)을 이탈하면 청산.
+    # 절대 최고가 기준 ATR 트레일링이 횡보 구간에서 옛 고점에 앵커링되어 느슨해지는
+    # 문제를 보완한다. 기본 비활성 — 백테스트 A/B로 검증된 전략만 True로 opt-in.
+    use_rolling_box_stop = False
+    rolling_box_window = 10
+
     def __init__(self, name: str = "Base Strategy"):
         self.name = name
         

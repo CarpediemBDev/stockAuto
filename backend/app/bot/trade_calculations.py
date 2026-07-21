@@ -142,3 +142,43 @@ def check_trailing_stop_breach(
 
     threshold = dec_highest_price * (Decimal('1.0') - dec_trailing_stop_pct / Decimal('100.0'))
     return dec_current_price <= threshold and dec_highest_price > dec_avg_price
+
+
+# 롤링 박스 트레일링 스탑의 기본 윈도우 봉 수 (전략별 override는 BaseStrategy.rolling_box_window)
+DEFAULT_ROLLING_BOX_WINDOW = 10
+
+
+def compute_rolling_box_stop(
+    prev_stop: float | Decimal | None,
+    window_low: float | Decimal | None,
+) -> Decimal:
+    """롤링 박스 스탑 가격을 래칫(단조 증가) 조건으로 갱신합니다.
+
+    새 스탑 = max(직전 스탑, 최근 N봉 저점). 윈도우 저점이 주가를 따라 내려가도
+    스탑은 절대 후퇴하지 않는다 — 이 래칫이 없으면 하락 중 스탑이 주가를 쫓아
+    내려가며 영원히 발동하지 않는 역주행이 발생한다(설계 핵심 불변식).
+    """
+    dec_prev = to_decimal(prev_stop)
+    dec_window_low = to_decimal(window_low)
+    return dec_prev if dec_prev >= dec_window_low else dec_window_low
+
+
+def check_rolling_box_breach(
+    current_price: float | Decimal,
+    rolling_stop: float | Decimal | None,
+    highest_price: float | Decimal,
+    avg_price: float | Decimal,
+) -> bool:
+    """롤링 박스 스탑 이탈 여부를 판정합니다.
+
+    ATR 트레일링과 동일하게 포지션이 한 번이라도 수익권(최고가 > 평단)에
+    진입한 뒤에만 활성화된다 — 진입 직후 박스 하단이 평단 위에 있어
+    즉시 청산되는 오발동을 차단하기 위함. 손실 방어는 기존 동적 손절선 담당.
+    """
+    dec_rolling_stop = to_decimal(rolling_stop)
+    if dec_rolling_stop <= 0:
+        return False
+    dec_current_price = to_decimal(current_price)
+    dec_highest_price = to_decimal(highest_price)
+    dec_avg_price = to_decimal(avg_price)
+    return dec_current_price < dec_rolling_stop and dec_highest_price > dec_avg_price
