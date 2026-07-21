@@ -62,6 +62,9 @@ async def test_scan_market_expert_maps_realtime_strategy_fields(monkeypatch):
     async def fake_check_fundamental_health(ticker):
         return True
 
+    # 스캐너 릴레이는 전일 애프터장·스윙 예측 캐시(로컬 DB)를 읽어 우선 감시 종목을 유니버스에
+    # 추가한다. 본 테스트는 시드 종목의 필드 매핑만 검증하므로 릴레이를 비워 hermetic하게 유지한다.
+    monkeypatch.setattr(scanner_module, "get_relay_priority_map", lambda: {})
     monkeypatch.setattr(scanner_module, "get_seed_tickers", fake_get_seed_tickers)
     monkeypatch.setattr(scanner_module, "check_market_sentiment", fake_check_market_sentiment)
     monkeypatch.setattr(scanner_module, "fetch_index_data", fake_fetch_index_data)

@@ -28,6 +28,12 @@ from app.scanner.filters import (
     CATALYST_KEYWORDS
 )
 from app.scanner.discovery import get_seed_tickers
+from app.scanner.watchlist_relay import (
+    get_relay_priority_map,
+    is_relay_source,
+    merge_reserved_candidates,
+)
+from app.bot.trade_calculations import DEFAULT_ROLLING_BOX_WINDOW
 from app.scanner.data_provider import (
     fetch_ohlcv,
     fetch_index_data,
@@ -40,8 +46,26 @@ from app.core.system_settings import (
     is_system_setting_enabled,
 )
 
+
+def calculate_rolling_box_low(df_15m: pd.DataFrame) -> float | None:
+    """롤링 박스 스탑용 최근 N봉 저점을 계산합니다 (형성 중인 마지막 봉 제외).
+
+    완성 봉이 윈도우(N)만큼 쌓이지 않았으면 None — 작은 박스로 인한 조기 발동을 막는다.
+    """
+    try:
+        if df_15m is None or df_15m.empty or 'Low' not in df_15m.columns:
+            return None
+        lows = df_15m['Low'].iloc[:-1].tail(DEFAULT_ROLLING_BOX_WINDOW)
+        if len(lows) < DEFAULT_ROLLING_BOX_WINDOW:
+            return None
+        val = float(lows.min())
+        return val if np.isfinite(val) and val > 0 else None
+    except Exception:
+        return None
+
+
 # 지수 비교용 (Relative Strength)
-MARKET_INDEX = "QQQ" 
+MARKET_INDEX = "QQQ"
 
 # 최소 거래대금 기준 (한국 돈 1억 원)
 MIN_KRW_VOLUME = 100_000_000.0
@@ -193,7 +217,23 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
     sentiment = await check_market_sentiment()
     tickers, source_map = await get_seed_tickers()
     if not tickers: return []
-    
+
+    # 0.5. 스캐너 릴레이: 전일 애프터장·스윙 예측 후보를 우선 감시 대상으로 편입
+    # (동기 DB 접근이 있어 워커 스레드로 격리. 실패 시 빈 dict — 기존 스캔과 동일 동작)
+    try:
+        relay_map = await asyncio.to_thread(get_relay_priority_map)
+    except Exception as e:
+        logger.warning(f"[Relay] priority map unavailable, falling back to normal scan: {e}")
+        relay_map = {}
+    if relay_map:
+        known = set(tickers)
+        for relay_ticker, relay_tags in relay_map.items():
+            if relay_ticker not in known:
+                tickers.append(relay_ticker)
+                known.add(relay_ticker)
+            source_map[relay_ticker] = source_map.get(relay_ticker, []) + relay_tags
+        logger.info(f"[Relay] {len(relay_map)} priority tickers merged into scan universe: {', '.join(sorted(relay_map))}")
+
     # 1. 지수 데이터 확보 (Relative Strength 계산용)
     df_qqq = await fetch_index_data(MARKET_INDEX)
     qqq_perf = (df_qqq['Close'].iloc[-1] / df_qqq['Close'].iloc[0] - 1) if not df_qqq.empty else 0
@@ -295,9 +335,10 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                     if is_near_recent_high and momentum_candles and premarket_gap_pct >= 5.0:
                         s1_score += 10
                         
-                    # 관심종목(WATCHLIST)은 Stage 1 필터 면제: 점수 무관하게 무조건 Stage 2 진입
+                    # 관심종목(WATCHLIST)·릴레이 우선 감시 종목은 Stage 1 필터 면제: 점수 무관하게 무조건 Stage 2 진입
                     is_watchlist = "WATCHLIST" in source_map.get(ticker, [])
-                    if s1_score >= 30 or rvol >= 2.5 or is_watchlist:
+                    is_relay = is_relay_source(source_map.get(ticker, []))
+                    if s1_score >= 30 or rvol >= 2.5 or is_watchlist or is_relay:
                         all_results.append({
                             "ticker": ticker,
                             "source": source_map.get(ticker, ["MARKET"]),
@@ -327,7 +368,9 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
     # 3. Stage 2: 후보군 정밀 분석
     # 💡 RVOL(거래량 폭발력) 1차, s1_score(품질) 2차 내림차순 — 유동성 우선 설계
     # AI 슬롯도 이 순서로 배정됨. 품질 우선으로 변경하려면 키를 (s1_score, rvol)로 수정할 것.
-    candidates = sorted(all_results, key=lambda x: (x['rvol'], x['s1_score']), reverse=True)[:25]
+    # 릴레이 우선 감시 종목은 상위 컷에서 밀리더라도 예약 슬롯으로 추가 편입(순수 추가형 — 기존 컷 구성 불변)
+    ranked = sorted(all_results, key=lambda x: (x['rvol'], x['s1_score']), reverse=True)
+    candidates = merge_reserved_candidates(ranked, base_limit=25)
     if not candidates: return []
     
     logger.info(f"[Stage 2] Precision scanning {len(candidates)} candidates via dynamic {sentiment} scorecard...")
@@ -521,6 +564,7 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                         "rs": cand['rs'],
                         "ema_aligned": cand.get('ema_aligned', True),
                         "atr": round(latest_atr, 4),
+                        "rolling_box_low": calculate_rolling_box_low(cand.get('df_15m')),
                         "dollar_volume": cand.get('dollar_volume', 0.0),
                         "is_near_52w_high": cand.get('is_near_52w_high', False),
                         "is_near_recent_high": cand.get('is_near_recent_high', False),
@@ -686,6 +730,7 @@ async def analyze_single_ticker(ticker: str, bypass_fundamental: bool = False) -
                 "rs": rs,
                 "ema_aligned": ema_aligned,
                 "atr": round(latest_atr, 4),
+                "rolling_box_low": calculate_rolling_box_low(df_15m),
                 "is_orb_breakout": is_orb_breakout,
                 "is_rsi_bb_extreme": is_rsi_bb_extreme,
                 "is_obv_accumulation": is_obv_accumulation,

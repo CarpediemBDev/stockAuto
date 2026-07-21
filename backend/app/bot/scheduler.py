@@ -47,12 +47,15 @@ from app.bot.trade_calculations import (
     calculate_buy_total,
     calculate_profit_rate,
     calculate_realized_pnl,
+    check_rolling_box_breach,
     check_stop_loss_breach,
     check_trailing_stop_breach,
+    compute_rolling_box_stop,
     fee_rate_for_trade_mode,
     to_decimal,
 )
 from app.bot.order_discovery import discover_orphan_orders_once
+from app.bot.equity_gate import get_equity_gate_factor
 import time
 from uuid import uuid4
 import math
@@ -948,6 +951,24 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             stop_loss_pct = strategy_instance.get_stop_loss_pct(atr, current_price)
             trailing_stop_pct = strategy_instance.get_trailing_stop_pct(atr, current_price)
 
+            # 롤링 박스 스탑 래칫 갱신 (opt-in 전략 한정). highest_price와 동일 사유로
+            # detached holding의 매핑 컬럼은 건드리지 않고 로컬 변수 + version 비간섭 Core UPDATE만 사용.
+            use_rolling_box = bool(getattr(strategy_instance, "use_rolling_box_stop", False))
+            dec_rolling_stop = to_decimal(getattr(h, "rolling_stop_price", None))
+            if use_rolling_box:
+                window_low = current_data.get('details', {}).get('rolling_box_low')
+                if window_low:
+                    new_rolling_stop = compute_rolling_box_stop(dec_rolling_stop, window_low)
+                    if new_rolling_stop > dec_rolling_stop:
+                        dec_rolling_stop = new_rolling_stop
+                        if isinstance(h, Holding) and h.id is not None:
+                            with micro_session(ctx) as db:
+                                db.query(Holding).filter(Holding.id == h.id).update(
+                                    {Holding.rolling_stop_price: dec_rolling_stop},
+                                    synchronize_session=False,
+                                )
+                                db.commit()
+
             sell_reason = None
             is_breached = False
             breach_reason = ""
@@ -958,6 +979,9 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             elif check_trailing_stop_breach(current_price_dec, dec_highest_price, trailing_stop_pct, h.avg_price):
                 is_breached = True
                 breach_reason = f"동적 트레일링 스탑 이탈 (최고가 ${float(dec_highest_price):.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)"
+            elif use_rolling_box and check_rolling_box_breach(current_price_dec, dec_rolling_stop, dec_highest_price, h.avg_price):
+                is_breached = True
+                breach_reason = f"롤링 박스 스탑 이탈 (박스 하단 ${float(dec_rolling_stop):.2f} 붕괴 | 현재 수익률: {profit_rate:.2f}%)"
 
             if is_breached:
                 cache_key = (user_id, h.ticker, h.strategy_type)
@@ -1275,6 +1299,7 @@ def calculate_entry_quantity(
     slot_total_asset_usd: float,
     current_price: float,
     proposed_alloc_factor: float,
+    equity_gate_factor: float = 1.0,
 ) -> tuple[int, float, float]:
     base_alloc_usd = slot_total_asset_usd * strategy_instance.base_allocation_pct
     if strategy_instance.min_allocation_usd > 0.0:
@@ -1288,7 +1313,7 @@ def calculate_entry_quantity(
             vol_factor = max(0.5, min(1.5, 2.0 / atr_pct))
 
     score_factor = 1.0 + (score - cutoff_score) * 0.05
-    proposed_value_usd = base_alloc_usd * vol_factor * score_factor * proposed_alloc_factor
+    proposed_value_usd = base_alloc_usd * vol_factor * score_factor * proposed_alloc_factor * equity_gate_factor
     proposed_qty = proposed_value_usd / current_price
 
     max_order_budget_usd = slot_cash_usd * 0.95
@@ -1478,6 +1503,16 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
             ).count()
         cutoff_score = strategy_instance.get_cutoff_score(ctx.sentiment)
 
+        # 에쿼티 커브 게이트: (슬롯×레짐) 최근 청산 성적이 부진하면 신규 매수 배분을 스로틀
+        with micro_session(ctx) as db:
+            equity_gate_factor, gate_meta = get_equity_gate_factor(db, user_id, slot_key, ctx.sentiment)
+        if equity_gate_factor < 1.0:
+            _log(
+                f"[Equity Gate] {strategy_instance.name} slot throttled to {equity_gate_factor:.0%} "
+                f"(PF {gate_meta.get('profit_factor'):.2f} over {gate_meta.get('sample_count')} recent {ctx.sentiment} trades)",
+                "WARNING",
+            )
+
         for signal in target_signals:
             clean_ticker = signal['ticker']
             if clean_ticker not in focused_tickers:
@@ -1533,6 +1568,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 slot_total_asset_usd=slot_total_asset_usd,
                 current_price=current_price,
                 proposed_alloc_factor=proposed_alloc_factor,
+                equity_gate_factor=equity_gate_factor,
             )
 
             if final_qty < 1:
