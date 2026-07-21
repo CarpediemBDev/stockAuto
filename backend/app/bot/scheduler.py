@@ -47,8 +47,10 @@ from app.bot.trade_calculations import (
     calculate_buy_total,
     calculate_profit_rate,
     calculate_realized_pnl,
+    check_rolling_box_breach,
     check_stop_loss_breach,
     check_trailing_stop_breach,
+    compute_rolling_box_stop,
     fee_rate_for_trade_mode,
     to_decimal,
 )
@@ -948,6 +950,24 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             stop_loss_pct = strategy_instance.get_stop_loss_pct(atr, current_price)
             trailing_stop_pct = strategy_instance.get_trailing_stop_pct(atr, current_price)
 
+            # 롤링 박스 스탑 래칫 갱신 (opt-in 전략 한정). highest_price와 동일 사유로
+            # detached holding의 매핑 컬럼은 건드리지 않고 로컬 변수 + version 비간섭 Core UPDATE만 사용.
+            use_rolling_box = bool(getattr(strategy_instance, "use_rolling_box_stop", False))
+            dec_rolling_stop = to_decimal(getattr(h, "rolling_stop_price", None))
+            if use_rolling_box:
+                window_low = current_data.get('details', {}).get('rolling_box_low')
+                if window_low:
+                    new_rolling_stop = compute_rolling_box_stop(dec_rolling_stop, window_low)
+                    if new_rolling_stop > dec_rolling_stop:
+                        dec_rolling_stop = new_rolling_stop
+                        if isinstance(h, Holding) and h.id is not None:
+                            with micro_session(ctx) as db:
+                                db.query(Holding).filter(Holding.id == h.id).update(
+                                    {Holding.rolling_stop_price: dec_rolling_stop},
+                                    synchronize_session=False,
+                                )
+                                db.commit()
+
             sell_reason = None
             is_breached = False
             breach_reason = ""
@@ -958,6 +978,9 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             elif check_trailing_stop_breach(current_price_dec, dec_highest_price, trailing_stop_pct, h.avg_price):
                 is_breached = True
                 breach_reason = f"동적 트레일링 스탑 이탈 (최고가 ${float(dec_highest_price):.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)"
+            elif use_rolling_box and check_rolling_box_breach(current_price_dec, dec_rolling_stop, dec_highest_price, h.avg_price):
+                is_breached = True
+                breach_reason = f"롤링 박스 스탑 이탈 (박스 하단 ${float(dec_rolling_stop):.2f} 붕괴 | 현재 수익률: {profit_rate:.2f}%)"
 
             if is_breached:
                 cache_key = (user_id, h.ticker, h.strategy_type)

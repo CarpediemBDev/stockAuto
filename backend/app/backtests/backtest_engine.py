@@ -10,7 +10,13 @@ from app.scanner.indicators import (
 )
 from app.core.logging import logger
 from app.backtests.backtest_metrics import calculate_performance_metrics
-from app.bot.trade_calculations import calculate_buy_total, calculate_realized_pnl
+from app.bot.trade_calculations import (
+    DEFAULT_ROLLING_BOX_WINDOW,
+    calculate_buy_total,
+    calculate_realized_pnl,
+    check_rolling_box_breach,
+    compute_rolling_box_stop,
+)
 
 from app.core.config import settings
 
@@ -77,7 +83,8 @@ class BacktestBroker:
                 "avg_price": round(new_avg, 4),
                 "highest_price": max(h["highest_price"], price),
                 "buy_stage": buy_stage,
-                "ticker_name": ticker_name or h["ticker_name"]
+                "ticker_name": ticker_name or h["ticker_name"],
+                "rolling_stop": h.get("rolling_stop", 0.0)  # 불타기 시 기존 래칫 스탑 유지
             }
         else:
             # 💡 신규 포지션 진입
@@ -86,7 +93,8 @@ class BacktestBroker:
                 "avg_price": price,
                 "highest_price": price,
                 "buy_stage": buy_stage,
-                "ticker_name": ticker_name or ticker
+                "ticker_name": ticker_name or ticker,
+                "rolling_stop": 0.0  # 롤링 박스 스탑 래칫 초기값 (첫 모니터링 봉에서 시드)
             }
 
         order_no = f"BT-BUY-{timestamp.strftime('%Y%m%d%H%M%S')}"
@@ -384,7 +392,11 @@ class BacktestSimulator:
                 metrics['MACD_line'] = macd_line
                 metrics['MACD_signal'] = sig_line
                 metrics['ATR'] = calculate_atr(df, 14)
-                
+
+                # 롤링 박스 스탑용 최근 N봉 저점 (현재 봉 제외 — 박스는 직전 봉들로만 형성)
+                rolling_box_window = int(getattr(self.strategy, 'rolling_box_window', DEFAULT_ROLLING_BOX_WINDOW))
+                metrics['rolling_box_low'] = df['Low'].shift(1).rolling(rolling_box_window).min()
+
                 # VWAP 및 Wick 계산
                 metrics['VWAP'] = calculate_vwap(df)
                 metrics['Wick'] = calculate_wick_ratio(df)
@@ -924,15 +936,27 @@ class BacktestSimulator:
                 is_breached = False
                 breach_reason = ""
 
+                # [지표 2-보조] 롤링 박스 스탑 래칫 갱신 (opt-in 전략 한정, 판정 전에 항상 갱신)
+                use_rolling_box = bool(getattr(self.strategy, 'use_rolling_box_stop', False))
+                if use_rolling_box:
+                    window_low = row.get('rolling_box_low')
+                    if window_low is not None and pd.notna(window_low):
+                        h["rolling_stop"] = float(compute_rolling_box_stop(h.get("rolling_stop", 0.0), window_low))
+
                 # [지표 2] 동적 손절선 이탈
                 if profit_rate <= -stop_loss_pct:
                     is_breached = True
                     breach_reason = f"동적 손절선 이탈 (손절선 -{stop_loss_pct:.2f}% 돌파 | 수익률: {profit_rate:.2f}%)"
-                    
+
                 # [지표 3] 동적 트레일링 스탑 이탈
                 elif price <= h["highest_price"] * (1 - trailing_stop_pct / 100) and h["highest_price"] > h["avg_price"]:
                     is_breached = True
                     breach_reason = f"동적 트레일링 스탑 이탈 (최고가 대비 -{trailing_stop_pct:.2f}% 하락 | 수익률: {profit_rate:.2f}%)"
+
+                # [지표 3-보조] 롤링 박스 스탑 이탈 (최근 N봉 저점 박스 하단 래칫 이탈)
+                elif use_rolling_box and check_rolling_box_breach(price, h.get("rolling_stop", 0.0), h["highest_price"], h["avg_price"]):
+                    is_breached = True
+                    breach_reason = f"롤링 박스 스탑 이탈 (박스 하단 ${h['rolling_stop']:.2f} 붕괴 | 수익률: {profit_rate:.2f}%)"
 
                 # 💡 손절선/트레일링 스탑 이탈 감지 시, 연속 N회 확정식 가드 적용
                 if is_breached:

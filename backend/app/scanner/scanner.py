@@ -28,6 +28,7 @@ from app.scanner.filters import (
     CATALYST_KEYWORDS
 )
 from app.scanner.discovery import get_seed_tickers
+from app.bot.trade_calculations import DEFAULT_ROLLING_BOX_WINDOW
 from app.scanner.data_provider import (
     fetch_ohlcv,
     fetch_index_data,
@@ -40,8 +41,26 @@ from app.core.system_settings import (
     is_system_setting_enabled,
 )
 
+
+def calculate_rolling_box_low(df_15m: pd.DataFrame) -> float | None:
+    """롤링 박스 스탑용 최근 N봉 저점을 계산합니다 (형성 중인 마지막 봉 제외).
+
+    완성 봉이 윈도우(N)만큼 쌓이지 않았으면 None — 작은 박스로 인한 조기 발동을 막는다.
+    """
+    try:
+        if df_15m is None or df_15m.empty or 'Low' not in df_15m.columns:
+            return None
+        lows = df_15m['Low'].iloc[:-1].tail(DEFAULT_ROLLING_BOX_WINDOW)
+        if len(lows) < DEFAULT_ROLLING_BOX_WINDOW:
+            return None
+        val = float(lows.min())
+        return val if np.isfinite(val) and val > 0 else None
+    except Exception:
+        return None
+
+
 # 지수 비교용 (Relative Strength)
-MARKET_INDEX = "QQQ" 
+MARKET_INDEX = "QQQ"
 
 # 최소 거래대금 기준 (한국 돈 1억 원)
 MIN_KRW_VOLUME = 100_000_000.0
@@ -193,7 +212,7 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
     sentiment = await check_market_sentiment()
     tickers, source_map = await get_seed_tickers()
     if not tickers: return []
-    
+
     # 1. 지수 데이터 확보 (Relative Strength 계산용)
     df_qqq = await fetch_index_data(MARKET_INDEX)
     qqq_perf = (df_qqq['Close'].iloc[-1] / df_qqq['Close'].iloc[0] - 1) if not df_qqq.empty else 0
@@ -521,6 +540,7 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                         "rs": cand['rs'],
                         "ema_aligned": cand.get('ema_aligned', True),
                         "atr": round(latest_atr, 4),
+                        "rolling_box_low": calculate_rolling_box_low(cand.get('df_15m')),
                         "dollar_volume": cand.get('dollar_volume', 0.0),
                         "is_near_52w_high": cand.get('is_near_52w_high', False),
                         "is_near_recent_high": cand.get('is_near_recent_high', False),
@@ -686,6 +706,7 @@ async def analyze_single_ticker(ticker: str, bypass_fundamental: bool = False) -
                 "rs": rs,
                 "ema_aligned": ema_aligned,
                 "atr": round(latest_atr, 4),
+                "rolling_box_low": calculate_rolling_box_low(df_15m),
                 "is_orb_breakout": is_orb_breakout,
                 "is_rsi_bb_extreme": is_rsi_bb_extreme,
                 "is_obv_accumulation": is_obv_accumulation,

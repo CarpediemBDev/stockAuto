@@ -9,7 +9,12 @@ from app.backtests.backtest_metrics import (
     assess_strategy_report,
     calculate_performance_metrics,
 )
-from app.bot.trade_calculations import calculate_buy_total, calculate_realized_pnl
+from app.bot.trade_calculations import (
+    calculate_buy_total,
+    calculate_realized_pnl,
+    check_rolling_box_breach,
+    compute_rolling_box_stop,
+)
 from app.core.config import settings
 from app.strategies.strategy_factory import get_strategy
 from app.core.logging import logger
@@ -50,6 +55,7 @@ class MockHolding:
         self.buy_stage = buy_stage
         self.strategy_type = strategy_type
         self.current_price = avg_price
+        self.rolling_stop = 0.0  # 롤링 박스 스탑 래칫 (opt-in 전략 한정 사용)
 
 def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
     """격리형 멀티 전략 슬롯 매니저의 백테스트를 100% 동일한 데이터 축 위에서 시뮬레이션합니다."""
@@ -178,12 +184,22 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
             is_breached = False
             breach_reason = ""
             
+            # 롤링 박스 스탑 래칫 갱신 (opt-in 전략 한정, 판정 전에 항상 갱신)
+            use_rolling_box = bool(getattr(strategy_instance, 'use_rolling_box_stop', False))
+            if use_rolling_box:
+                window_low = row.get('rolling_box_low')
+                if window_low is not None and pd.notna(window_low):
+                    h.rolling_stop = float(compute_rolling_box_stop(getattr(h, 'rolling_stop', 0.0), window_low))
+
             if profit_rate <= -stop_loss_pct:
                 is_breached = True
                 breach_reason = f"동적 손절선 이탈 (-{stop_loss_pct:.2f}% 돌파 | 수익률: {profit_rate:.2f}%)"
             elif current_price <= h.highest_price * (1 - trailing_stop_pct / 100) and h.highest_price > h.avg_price:
                 is_breached = True
                 breach_reason = f"동적 트레일링 스탑 이탈 (-{trailing_stop_pct:.2f}% 돌파 | 수익률: {profit_rate:.2f}%)"
+            elif use_rolling_box and check_rolling_box_breach(current_price, getattr(h, 'rolling_stop', 0.0), h.highest_price, h.avg_price):
+                is_breached = True
+                breach_reason = f"롤링 박스 스탑 이탈 (박스 하단 ${h.rolling_stop:.2f} 붕괴 | 수익률: {profit_rate:.2f}%)"
             
             cooldown_key = (h.ticker, h.strategy_type)
             if is_breached:
