@@ -55,6 +55,7 @@ from app.bot.trade_calculations import (
     to_decimal,
 )
 from app.bot.order_discovery import discover_orphan_orders_once
+from app.bot.equity_gate import get_equity_gate_factor
 import time
 from uuid import uuid4
 import math
@@ -1298,6 +1299,7 @@ def calculate_entry_quantity(
     slot_total_asset_usd: float,
     current_price: float,
     proposed_alloc_factor: float,
+    equity_gate_factor: float = 1.0,
 ) -> tuple[int, float, float]:
     base_alloc_usd = slot_total_asset_usd * strategy_instance.base_allocation_pct
     if strategy_instance.min_allocation_usd > 0.0:
@@ -1311,7 +1313,7 @@ def calculate_entry_quantity(
             vol_factor = max(0.5, min(1.5, 2.0 / atr_pct))
 
     score_factor = 1.0 + (score - cutoff_score) * 0.05
-    proposed_value_usd = base_alloc_usd * vol_factor * score_factor * proposed_alloc_factor
+    proposed_value_usd = base_alloc_usd * vol_factor * score_factor * proposed_alloc_factor * equity_gate_factor
     proposed_qty = proposed_value_usd / current_price
 
     max_order_budget_usd = slot_cash_usd * 0.95
@@ -1501,6 +1503,16 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
             ).count()
         cutoff_score = strategy_instance.get_cutoff_score(ctx.sentiment)
 
+        # 에쿼티 커브 게이트: (슬롯×레짐) 최근 청산 성적이 부진하면 신규 매수 배분을 스로틀
+        with micro_session(ctx) as db:
+            equity_gate_factor, gate_meta = get_equity_gate_factor(db, user_id, slot_key, ctx.sentiment)
+        if equity_gate_factor < 1.0:
+            _log(
+                f"[Equity Gate] {strategy_instance.name} slot throttled to {equity_gate_factor:.0%} "
+                f"(PF {gate_meta.get('profit_factor'):.2f} over {gate_meta.get('sample_count')} recent {ctx.sentiment} trades)",
+                "WARNING",
+            )
+
         for signal in target_signals:
             clean_ticker = signal['ticker']
             if clean_ticker not in focused_tickers:
@@ -1556,6 +1568,7 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 slot_total_asset_usd=slot_total_asset_usd,
                 current_price=current_price,
                 proposed_alloc_factor=proposed_alloc_factor,
+                equity_gate_factor=equity_gate_factor,
             )
 
             if final_qty < 1:
