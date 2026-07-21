@@ -216,6 +216,19 @@ erDiagram
 * `captured_at` (DATETIME, Index): 기록 시각. API 응답에 포함되어 프론트 신선도 배지의 기준이 됩니다.
 * *보존 정책:* 사용자·모드별 최신 500건 유지, 평시 60초 dedup (체결·초기화·청산 직후에는 `force=True`로 즉시 기록).
 
+### ⑩ `swing_score_outcomes` (스윙 점수 캘리브레이션 관측)
+스윙 예측 점수와 **익일 실제 등락**을 짝지어 누적하는 사후 검증 원장입니다. "85점 종목이 실제로 다음날 올랐는가"를 데이터로 확인해 점수 인플레이션이나 예측력 없는 지표를 적발하기 위한 것으로, **매매 경로에는 일절 관여하지 않는 순수 관측 레이어**입니다.
+* `predicted_date` (VARCHAR, Index): 예측 스냅샷 기준일 (`YYYY-MM-DD`, UTC)
+* `ticker` (VARCHAR, Index): 종목 영문 티커
+* `score` (NUMERIC(6,2)): 예측 당시 스윙 점수 (0~100)
+* `baseline_close` (NUMERIC(20,4)): 예측 시점 종가
+* `observed_close` (NUMERIC(20,4)): 예측일 **다음 거래일** 종가 (주말·휴장일은 건너뜀)
+* `observed_date` (VARCHAR): 관측 종가의 거래일 (`YYYY-MM-DD`)
+* `return_pct` (NUMERIC(20,4)): 익일 수익률(%) — Decimal 연산으로 산출
+* `created_at` (DATETIME, Index): 관측 기록 시각
+* *제약 조건:* 같은 예측일에 스냅샷이 여러 번 생성돼도 종목당 1건만 남도록 복합 유니크 제약(`predicted_date`, `ticker`)을 적용해 잡 재실행 멱등성을 보장합니다.
+* *적재 주체:* `swing_score_calibration_job`(매일 08:30 cron)이 `swing_prediction_snapshots`를 읽어 미관측 예측만 백필합니다. 익일 종가가 아직 없으면 기록하지 않고 다음 실행에서 재시도하며, 예측일로부터 10일이 지나면 포기합니다.
+
 ---
 
 ## 💾 3. 클라우드 배포 시 데이터 영속성 관리 (Data Persistence)
