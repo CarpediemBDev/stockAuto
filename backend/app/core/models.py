@@ -376,6 +376,29 @@ class SwingPredictionSnapshot(Base):
     )
     created_at = Column(AwareDateTime, default=utc_now_aware, index=True, comment="스냅샷 생성 시각")
 
+class SwingScoreOutcome(Base):
+    """스윙 예측 점수와 익일 실제 등락을 짝지어 누적하는 캘리브레이션 관측 테이블.
+
+    '85점 종목이 실제로 다음날 올랐는가'를 사후 검증하기 위한 축적 원장이며,
+    점수→실현 수익 매핑 보정(등화회귀 등)의 입력이 된다. 매매에는 관여하지 않는다.
+    """
+    __tablename__ = "swing_score_outcomes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    predicted_date = Column(String, nullable=False, index=True, comment="예측 스냅샷 기준일 (YYYY-MM-DD, UTC)")
+    ticker = Column(String, nullable=False, index=True, comment="종목 영문 티커")
+    score = Column(Numeric(precision=6, scale=2, asdecimal=True), nullable=False, comment="예측 당시 스윙 점수 (0~100)")
+    baseline_close = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=False, comment="예측 시점 종가")
+    observed_close = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=False, comment="예측일 다음 거래일 종가")
+    observed_date = Column(String, nullable=False, comment="관측 종가의 거래일 (YYYY-MM-DD)")
+    return_pct = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=False, comment="익일 수익률 (%)")
+    created_at = Column(AwareDateTime, default=utc_now_aware, index=True, comment="관측 기록 시각")
+
+    __table_args__ = (
+        # 같은 예측일에 스냅샷이 여러 번 생성돼도 종목당 관측은 1건만 남긴다 (잡 재실행 멱등성).
+        UniqueConstraint("predicted_date", "ticker", name="uq_swing_outcome_date_ticker"),
+    )
+
 class UnfilledOrder(Base):
     """미체결 가상 지정가 주문"""
     __tablename__ = "unfilled_orders"

@@ -35,6 +35,7 @@ from app.bot.market_session import (
 from app.trades.market_overview_cache import market_overview_cache_wrapper
 from app.trades.equity_snapshot import record_equity_snapshot
 from app.scanner.swing_prediction_cache import swing_prediction_cache_wrapper
+from app.scanner.score_calibration import swing_score_calibration_wrapper
 from app.bot.order_reconciler import (
     begin_order_submission,
     create_order_intent,
@@ -2198,6 +2199,17 @@ def start_scheduler():
         # ② 스윙 예측 캐시 갱신: 서버 시작 시 1회 + 매일 08:00 KST 1회
         scheduler.add_job(swing_prediction_cache_wrapper, 'date', id='swing_prediction_startup_job', run_date=datetime.now())
         scheduler.add_job(swing_prediction_cache_wrapper, 'cron', hour=8, minute=0, id='swing_prediction_daily_job')
+        # 스윙 예측 점수 캘리브레이션: 당일 예측 갱신 직후, 지난 예측들의 익일 실제 등락을 누적한다.
+        # 매매에 관여하지 않는 관측 잡이라 실패해도 트레이딩 사이클에 영향이 없다.
+        scheduler.add_job(
+            swing_score_calibration_wrapper,
+            'cron',
+            hour=8,
+            minute=30,
+            id='swing_score_calibration_job',
+            max_instances=1,
+            coalesce=True,
+        )
         # ③ 스캐너 캐시 갱신: 10분 주기 (yfinance 대규모 API 호출 - Rate Limit 안전)
         scheduler.add_job(scanner_cache_wrapper, 'interval', minutes=10, id='scanner_cache_job', next_run_time=datetime.now())
         # ④ 자동매매 루프: 1분 주기 (캐시된 시그널로 봇 실행 사용자 처리)
