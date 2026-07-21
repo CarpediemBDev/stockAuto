@@ -4,8 +4,8 @@ import { Toaster } from "sonner";
 import { NavBar } from "@/components/NavBar";
 import "./globals.css";
 
-
-
+import { NextIntlClientProvider } from 'next-intl';
+import { getMessages } from 'next-intl/server';
 const notoSansKR = Noto_Sans_KR({
   variable: "--font-noto-sans-kr",
   subsets: ["latin"],
@@ -25,28 +25,32 @@ export const metadata: Metadata = {
   description: "글로벌 우량주 퀀트 시그널 스캐너 & 자동매매 시스템",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const messages = await getMessages();
+
   return (
     <html
       lang="ko"
       className={`${notoSansKR.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-black text-white relative text-[14px] leading-relaxed">
-        <AuthProvider>
-          <EventStreamProvider>
-            {/* 글로벌 상단 네비게이션 바 */}
-            <NavBar />
+        <NextIntlClientProvider messages={messages}>
+          <AuthProvider>
+            <EventStreamProvider>
+              {/* 글로벌 상단 네비게이션 바 */}
+              <NavBar />
 
-            {/* 메인 컨텐츠 영역 */}
-            <div className="flex-1 w-full">
-              {children}
-            </div>
-          </EventStreamProvider>
-        </AuthProvider>
+              {/* 메인 컨텐츠 영역 */}
+              <div className="flex-1 w-full">
+                {children}
+              </div>
+            </EventStreamProvider>
+          </AuthProvider>
+        </NextIntlClientProvider>
 
         {/* 환경 식별 뱃지 (좌측 하단 띠) */}
         <EnvironmentBadge />

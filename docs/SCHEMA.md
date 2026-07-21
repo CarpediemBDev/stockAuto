@@ -57,6 +57,7 @@ erDiagram
         float avg_price
         int quantity
         float highest_price
+        float rolling_stop_price
         float last_price
         datetime last_price_updated_at
         string regime_mode
@@ -162,6 +163,7 @@ erDiagram
 * `avg_price` (FLOAT): 매수 평단가 (피라미딩 시 가중평균 갱신)
 * `quantity` (INTEGER): 보유 수량
 * `highest_price` (FLOAT): **매수 이후 최고가 (Trailing Stop 고점 기준점)**
+* `rolling_stop_price` (NUMERIC(20,4), Nullable): 롤링 박스 스탑 래칫 가격 — 최근 N봉 저점 박스 하단의 단조 증가 스탑. `use_rolling_box_stop` opt-in 전략만 갱신·판정에 사용하며 NULL은 미시드 상태.
 * `last_price` (NUMERIC(20,4), Nullable): 스케줄러가 관측·영속화한 최근 현재가 (`avg_price`와 동일한 USD 기준). 유저 대면 잔고/보유종목 API가 외부 시세 호출 없이 평가금을 계산하는 원천.
 * `last_price_updated_at` (DATETIME, Nullable): `last_price` 관측 시각. 백그라운드 잡이 10분 이상 낡은 종목만 벌크 시세로 재갱신하는 신선도 기준.
 * `regime_mode` (VARCHAR, Nullable): ⭐ **[v2.0]** 최초 진입 당시 장세 레짐

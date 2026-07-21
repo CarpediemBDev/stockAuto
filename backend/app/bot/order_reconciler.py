@@ -558,22 +558,16 @@ async def reconcile_open_orders_once(session_factory=SessionLocal) -> int:
                 db.commit()
                 processed += 1
 
+                from app.core.i18n import I18n
+                user_lang = "ko"
+                
                 if application.applied_qty > 0 or resolved:
-                    resolution_text = "\nOrder resolved; bot preference unchanged." if resolved else ""
-                    send_message_async(
-                        user_id,
-                        f"*Order Reconciliation Updated*\n"
-                        f"Side: `{side}`\nTicker: `{ticker}`\nStatus: `{status}`\n"
-                        f"Applied: `{cumulative}/{requested}`{resolution_text}",
-                    )
+                    resolution_text = "\n" + I18n.get_msg(user_lang, "ui.order_resolved", default="주문이 최종 확인되었습니다. 봇 상태 정상 유지.") if resolved else ""
+                    msg = I18n.get_msg(user_lang, "telegram.order_reconciled", side=side, ticker=ticker, status=status, cumulative=cumulative, requested=requested, resolution_text=resolution_text)
+                    send_message_async(user_id, msg)
                 elif stale_alert:
-                    send_message_async(
-                        user_id,
-                        f"*Order Reconciliation Still Pending*\n"
-                        f"Side: `{side}`\nTicker: `{ticker}`\nStatus: `{status}`\n"
-                        f"Error: `{last_error or 'none'}`\n\n"
-                        "New trading cycles remain blocked by the order ledger while reconciliation continues.",
-                    )
+                    msg = I18n.get_msg(user_lang, "telegram.order_stale", side=side, ticker=ticker, status=status, error=last_error or 'none')
+                    send_message_async(user_id, msg)
             finally:
                 await symbol_lease.release()
         except Exception:

@@ -111,6 +111,9 @@ class UserSettings(Base):
     # 텔레그램 설정
     telegram_chat_id = Column(String, nullable=True)
     telegram_enabled = Column(Boolean, default=False)
+    
+    # 다국어 설정 (ko/en)
+    language = Column(String(10), default="ko")
 
     # 봇 기동 제어 스위치
     is_running = Column(Boolean, default=False)
@@ -182,6 +185,7 @@ class Holding(Base):
     avg_price = Column(Numeric(precision=20, scale=4, asdecimal=True))   # 평단가
     quantity = Column(Integer)  # 보유수량
     highest_price = Column(Numeric(precision=20, scale=4, asdecimal=True)) # 구매 후 최고가 (트레일링 스탑 기준점)
+    rolling_stop_price = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)  # 롤링 박스 스탑 래칫 가격 (단조 증가, opt-in 전략 한정)
     last_price = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)  # 최근 관측 현재가 (avg_price와 동일한 USD 기준)
     last_price_updated_at = Column(AwareDateTime, nullable=True)  # last_price 관측 시각 (신선도 판단 기준)
     regime_mode = Column(String, nullable=True)     # ⭐ v2.0 진입 당시 장세 레짐
