@@ -1,6 +1,8 @@
 import pandas as pd
 from abc import ABC, abstractmethod
 
+from app.bot.trade_calculations import DEFAULT_ROLLING_BOX_MINUTES
+
 class BaseStrategy(ABC):
     """
     모든 트레이딩 전략이 상속받아야 하는 추상 베이스 클래스입니다.
@@ -11,11 +13,16 @@ class BaseStrategy(ABC):
     # 스케줄러의 전용 경로(process_autonomous_slots)가 직접 집행합니다.
     is_autonomous = False
 
-    # 롤링 박스 트레일링 스탑: 최근 N봉 저점 박스 하단(래칫 단조 증가)을 이탈하면 청산.
+    # 롤링 박스 트레일링 스탑: 최근 박스 구간의 저점(래칫 단조 증가)을 이탈하면 청산.
     # 절대 최고가 기준 ATR 트레일링이 횡보 구간에서 옛 고점에 앵커링되어 느슨해지는
     # 문제를 보완한다. 기본 비활성 — 백테스트 A/B로 검증된 전략만 True로 opt-in.
+    #
+    # 박스 길이는 '봉 개수'가 아니라 '시간 길이(분)'로 선언한다. 봉 개수로 두면 같은
+    # 값이 라이브(15분봉)와 백테스트(전략 인터벌)에서 서로 다른 실시간 길이를 뜻해
+    # 검증 결과가 라이브로 전이되지 않는다. 실제 봉 수 환산은 각 타임프레임에서
+    # trade_calculations.resolve_rolling_box_bars가 단독으로 담당한다.
     use_rolling_box_stop = False
-    rolling_box_window = 10
+    rolling_box_minutes = DEFAULT_ROLLING_BOX_MINUTES
 
     def __init__(self, name: str = "Base Strategy"):
         self.name = name
