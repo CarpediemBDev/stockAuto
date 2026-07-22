@@ -3,8 +3,18 @@
     "orphan_order_recovered": "*Orphan Order Recovered*\nSide: {side}\nTicker: {ticker}\nOrder No: {broker_order_no}\nStatus: {status}\nBot preference unchanged.",
     "order_reconciled": "*Order Reconciliation Updated*\nSide: {side}\nTicker: {ticker}\nStatus: {status}\nApplied: {cumulative}/{requested}{resolution_text}",
     "order_stale": "*Order Reconciliation Still Pending*\nSide: {side}\nTicker: {ticker}\nStatus: {status}\nError: {error}\n\nNew trading cycles remain blocked by the order ledger while reconciliation continues.",
-    "regime_exit": "🔴 *[{strategy_name} Regime Exit Sell]*\nTicker: {asset}\n• *Filled Price:* ${filled_price:,.2f}\n• *Filled Qty:* {filled_qty} shares\n• *Reason:* SMA{sma_period} downward crossover {confirm_days} days confirmed\n\n{pnl_emoji} *Return Rate:* {pnl_sign}{return_rate:.2f}%\n💰 *Realized PnL:* {pnl_sign}\n• *Order No:* {order_no}"
+    "regime_exit": "🔴 *[{strategy_name} Regime Exit Sell]*\nTicker: {asset}\n• *Filled Price:* ${filled_price:,.2f}\n• *Filled Qty:* {filled_qty} shares\n• *Reason:* SMA{sma_period} downward crossover {confirm_days} days confirmed\n\n{pnl_emoji} *Return Rate:* {pnl_sign}{return_rate:.2f}%\n💰 *Realized PnL:* {pnl_sign}\n• *Order No:* {order_no}",
+    "order_recovery_ambiguous": "⚠️ *[Orphan Order Linking Deferred]*\n• *Side:* {side}\n• *Ticker:* {ticker}\n• *Matching Orders:* {candidate_count}\n\nSeveral broker orders match this intent, so automatic linking was refused to avoid mislinking. Your bot preference is unchanged."
   },
-  "exception": {},
-  "ui": {}
+  "ui": {
+    "order_resolved": "The order has been fully confirmed. Bot status remains normal."
+  },
+  "admin": {
+    "users": {
+      "title": "User Management & Live Arena",
+      "sort_profit": "Rank by Return",
+      "loading": "Loading user data...",
+      "no_data": "No users have signed up yet."
+    }
+  }
 }

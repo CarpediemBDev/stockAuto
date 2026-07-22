@@ -1,0 +1,179 @@
+"""다국어 알림 메시지(I18n) 회귀 테스트.
+
+핵심 불변식:
+1. 키를 못 찾아도 사용자에게 날 키 문자열('ui.order_resolved')이 전달되지 않는다
+   — default가 있으면 default, 없으면 ko로 강등한다. 실제로 텔레그램에 키가
+   그대로 노출되던 결함의 재발 방지가 이 파일의 존재 이유다.
+2. default는 이름 있는 매개변수이며 포맷 인자로 오염되지 않는다.
+3. 알림 언어는 UserSettings.language에서 결정되고, 조회가 실패해도 'ko'로 폴백한다.
+4. ko/en 딕셔너리는 같은 키 집합을 가지며 플레이스홀더도 일치한다.
+"""
+
+import json
+import pathlib
+import re
+
+import pytest
+
+from app.core.i18n import I18n, resolve_user_language
+
+LOCALES_DIR = pathlib.Path(__file__).resolve().parents[2] / "locales"
+
+
+def _load(lang: str) -> dict:
+    return json.loads((LOCALES_DIR / f"{lang}.json").read_text(encoding="utf-8"))
+
+
+def _flatten(d: dict, prefix: str = "") -> dict:
+    flat = {}
+    for key, value in d.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            flat.update(_flatten(value, path))
+        else:
+            flat[path] = value
+    return flat
+
+
+class TestMissingKeyNeverLeaks:
+    def test_missing_key_with_default_returns_default(self):
+        result = I18n.get_msg("ko", "ui.__does_not_exist__", default="대체 문구")
+        assert result == "대체 문구"
+
+    def test_missing_key_without_default_degrades_to_key(self):
+        # default가 없으면 키로 강등되지만, 이 경우 WARNING 로그가 남아 탐지 가능해야 한다.
+        result = I18n.get_msg("ko", "ui.__does_not_exist__")
+        assert result == "ui.__does_not_exist__"
+
+    def test_order_resolved_key_actually_exists(self):
+        # 결함 재발 방지: 이 키가 비면 텔레그램 본문에 'ui.order_resolved'가 노출됐었다.
+        result = I18n.get_msg("ko", "ui.order_resolved", default="fallback")
+        assert result != "ui.order_resolved"
+        assert result != "fallback"
+        assert "봇" in result
+
+    def test_default_is_not_consumed_as_format_arg(self):
+        # default가 **kwargs로 새면 포맷 인자로 오해된다 — 이름 있는 매개변수여야 한다.
+        result = I18n.get_msg("ko", "telegram.orphan_order_recovered",
+                              default="쓰이면 안 됨",
+                              side="BUY", ticker="AAPL",
+                              broker_order_no="123", status="FILLED")
+        assert "쓰이면 안 됨" not in result
+        assert "AAPL" in result
+
+
+class TestLanguageFallback:
+    def test_unknown_language_falls_back_to_ko(self):
+        ko = I18n.get_msg("ko", "ui.order_resolved")
+        assert I18n.get_msg("fr", "ui.order_resolved") == ko
+
+    def test_empty_language_falls_back_to_ko(self):
+        ko = I18n.get_msg("ko", "ui.order_resolved")
+        assert I18n.get_msg("", "ui.order_resolved") == ko
+        assert I18n.get_msg(None, "ui.order_resolved") == ko
+
+    def test_english_returns_english(self):
+        result = I18n.get_msg("en", "ui.order_resolved")
+        assert result != I18n.get_msg("ko", "ui.order_resolved")
+        assert "Bot status" in result
+
+
+class TestResolveUserLanguage:
+    def test_returns_ko_when_lookup_raises(self):
+        class BrokenDB:
+            def query(self, *a, **k):
+                raise RuntimeError("db is down")
+
+        # 알림 자체는 나가야 하므로 조회 실패는 항상 ko로 폴백한다.
+        assert resolve_user_language(BrokenDB(), 1) == "ko"
+
+    def test_returns_ko_when_settings_missing(self):
+        class EmptyDB:
+            def query(self, *a, **k):
+                return self
+
+            def filter(self, *a, **k):
+                return self
+
+            def scalar(self):
+                return None
+
+        assert resolve_user_language(EmptyDB(), 1) == "ko"
+
+    def test_returns_stored_language(self):
+        class EnDB:
+            def query(self, *a, **k):
+                return self
+
+            def filter(self, *a, **k):
+                return self
+
+            def scalar(self):
+                return "en"
+
+        assert resolve_user_language(EnDB(), 1) == "en"
+
+
+class TestDictionaryParity:
+    def test_ko_and_en_have_identical_key_sets(self):
+        ko_keys = set(_flatten(_load("ko")))
+        en_keys = set(_flatten(_load("en")))
+        assert ko_keys == en_keys, (
+            f"ko 전용: {sorted(ko_keys - en_keys)} / en 전용: {sorted(en_keys - ko_keys)}"
+        )
+
+    def test_placeholders_match_across_languages(self):
+        ko = _flatten(_load("ko"))
+        en = _flatten(_load("en"))
+        placeholder = re.compile(r"\{(\w+)")
+        for key, ko_text in ko.items():
+            if not isinstance(ko_text, str):
+                continue
+            # 플레이스홀더가 어긋나면 한쪽 언어에서만 KeyError로 포맷이 깨진다.
+            assert set(placeholder.findall(ko_text)) == set(placeholder.findall(en[key])), key
+
+    def test_no_empty_namespace_left_behind(self):
+        # 빈 네임스페이스는 '연결됐다고 착각하지만 키가 없는' 상태를 만든다.
+        # exception 네임스페이스가 정확히 이 상태로 방치되어 있었고, 참조하는 코드가
+        # 하나도 없어 제거했다. 예외 메시지 다국어화를 실제로 구현할 때 키와 함께 추가할 것.
+        for lang in ("ko", "en"):
+            for namespace, body in _load(lang).items():
+                assert body, f"{lang}.json의 '{namespace}' 네임스페이스가 비어 있음"
+
+
+class TestFrontendConsumedKeysExist:
+    """프론트가 useTranslations로 요청하는 키가 딕셔너리에 실재하는지 검증한다.
+
+    소비자 코드만 병합되고 딕셔너리가 빠져 화면에 키 경로가 노출되던 상태를 막는다.
+    """
+
+    FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
+
+    def _consumed_keys(self) -> set[str]:
+        namespace_re = re.compile(r"const\s+(\w+)\s*=\s*useTranslations\(\s*['\"]([^'\"]+)['\"]\s*\)")
+        consumed = set()
+        for path in self.FRONTEND.rglob("*.tsx"):
+            if "node_modules" in path.parts or ".next" in str(path):
+                continue
+            source = path.read_text(encoding="utf-8", errors="ignore")
+            for var, namespace in namespace_re.findall(source):
+                for key in re.findall(rf"\b{var}\(\s*['\"]([^'\"]+)['\"]", source):
+                    consumed.add(f"{namespace}.{key}")
+        return consumed
+
+    def test_every_consumed_key_is_defined(self):
+        consumed = self._consumed_keys()
+        assert consumed, "useTranslations 소비 키를 하나도 찾지 못했다 — 추출 정규식 점검 필요"
+        defined = set(_flatten(_load("ko")))
+        missing = sorted(consumed - defined)
+        assert not missing, f"프론트가 쓰는데 ko.json에 없는 키: {missing}"
+
+
+class TestDiscoveryNotificationLocalized:
+    @pytest.mark.parametrize("lang,marker", [("ko", "보류"), ("en", "Deferred")])
+    def test_ambiguous_notification_has_both_languages(self, lang, marker):
+        result = I18n.get_msg(lang, "telegram.order_recovery_ambiguous",
+                              side="BUY", ticker="TSLA", candidate_count=3)
+        assert marker in result
+        assert "TSLA" in result
+        assert "3" in result
