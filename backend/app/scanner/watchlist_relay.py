@@ -15,6 +15,10 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.database import SessionLocal
 from app.core.logging import logger
+from app.core.system_settings import (
+    SETTING_ENABLE_SCANNER_RELAY,
+    is_system_setting_enabled,
+)
 
 # 릴레이 출처 태그 (source_map에 병기되어 다운스트림에서 유래를 추적)
 RELAY_SOURCE_AFTER_HOURS = "RELAY_AFTER_HOURS"
@@ -102,8 +106,16 @@ def get_relay_priority_map() -> dict[str, list[str]]:
 
     동기 DB 접근이 포함되므로 async 컨텍스트에서는 asyncio.to_thread로 호출할 것.
     모든 실패는 삼켜지고 해당 소스 몫만 빈 채로 반환된다.
+
+    킬 스위치(enable_scanner_relay)가 꺼져 있으면 빈 맵을 반환해, 스캐너가 릴레이
+    도입 이전과 완전히 동일하게 동작한다. 스위치 조회 자체가 실패하면 기본값(ON)으로
+    폴백하므로 일시적 DB 장애가 매매 대상을 조용히 축소하지 않는다.
     """
     priority: dict[str, list[str]] = {}
+
+    if not is_system_setting_enabled(SETTING_ENABLE_SCANNER_RELAY):
+        logger.info("[Relay] disabled by system setting — falling back to normal scan universe")
+        return priority
 
     try:
         for ticker in _collect_after_hours():
