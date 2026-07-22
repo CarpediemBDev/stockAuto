@@ -558,9 +558,9 @@ async def reconcile_open_orders_once(session_factory=SessionLocal) -> int:
                 db.commit()
                 processed += 1
 
-                from app.core.i18n import I18n
-                user_lang = "ko"
-                
+                from app.core.i18n import I18n, resolve_user_language
+                user_lang = resolve_user_language(db, user_id)
+
                 if application.applied_qty > 0 or resolved:
                     resolution_text = "\n" + I18n.get_msg(user_lang, "ui.order_resolved", default="주문이 최종 확인되었습니다. 봇 상태 정상 유지.") if resolved else ""
                     msg = I18n.get_msg(user_lang, "telegram.order_reconciled", side=side, ticker=ticker, status=status, cumulative=cumulative, requested=requested, resolution_text=resolution_text)

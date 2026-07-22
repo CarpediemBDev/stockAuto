@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 from app.brokers.broker_factory import get_broker_client
 from app.bot.order_reconciler import apply_broker_report
 from app.core.database import SessionLocal
+from app.core.i18n import I18n, resolve_user_language
 from app.core.logging import logger
 from app.core.models import ActionLog, BrokerOrder, UserSettings, utc_now_aware
 from app.core.telegram import send_message_async
@@ -174,10 +175,13 @@ def discover_orphan_orders_once(session_factory=SessionLocal) -> int:
                 ))
                 notifications.append((
                     order.user_id,
-                    f"*Order Recovery Ambiguous*\n"
-                    f"Side: `{order.side}`\nTicker: `{order.ticker}`\n"
-                    f"Candidates: `{len(candidates)}`\n\n"
-                    "Automatic linking was refused; the user's bot preference was preserved.",
+                    I18n.get_msg(
+                        resolve_user_language(db, order.user_id),
+                        "telegram.order_recovery_ambiguous",
+                        side=order.side,
+                        ticker=order.ticker,
+                        candidate_count=len(candidates),
+                    ),
                 ))
                 continue
 
@@ -197,20 +201,15 @@ def discover_orphan_orders_once(session_factory=SessionLocal) -> int:
                     f"applied={application.applied_qty}."
                 ),
             ))
-            from app.core.i18n import I18n
-            
-            # TODO: Get user's preferred language from DB, for now default to 'ko'
-            user_lang = "ko"
-            
             msg = I18n.get_msg(
-                user_lang, 
-                "telegram.orphan_order_recovered", 
-                side=order.side, 
-                ticker=order.ticker, 
-                broker_order_no=order.broker_order_no, 
-                status=order.status
+                resolve_user_language(db, order.user_id),
+                "telegram.orphan_order_recovered",
+                side=order.side,
+                ticker=order.ticker,
+                broker_order_no=order.broker_order_no,
+                status=order.status,
             )
-            
+
             notifications.append((order.user_id, msg))
 
         db.commit()

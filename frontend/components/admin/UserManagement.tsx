@@ -206,7 +206,6 @@ export function UserManagement() {
 
 
   const t = useTranslations('admin.users');
-  const tTrans = useTranslations('admin.translation');
 
   return (
     <div className="space-y-6">
@@ -217,7 +216,7 @@ export function UserManagement() {
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <Users size={18} className="text-blue-400" />
-            {t('title')} & 실시간 아레나
+            {t('title')}
           </h2>
           <div className="flex items-center gap-3">
             {/* 랭킹 정렬 토글 스위치 */}
@@ -245,12 +244,12 @@ export function UserManagement() {
           {loading ? (
             <div className="py-20 flex flex-col items-center justify-center gap-3">
               <Loader2 size={36} className="animate-spin text-zinc-500" />
-              <span className="text-xs text-zinc-500 font-semibold">{tTrans('loading')}</span>
+              <span className="text-xs text-zinc-500 font-semibold">{t('loading')}</span>
             </div>
           ) : usersList.length === 0 ? (
             <div className="py-16 text-center">
               <Users size={48} className="mx-auto text-zinc-700 mb-3" />
-              <p className="text-sm font-semibold text-zinc-500">{tTrans('no_data')}</p>
+              <p className="text-sm font-semibold text-zinc-500">{t('no_data')}</p>
             </div>
           ) : (
             <table className="w-full divide-y divide-zinc-800/60">
