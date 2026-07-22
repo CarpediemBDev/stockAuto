@@ -13,6 +13,15 @@ import pytest
 from app.scanner import watchlist_relay as relay
 
 
+@pytest.fixture(autouse=True)
+def relay_enabled(monkeypatch):
+    """킬 스위치 조회가 로컬 DB 상태에 좌우되지 않도록 기본 ON으로 고정한다.
+
+    스위치 자체를 검증하는 테스트는 이 픽스처를 다시 덮어쓴다.
+    """
+    monkeypatch.setattr(relay, "is_system_setting_enabled", lambda key: True)
+
+
 def _iso(dt: datetime) -> str:
     return dt.isoformat()
 
@@ -148,3 +157,41 @@ class TestReservedSlots:
         merged = relay.merge_reserved_candidates(ranked, base_limit=25)
         assert [c["ticker"] for c in merged].count("R0") == 1
         assert len(merged) == 25
+
+
+class TestKillSwitch:
+    def test_disabled_switch_returns_empty_map_without_touching_sources(self, monkeypatch):
+        def boom():
+            raise AssertionError("스위치가 꺼지면 소스를 조회하지 않아야 한다")
+
+        monkeypatch.setattr(relay, "is_system_setting_enabled", lambda key: False)
+        monkeypatch.setattr(relay, "_collect_after_hours", boom)
+        monkeypatch.setattr(relay, "_collect_swing", boom)
+        assert relay.get_relay_priority_map() == {}
+
+    def test_enabled_switch_collects_normally(self, monkeypatch):
+        monkeypatch.setattr(relay, "is_system_setting_enabled", lambda key: True)
+        monkeypatch.setattr(relay, "_collect_after_hours", lambda: ["AAA"])
+        monkeypatch.setattr(relay, "_collect_swing", lambda: [])
+        assert relay.get_relay_priority_map() == {"AAA": [relay.RELAY_SOURCE_AFTER_HOURS]}
+
+    def test_switch_is_queried_with_the_relay_key(self, monkeypatch):
+        seen = []
+        monkeypatch.setattr(relay, "is_system_setting_enabled", lambda key: seen.append(key) or True)
+        monkeypatch.setattr(relay, "_collect_after_hours", lambda: [])
+        monkeypatch.setattr(relay, "_collect_swing", lambda: [])
+        relay.get_relay_priority_map()
+        assert seen == [relay.SETTING_ENABLE_SCANNER_RELAY]
+
+    def test_spec_default_is_on_so_db_failure_keeps_relay_alive(self):
+        from app.core.system_settings import (
+            SETTING_ENABLE_SCANNER_RELAY,
+            SYSTEM_SETTING_SPECS,
+        )
+
+        spec = SYSTEM_SETTING_SPECS[SETTING_ENABLE_SCANNER_RELAY]
+        # 조회 실패 시 get_system_setting이 default로 폴백하므로, 기본값이 ON이어야
+        # 일시적 DB 장애가 매매 대상을 조용히 축소하지 않는다.
+        assert spec.default is True
+        assert spec.value_type == "bool"
+        assert spec.is_runtime is True

@@ -22,6 +22,7 @@ class SystemSettingSpec:
 
 
 SETTING_ENABLE_GEMINI_NEWS_ANALYSIS = "enable_gemini_news_analysis"
+SETTING_ENABLE_SCANNER_RELAY = "enable_scanner_relay"
 
 SYSTEM_SETTING_SPECS: dict[str, SystemSettingSpec] = {
     SETTING_ENABLE_GEMINI_NEWS_ANALYSIS: SystemSettingSpec(
@@ -30,6 +31,19 @@ SYSTEM_SETTING_SPECS: dict[str, SystemSettingSpec] = {
         value_type="bool",
         category="ai",
         description="Enable Gemini-backed AI analysis for scanner news headlines.",
+        is_runtime=True,
+        is_public=False,
+    ),
+    # 릴레이는 이미 가동 중인 기능이므로 기본값은 ON이다. 이 스위치는 신규 기능의
+    # opt-in이 아니라 '오작동 시 재배포 없이 즉시 끄는' 킬 스위치이며, DB 조회
+    # 실패 시 get_system_setting이 default로 폴백하므로 일시적 DB 장애가 매매
+    # 대상을 조용히 바꾸지 않는다.
+    SETTING_ENABLE_SCANNER_RELAY: SystemSettingSpec(
+        key=SETTING_ENABLE_SCANNER_RELAY,
+        default=True,
+        value_type="bool",
+        category="scanner",
+        description="Enable the scanner relay that feeds after-hours and swing-prediction candidates into the intraday scan universe.",
         is_runtime=True,
         is_public=False,
     ),
