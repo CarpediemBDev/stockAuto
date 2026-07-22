@@ -12,12 +12,15 @@ import { useAuthStore } from "@/store/authStore";
 import { useTimezone } from "@/store/timezoneStore";
 import { toast } from "sonner";
 import { Globe, Activity } from "lucide-react";
+import { useTranslations } from "next-intl";
 
-// 모바일(<md)에서는 아이콘만 노출해 가로 오버플로를 막는다
+// 모바일(<md)에서는 아이콘만 노출해 가로 오버플로를 막는다.
+// 라벨은 모듈 로드 시점에 확정할 수 없으므로(로케일은 렌더 시점에 정해진다)
+// 번역 키만 들고 있다가 컴포넌트 안에서 t()로 푼다.
 const navItems = [
-  { href: "/", icon: "📈", text: "자동 매매" },
-  { href: "/scanner", icon: "🔭", text: "마켓 스캐너" },
-  { href: "/report", icon: "📊", text: "매매 보고서" },
+  { href: "/", icon: "📈", labelKey: "trading" },
+  { href: "/scanner", icon: "🔭", labelKey: "scanner" },
+  { href: "/report", icon: "📊", labelKey: "report" },
 ];
 
 export function NavBar() {
@@ -28,6 +31,7 @@ export function NavBar() {
   const [isTimezoneMenuOpen, setIsTimezoneMenuOpen] = useState(false);
   const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
   const { accessToken, username, role, clearAuth } = useAuthStore();
+  const t = useTranslations("nav");
   const { selectedTimezone, timezoneOptions, setTimezone } = useTimezone();
   const [currentLang, setCurrentLang] = useState("ko"); // 기본 언어
 
@@ -76,14 +80,14 @@ export function NavBar() {
     try {
       if (isBotRunning) {
         await botAPI.stop();
-        toast.success("자율 트레이딩 자동매매 루프를 정지했습니다.");
+        toast.success(t("toast.bot_stopped"));
       } else {
         await botAPI.start();
-        toast.success("자율 트레이딩 자동매매 루프를 가동했습니다.");
+        toast.success(t("toast.bot_started"));
       }
       mutate();
     } catch (error: unknown) {
-      const errMsg = error instanceof Error ? error.message : "봇 제어에 실패했습니다.";
+      const errMsg = error instanceof Error ? error.message : t("toast.bot_control_failed");
       toast.error(errMsg);
     } finally {
       setIsTogglingBot(false);
@@ -103,6 +107,9 @@ export function NavBar() {
       // 3. 페이지 새로고침하여 서버 컴포넌트들 재렌더링
       router.refresh();
       setIsLangMenuOpen(false);
+      // 이 토스트만 의도적으로 리터럴을 쓴다. useTranslations는 '변경 전' 로케일에
+      // 묶여 있어 t()로 뽑으면 새 언어가 아니라 옛 언어로 안내된다. 언어 변경 안내는
+      // 바뀐 언어로 보여야 하므로 대상 언어 문구를 직접 고른다.
       toast.success(lang === 'ko' ? "한국어로 변경되었습니다." : "Language changed to English.");
     } catch (e) {
       console.error(e);
@@ -119,7 +126,7 @@ export function NavBar() {
       // 무시
     }
     clearAuth();
-    toast.success("성공적으로 로그아웃되었습니다.");
+    toast.success(t("toast.logged_out"));
     router.push("/login");
   };
 
@@ -166,12 +173,13 @@ export function NavBar() {
                     item.href === "/"
                       ? pathname === "/"
                       : pathname.startsWith(item.href);
+                  const label = t(item.labelKey);
 
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
-                      title={item.text}
+                      title={label}
                       className={cn(
                         "px-3 md:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap",
                         isActive
@@ -179,7 +187,7 @@ export function NavBar() {
                           : "text-zinc-400 hover:text-white hover:bg-zinc-800/50"
                       )}
                     >
-                      {item.icon} <span className="hidden md:inline">{item.text}</span>
+                      {item.icon} <span className="hidden md:inline">{label}</span>
                     </Link>
                   );
                 })}
@@ -197,7 +205,7 @@ export function NavBar() {
                         setIsTimezoneMenuOpen(false);
                       }}
                       className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-zinc-800/50 text-zinc-400 hover:text-white transition-colors duration-200 text-xs font-bold uppercase"
-                      title="언어 변경"
+                      title={t("language_change")}
                     >
                       {currentLang}
                     </button>
@@ -242,7 +250,7 @@ export function NavBar() {
                         setIsLangMenuOpen(false);
                       }}
                       className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-zinc-800/50 text-zinc-400 hover:text-white transition-colors duration-200"
-                      title="타임존 변경"
+                      title={t("timezone_change")}
                     >
                       <Globe size={18} />
                     </button>
@@ -260,7 +268,7 @@ export function NavBar() {
                                 onClick={() => {
                                   setTimezone(tz.id);
                                   setIsTimezoneMenuOpen(false);
-                                  toast.success(`타임존이 ${tz.abbr} 기준으로 변경되었습니다.`);
+                                  toast.success(t("toast.timezone_changed", { abbr: tz.abbr }));
                                 }}
                                 className={cn(
                                   "w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-200",
@@ -291,7 +299,7 @@ export function NavBar() {
                       className="flex items-center space-x-2.5 px-3.5 py-1.5 rounded-xl border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 hover:bg-zinc-900/50 text-white font-semibold text-xs tracking-tight transition-all duration-200 active:scale-[0.98] cursor-pointer"
                     >
                     <span className={cn("w-1.5 h-1.5 rounded-full animate-pulse", isBotRunning ? "bg-emerald-500" : "bg-zinc-500")}></span>
-                    <span>{username}님</span>
+                    <span>{t("user_greeting", { username: username ?? "" })}</span>
                     <svg
                       className={cn("w-3.5 h-3.5 text-zinc-400 transition-transform duration-200", isUserMenuOpen && "rotate-180")}
                       fill="none"
@@ -315,16 +323,16 @@ export function NavBar() {
                         {/* 실시간 상태 정보 */}
                         <div className="px-3 py-1.5 space-y-1 text-[11px] text-zinc-400">
                           <div className="flex justify-between items-center">
-                            <span>엔진 모드:</span>
+                            <span>{t("engine_mode")}</span>
                             <span className="font-semibold text-zinc-200">
                               {tradeMode === 'REAL' ? '🔥 REAL' : tradeMode === 'MOCK' ? '⚡ MOCK' : '📝 SIMULATED'}
                             </span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span>봇 상태:</span>
+                            <span>{t("bot_status")}</span>
                             <span className={cn("font-bold flex items-center gap-1", isBotRunning ? "text-emerald-400" : "text-zinc-500")}>
                               <span className={cn("w-1.5 h-1.5 rounded-full", isBotRunning ? "bg-emerald-500 animate-pulse" : "bg-zinc-500")}></span>
-                              {isBotRunning ? "가동 중" : "정지됨"}
+                              {isBotRunning ? t("running") : t("stopped")}
                             </span>
                           </div>
                         </div>
@@ -346,12 +354,12 @@ export function NavBar() {
                             ) : isBotRunning ? (
                               <>
                                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
-                                <span>자동매매 즉시 정지</span>
+                                <span>{t("stop_now")}</span>
                               </>
                             ) : (
                               <>
                                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"/></svg>
-                                <span>자동매매 즉시 가동</span>
+                                <span>{t("start_now")}</span>
                               </>
                             )}
                           </button>
@@ -370,7 +378,7 @@ export function NavBar() {
                               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                               </svg>
-                              <span className="text-blue-400 font-bold">🛡️ 마스터 어드민 패널</span>
+                              <span className="text-blue-400 font-bold">{t("admin_panel")}</span>
                             </Link>
                             <Link
                               href="/admin/system"
@@ -378,7 +386,7 @@ export function NavBar() {
                               className="flex items-center space-x-2 px-2.5 py-2 rounded-lg text-left text-zinc-400 hover:text-white hover:bg-zinc-800/50 text-xs font-semibold transition-all duration-200 cursor-pointer"
                             >
                               <Activity size={14} className="text-emerald-400" />
-                              <span className="text-emerald-400 font-bold">📡 시스템 헬스 관제</span>
+                              <span className="text-emerald-400 font-bold">{t("system_health")}</span>
                             </Link>
                           </>
                         )}
@@ -393,7 +401,7 @@ export function NavBar() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                           </svg>
-                          <span>⚙️ 개인 투자 설정</span>
+                          <span>{t("personal_settings")}</span>
                         </Link>
 
                         {/* 로그아웃 */}
@@ -407,7 +415,7 @@ export function NavBar() {
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                           </svg>
-                          <span>로그아웃</span>
+                          <span>{t("logout")}</span>
                         </button>
                       </div>
                     </>

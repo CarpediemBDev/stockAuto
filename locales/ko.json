@@ -9,6 +9,31 @@
   "ui": {
     "order_resolved": "주문이 최종 확인되었습니다. 봇 상태 정상 유지."
   },
+  "nav": {
+    "trading": "자동 매매",
+    "scanner": "마켓 스캐너",
+    "report": "매매 보고서",
+    "language_change": "언어 변경",
+    "timezone_change": "타임존 변경",
+    "user_greeting": "{username}님",
+    "engine_mode": "엔진 모드:",
+    "bot_status": "봇 상태:",
+    "running": "가동 중",
+    "stopped": "정지됨",
+    "stop_now": "자동매매 즉시 정지",
+    "start_now": "자동매매 즉시 가동",
+    "admin_panel": "🛡️ 마스터 어드민 패널",
+    "system_health": "📡 시스템 헬스 관제",
+    "personal_settings": "⚙️ 개인 투자 설정",
+    "logout": "로그아웃",
+    "toast": {
+      "bot_started": "자율 트레이딩 자동매매 루프를 가동했습니다.",
+      "bot_stopped": "자율 트레이딩 자동매매 루프를 정지했습니다.",
+      "bot_control_failed": "봇 제어에 실패했습니다.",
+      "timezone_changed": "타임존이 {abbr} 기준으로 변경되었습니다.",
+      "logged_out": "성공적으로 로그아웃되었습니다."
+    }
+  },
   "admin": {
     "users": {
       "title": "사용자 관리 & 실시간 아레나",
