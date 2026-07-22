@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from app.core.config import settings
@@ -144,8 +145,56 @@ def check_trailing_stop_breach(
     return dec_current_price <= threshold and dec_highest_price > dec_avg_price
 
 
-# 롤링 박스 트레일링 스탑의 기본 윈도우 봉 수 (전략별 override는 BaseStrategy.rolling_box_window)
-DEFAULT_ROLLING_BOX_WINDOW = 10
+# 롤링 박스 트레일링 스탑의 박스 길이는 '봉 개수'가 아니라 '시간 길이(분)'로 정의한다.
+# 봉 개수로 두면 같은 값이 라이브(15분봉)와 백테스트(전략 인터벌)에서 서로 다른
+# 실시간 길이를 뜻하게 되어, 백테스트 검증 결과가 라이브로 전이되지 않는다.
+DEFAULT_ROLLING_BOX_MINUTES = 150      # 2.5시간 (15분봉 10개 — 기존 라이브 동작과 동일)
+# 라이브 스캐너가 공급할 수 있는 상한. 이보다 긴 박스를 전략이 선언해도 라이브에서
+# 데이터가 모자라 조용히 미발동되는 것을 막기 위해 환산 단계에서 잘라낸다.
+MAX_ROLLING_BOX_MINUTES = 480          # 8시간
+MIN_ROLLING_BOX_BARS = 2               # 1봉 박스는 직전 봉 저점과 같아 의미가 없다
+LIVE_BOX_BAR_MINUTES = 15              # 라이브 스캐너가 박스 계산에 쓰는 봉 주기
+
+# 백테스트 인터벌별 봉 1개의 길이(분). 1d는 정규장 6.5시간을 기준으로 한다.
+_INTERVAL_BAR_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "1d": 390}
+
+
+def bar_minutes_for_interval(interval: str) -> int:
+    """백테스트 인터벌 문자열을 봉 1개의 길이(분)로 환산한다. 미지의 값은 60분으로 본다."""
+    return _INTERVAL_BAR_MINUTES.get(interval, 60)
+
+
+def resolve_rolling_box_bars(box_minutes: float, bar_minutes: int) -> int:
+    """박스 길이(분)를 해당 타임프레임의 봉 개수로 환산한다.
+
+    라이브와 백테스트가 같은 실시간 길이의 박스를 쓰도록 보장하는 단일 환산 지점이다.
+    나눗셈이 딱 떨어지지 않으면 반올림(0.5는 올림)하며, 결과는 MIN_ROLLING_BOX_BARS
+    이상으로 보정된다 — 예컨대 일봉에서는 2.5시간 박스를 표현할 수 없으므로 2봉이 된다.
+    """
+    if bar_minutes <= 0:
+        raise ValueError("bar_minutes must be positive")
+    minutes = min(max(float(box_minutes), 0.0), float(MAX_ROLLING_BOX_MINUTES))
+    bars = int(math.floor(minutes / bar_minutes + 0.5))
+    return max(MIN_ROLLING_BOX_BARS, bars)
+
+
+def compute_box_low(recent_lows, bars: int) -> float | None:
+    """완성 봉 저점 목록에서 최근 bars개의 최저값을 구한다. 순수 함수.
+
+    봉이 bars개만큼 쌓이지 않았으면 None — 짧은 박스로 인한 조기 발동을 막는다.
+    """
+    if not recent_lows or bars <= 0:
+        return None
+    window = list(recent_lows)[-bars:]
+    if len(window) < bars:
+        return None
+    try:
+        numeric = [float(value) for value in window]
+    except (TypeError, ValueError):
+        return None
+    if any(not math.isfinite(value) or value <= 0 for value in numeric):
+        return None
+    return min(numeric)
 
 
 def compute_rolling_box_stop(

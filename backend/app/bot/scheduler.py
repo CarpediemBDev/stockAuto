@@ -48,10 +48,14 @@ from app.bot.trade_calculations import (
     calculate_buy_total,
     calculate_profit_rate,
     calculate_realized_pnl,
+    DEFAULT_ROLLING_BOX_MINUTES,
+    LIVE_BOX_BAR_MINUTES,
     check_rolling_box_breach,
     check_stop_loss_breach,
     check_trailing_stop_breach,
+    compute_box_low,
     compute_rolling_box_stop,
+    resolve_rolling_box_bars,
     fee_rate_for_trade_mode,
     to_decimal,
 )
@@ -957,7 +961,16 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             use_rolling_box = bool(getattr(strategy_instance, "use_rolling_box_stop", False))
             dec_rolling_stop = to_decimal(getattr(h, "rolling_stop_price", None))
             if use_rolling_box:
-                window_low = current_data.get('details', {}).get('rolling_box_low')
+                # 박스 길이는 전략이 '분' 단위로 선언하고, 라이브 15분봉 기준 봉 수로 환산한다.
+                # 백테스트와 동일한 환산 함수를 써서 두 경로의 박스가 같은 실시간 길이를 갖는다.
+                box_bars = resolve_rolling_box_bars(
+                    getattr(strategy_instance, "rolling_box_minutes", DEFAULT_ROLLING_BOX_MINUTES),
+                    LIVE_BOX_BAR_MINUTES,
+                )
+                window_low = compute_box_low(
+                    current_data.get('details', {}).get('recent_lows_15m'),
+                    box_bars,
+                )
                 if window_low:
                     new_rolling_stop = compute_rolling_box_stop(dec_rolling_stop, window_low)
                     if new_rolling_stop > dec_rolling_stop:

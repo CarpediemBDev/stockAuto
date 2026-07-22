@@ -11,7 +11,9 @@ from app.scanner.indicators import (
 from app.core.logging import logger
 from app.backtests.backtest_metrics import calculate_performance_metrics
 from app.bot.trade_calculations import (
-    DEFAULT_ROLLING_BOX_WINDOW,
+    DEFAULT_ROLLING_BOX_MINUTES,
+    bar_minutes_for_interval,
+    resolve_rolling_box_bars,
     calculate_buy_total,
     calculate_realized_pnl,
     check_rolling_box_breach,
@@ -394,8 +396,13 @@ class BacktestSimulator:
                 metrics['ATR'] = calculate_atr(df, 14)
 
                 # 롤링 박스 스탑용 최근 N봉 저점 (현재 봉 제외 — 박스는 직전 봉들로만 형성)
-                rolling_box_window = int(getattr(self.strategy, 'rolling_box_window', DEFAULT_ROLLING_BOX_WINDOW))
-                metrics['rolling_box_low'] = df['Low'].shift(1).rolling(rolling_box_window).min()
+                # 박스 길이는 전략이 '분' 단위로 선언하고, 백테스트 인터벌의 봉 길이로 환산한다.
+                # 라이브(15분봉)와 동일한 환산 함수를 써야 두 경로의 박스가 같은 실시간 길이를 갖는다.
+                rolling_box_bars = resolve_rolling_box_bars(
+                    getattr(self.strategy, 'rolling_box_minutes', DEFAULT_ROLLING_BOX_MINUTES),
+                    bar_minutes_for_interval(self.interval),
+                )
+                metrics['rolling_box_low'] = df['Low'].shift(1).rolling(rolling_box_bars).min()
 
                 # VWAP 및 Wick 계산
                 metrics['VWAP'] = calculate_vwap(df)
