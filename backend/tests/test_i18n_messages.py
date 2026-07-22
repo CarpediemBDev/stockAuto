@@ -168,6 +168,20 @@ class TestFrontendConsumedKeysExist:
         missing = sorted(consumed - defined)
         assert not missing, f"프론트가 쓰는데 ko.json에 없는 키: {missing}"
 
+    def test_navbar_dynamic_label_keys_are_defined(self):
+        """NavBar는 t(item.labelKey)로 동적 호출해 위 정규식이 잡지 못한다.
+
+        navItems 배열에서 labelKey를 직접 읽어 딕셔너리와 대조한다 — 메뉴 라벨이
+        키 경로 그대로 상단바에 노출되는 사고를 막는 최소 방어선.
+        """
+        source = (self.FRONTEND / "components" / "NavBar.tsx").read_text(encoding="utf-8")
+        label_keys = re.findall(r"labelKey:\s*['\"]([^'\"]+)['\"]", source)
+        assert label_keys, "navItems에서 labelKey를 찾지 못했다 — 구조가 바뀌었는지 확인 필요"
+        for lang in ("ko", "en"):
+            defined = set(_flatten(_load(lang)))
+            for key in label_keys:
+                assert f"nav.{key}" in defined, f"{lang}.json에 nav.{key} 없음"
+
 
 class TestDiscoveryNotificationLocalized:
     @pytest.mark.parametrize("lang,marker", [("ko", "보류"), ("en", "Deferred")])
