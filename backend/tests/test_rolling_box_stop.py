@@ -14,7 +14,13 @@ import pandas as pd
 import pytest
 
 from app.bot.trade_calculations import (
-    DEFAULT_ROLLING_BOX_WINDOW,
+    DEFAULT_ROLLING_BOX_MINUTES,
+    LIVE_BOX_BAR_MINUTES,
+    MAX_ROLLING_BOX_MINUTES,
+    MIN_ROLLING_BOX_BARS,
+    bar_minutes_for_interval,
+    compute_box_low,
+    resolve_rolling_box_bars,
     check_rolling_box_breach,
     compute_rolling_box_stop,
 )
@@ -65,7 +71,7 @@ class TestBreach:
         assert not check_rolling_box_breach(50.0, None, highest_price=110.0, avg_price=95.0)
 
 
-class TestScannerRollingBoxLow:
+class TestScannerRecentLows:
     def _df(self, lows):
         return pd.DataFrame({
             "Low": lows,
@@ -74,29 +80,78 @@ class TestScannerRollingBoxLow:
         })
 
     def test_excludes_forming_last_bar(self):
-        from app.scanner.scanner import calculate_rolling_box_low
+        from app.scanner.scanner import collect_recent_lows_15m
 
-        # 마지막 봉 저점 1.0은 형성 중 — 제외되어야 함
-        lows = [100.0] * DEFAULT_ROLLING_BOX_WINDOW + [1.0]
-        assert calculate_rolling_box_low(self._df(lows)) == 100.0
+        lows = [100.0] * 10 + [1.0]
+        assert 1.0 not in collect_recent_lows_15m(self._df(lows))
 
-    def test_requires_full_window_of_completed_bars(self):
-        from app.scanner.scanner import calculate_rolling_box_low
+    def test_caps_at_live_supply_ceiling(self):
+        from app.scanner.scanner import collect_recent_lows_15m
 
-        lows = [100.0] * (DEFAULT_ROLLING_BOX_WINDOW - 1) + [99.0]  # 완성 봉 N-1개뿐
-        assert calculate_rolling_box_low(self._df(lows)) is None
+        max_bars = resolve_rolling_box_bars(MAX_ROLLING_BOX_MINUTES, LIVE_BOX_BAR_MINUTES)
+        lows = [100.0 + i for i in range(max_bars + 20)]
+        assert len(collect_recent_lows_15m(self._df(lows))) == max_bars
 
-    def test_returns_min_of_window(self):
-        from app.scanner.scanner import calculate_rolling_box_low
+    def test_preserves_order_for_downstream_window(self):
+        from app.scanner.scanner import collect_recent_lows_15m
 
         lows = [100.0, 97.5, 103.0, 99.0, 101.0, 98.0, 104.0, 102.0, 100.5, 99.5, 55.5]
-        assert calculate_rolling_box_low(self._df(lows)) == 97.5
+        result = collect_recent_lows_15m(self._df(lows))
+        assert result[0] == 100.0 and result[-1] == 99.5
+
+    def test_drops_nonpositive_and_nan(self):
+        from app.scanner.scanner import collect_recent_lows_15m
+
+        lows = [100.0, 0.0, float("nan"), 98.0, 99.0]
+        assert collect_recent_lows_15m(self._df(lows)) == [100.0, 98.0]
 
     def test_handles_empty_and_none(self):
-        from app.scanner.scanner import calculate_rolling_box_low
+        from app.scanner.scanner import collect_recent_lows_15m
 
-        assert calculate_rolling_box_low(None) is None
-        assert calculate_rolling_box_low(pd.DataFrame()) is None
+        assert collect_recent_lows_15m(None) == []
+        assert collect_recent_lows_15m(pd.DataFrame()) == []
+
+
+class TestResolveRollingBoxBars:
+    def test_live_default_matches_legacy_ten_bars(self):
+        assert resolve_rolling_box_bars(DEFAULT_ROLLING_BOX_MINUTES, LIVE_BOX_BAR_MINUTES) == 10
+
+    def test_same_duration_across_timeframes(self):
+        for interval, expected in [("15m", 10), ("5m", 30), ("1h", 3)]:
+            assert resolve_rolling_box_bars(150, bar_minutes_for_interval(interval)) == expected
+
+    def test_daily_interval_clamps_to_minimum_bars(self):
+        assert resolve_rolling_box_bars(150, bar_minutes_for_interval("1d")) == MIN_ROLLING_BOX_BARS
+
+    def test_clamps_above_live_supply_ceiling(self):
+        capped = resolve_rolling_box_bars(MAX_ROLLING_BOX_MINUTES + 600, LIVE_BOX_BAR_MINUTES)
+        assert capped == resolve_rolling_box_bars(MAX_ROLLING_BOX_MINUTES, LIVE_BOX_BAR_MINUTES)
+
+    def test_zero_and_negative_minutes_clamp_to_minimum(self):
+        assert resolve_rolling_box_bars(0, 15) == MIN_ROLLING_BOX_BARS
+        assert resolve_rolling_box_bars(-100, 15) == MIN_ROLLING_BOX_BARS
+
+    def test_invalid_bar_minutes_raises(self):
+        with pytest.raises(ValueError):
+            resolve_rolling_box_bars(150, 0)
+
+
+class TestComputeBoxLow:
+    def test_takes_min_of_last_bars(self):
+        assert compute_box_low([10.0, 5.0, 9.0, 8.0], 3) == 5.0
+
+    def test_ignores_older_bars_outside_window(self):
+        assert compute_box_low([1.0, 10.0, 9.0, 8.0], 3) == 8.0
+
+    def test_returns_none_when_not_enough_bars(self):
+        assert compute_box_low([10.0, 9.0], 3) is None
+
+    def test_returns_none_for_empty_or_invalid(self):
+        assert compute_box_low([], 3) is None
+        assert compute_box_low(None, 3) is None
+        assert compute_box_low([10.0, 9.0, 8.0], 0) is None
+        assert compute_box_low([10.0, 0.0, 8.0], 3) is None
+        assert compute_box_low([10.0, "x", 8.0], 3) is None
 
 
 class TestStrategyDefaults:
@@ -104,7 +159,7 @@ class TestStrategyDefaults:
         from app.strategies.base_strategy import BaseStrategy
 
         assert BaseStrategy.use_rolling_box_stop is False
-        assert BaseStrategy.rolling_box_window == DEFAULT_ROLLING_BOX_WINDOW
+        assert BaseStrategy.rolling_box_minutes == DEFAULT_ROLLING_BOX_MINUTES
 
     def test_holding_model_has_rolling_stop_column(self):
         from app.core import models

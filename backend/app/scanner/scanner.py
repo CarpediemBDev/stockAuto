@@ -33,7 +33,11 @@ from app.scanner.watchlist_relay import (
     is_relay_source,
     merge_reserved_candidates,
 )
-from app.bot.trade_calculations import DEFAULT_ROLLING_BOX_WINDOW
+from app.bot.trade_calculations import (
+    LIVE_BOX_BAR_MINUTES,
+    MAX_ROLLING_BOX_MINUTES,
+    resolve_rolling_box_bars,
+)
 from app.scanner.data_provider import (
     fetch_ohlcv,
     fetch_index_data,
@@ -47,21 +51,22 @@ from app.core.system_settings import (
 )
 
 
-def calculate_rolling_box_low(df_15m: pd.DataFrame) -> float | None:
-    """롤링 박스 스탑용 최근 N봉 저점을 계산합니다 (형성 중인 마지막 봉 제외).
+def collect_recent_lows_15m(df_15m: pd.DataFrame) -> list[float]:
+    """롤링 박스 스탑용 최근 완성 15분봉 저점 목록을 만든다 (형성 중인 마지막 봉 제외).
 
-    완성 봉이 윈도우(N)만큼 쌓이지 않았으면 None — 작은 박스로 인한 조기 발동을 막는다.
+    스캐너는 어느 전략이 이 시그널을 쓸지 모르므로 박스 하단을 미리 확정하지 않고
+    저점 원자재만 공급한다. 전략별 박스 길이 환산과 최저값 산출은 스케줄러가
+    trade_calculations.resolve_rolling_box_bars/compute_box_low로 수행한다.
+    목록 길이는 라이브 상한(MAX_ROLLING_BOX_MINUTES)에 해당하는 봉 수로 자른다.
     """
     try:
         if df_15m is None or df_15m.empty or 'Low' not in df_15m.columns:
-            return None
-        lows = df_15m['Low'].iloc[:-1].tail(DEFAULT_ROLLING_BOX_WINDOW)
-        if len(lows) < DEFAULT_ROLLING_BOX_WINDOW:
-            return None
-        val = float(lows.min())
-        return val if np.isfinite(val) and val > 0 else None
+            return []
+        max_bars = resolve_rolling_box_bars(MAX_ROLLING_BOX_MINUTES, LIVE_BOX_BAR_MINUTES)
+        lows = df_15m['Low'].iloc[:-1].tail(max_bars)
+        return [float(v) for v in lows.tolist() if np.isfinite(v) and v > 0]
     except Exception:
-        return None
+        return []
 
 
 # 지수 비교용 (Relative Strength)
@@ -564,7 +569,7 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                         "rs": cand['rs'],
                         "ema_aligned": cand.get('ema_aligned', True),
                         "atr": round(latest_atr, 4),
-                        "rolling_box_low": calculate_rolling_box_low(cand.get('df_15m')),
+                        "recent_lows_15m": collect_recent_lows_15m(cand.get('df_15m')),
                         "dollar_volume": cand.get('dollar_volume', 0.0),
                         "is_near_52w_high": cand.get('is_near_52w_high', False),
                         "is_near_recent_high": cand.get('is_near_recent_high', False),
@@ -730,7 +735,7 @@ async def analyze_single_ticker(ticker: str, bypass_fundamental: bool = False) -
                 "rs": rs,
                 "ema_aligned": ema_aligned,
                 "atr": round(latest_atr, 4),
-                "rolling_box_low": calculate_rolling_box_low(df_15m),
+                "recent_lows_15m": collect_recent_lows_15m(df_15m),
                 "is_orb_breakout": is_orb_breakout,
                 "is_rsi_bb_extreme": is_rsi_bb_extreme,
                 "is_obv_accumulation": is_obv_accumulation,
