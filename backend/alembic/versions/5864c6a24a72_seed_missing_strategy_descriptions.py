@@ -91,17 +91,23 @@ DESCRIPTIONS = {
 
 
 def upgrade() -> None:
+    conn = op.get_bind()
+    stmt = sa.text(
+        "UPDATE strategies SET summary_ko = :desc "
+        "WHERE strategy_type = :stype AND (summary_ko IS NULL OR summary_ko = '')"
+    )
     for stype, desc in DESCRIPTIONS.items():
-        escaped_desc = desc.replace("'", "''")
-        op.execute(
-            f"UPDATE strategies SET summary_ko = '{escaped_desc}' "
-            f"WHERE strategy_type = '{stype}' AND (summary_ko IS NULL OR summary_ko = '')"
-        )
+        conn.execute(stmt, {"desc": desc, "stype": stype})
 
 
 def downgrade() -> None:
-    for stype in DESCRIPTIONS.keys():
-        op.execute(
-            f"UPDATE strategies SET summary_ko = NULL WHERE strategy_type = '{stype}'"
-        )
+    # upgrade()는 비어 있던 행만 채우므로, 롤백도 이 마이그레이션이 실제로 써넣은
+    # 문구와 정확히 일치하는 행만 되돌린다. 기존 설명이나 이후 수정본을 지우지 않기 위함.
+    conn = op.get_bind()
+    stmt = sa.text(
+        "UPDATE strategies SET summary_ko = NULL "
+        "WHERE strategy_type = :stype AND summary_ko = :desc"
+    )
+    for stype, desc in DESCRIPTIONS.items():
+        conn.execute(stmt, {"desc": desc, "stype": stype})
 
