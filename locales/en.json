@@ -9,6 +9,31 @@
   "ui": {
     "order_resolved": "The order has been fully confirmed. Bot status remains normal."
   },
+  "nav": {
+    "trading": "Auto Trading",
+    "scanner": "Market Scanner",
+    "report": "Trade Report",
+    "language_change": "Change language",
+    "timezone_change": "Change timezone",
+    "user_greeting": "{username}",
+    "engine_mode": "Engine mode:",
+    "bot_status": "Bot status:",
+    "running": "Running",
+    "stopped": "Stopped",
+    "stop_now": "Stop trading now",
+    "start_now": "Start trading now",
+    "admin_panel": "🛡️ Master Admin Panel",
+    "system_health": "📡 System Health Monitor",
+    "personal_settings": "⚙️ Investment Settings",
+    "logout": "Log out",
+    "toast": {
+      "bot_started": "The autonomous trading loop has started.",
+      "bot_stopped": "The autonomous trading loop has stopped.",
+      "bot_control_failed": "Failed to control the bot.",
+      "timezone_changed": "Timezone changed to {abbr}.",
+      "logged_out": "You have been logged out."
+    }
+  },
   "admin": {
     "users": {
       "title": "User Management & Live Arena",
