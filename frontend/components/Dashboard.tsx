@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { TradeLogs } from "./TradeLogs";
 import { AccountBalance } from "./AccountBalance";
 import PortfolioView from "./PortfolioView";
@@ -24,6 +25,7 @@ export function Dashboard() {
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
 
   const [displayCurrency, setDisplayCurrency] = useState<"KRW" | "USD">("KRW");
+  const t = useTranslations("dashboard");
 
   return (
     <div className={`min-h-screen transition-colors duration-700 ${isReal && isBotRunning ? 'bg-red-950/20' : 'bg-black'}`}>
@@ -33,7 +35,7 @@ export function Dashboard() {
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center gap-3">
             <span className="bg-indigo-600 w-2.5 h-6 rounded-full"></span>
-            기본계좌 현황
+            {t("account_status")}
           </h1>
           
           <div className="flex items-center gap-3">
@@ -47,7 +49,7 @@ export function Dashboard() {
                     : "text-zinc-500 hover:text-zinc-300"
                 }`}
               >
-                $ USD
+                {t("currency_usd")}
               </button>
               <button
                 onClick={() => setDisplayCurrency("KRW")}
@@ -57,7 +59,7 @@ export function Dashboard() {
                     : "text-zinc-500 hover:text-zinc-300"
                 }`}
               >
-                원 KRW
+                {t("currency_krw")}
               </button>
             </div>
           </div>
@@ -68,7 +70,7 @@ export function Dashboard() {
         <div className="mb-6">
           <h2 className="text-xl font-bold text-slate-100 mb-4 flex items-center">
             <div className="w-1.5 h-6 bg-blue-500 rounded-full mr-3"></div>
-            실시간 포트폴리오 (Portfolio)
+            {t("portfolio_title")}
           </h2>
           <PortfolioView displayCurrency={displayCurrency} />
         </div>
@@ -76,10 +78,10 @@ export function Dashboard() {
         <div className="mb-12">
           <h2 className="text-xl font-bold text-slate-100 mb-4 flex items-center">
             <div className="w-1.5 h-6 bg-indigo-500 rounded-full mr-3"></div>
-            전략 카탈로그 (Strategy Catalog)
+            {t("strategy_catalog_title")}
           </h2>
           <p className="text-zinc-400 text-sm mb-6 max-w-3xl leading-relaxed">
-            StockAuto의 다양한 매매 전략을 확인하고 즉시 적용할 수 있습니다. 각 전략은 특정 장세에 최적화되어 있거나 모든 상황에 유연하게 대처할 수 있도록 설계되었습니다.
+            {t("strategy_catalog_desc")}
           </p>
           <StrategyCatalog />
         </div>
@@ -98,7 +100,7 @@ export function Dashboard() {
             <button 
               onClick={() => setIsChartOpen(false)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-white p-2 rounded-full hover:bg-zinc-900 active:scale-95 transition-all z-10 font-bold"
-              aria-label="닫기"
+              aria-label={t("close")}
             >
               ✕
             </button>
@@ -124,7 +126,7 @@ export function Dashboard() {
             <button 
               onClick={() => setIsLogsModalOpen(false)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-white p-2 rounded-full hover:bg-zinc-900 active:scale-95 transition-all z-10 font-bold"
-              aria-label="닫기"
+              aria-label={t("close")}
             >
               ✕
             </button>
