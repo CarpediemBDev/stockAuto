@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { accountAPI, adminAPI, authAPI, reportAPI } from "@/lib/api";
 import useSWR from "swr";
+import { useTranslations } from "next-intl";
 
 type SubTab = "environment" | "telegram" | "danger";
 type TradeMode = string;
@@ -101,12 +102,17 @@ function supportsTradeMode(broker: BrokerOption | undefined, tradeMode: string):
   return !broker || broker.supported_modes.includes(tradeMode);
 }
 
-function unsupportedTradeModeMessage(broker: BrokerOption | undefined, tradeMode: string): string {
+function unsupportedTradeModeMessage(
+  broker: BrokerOption | undefined,
+  tradeMode: string,
+  t: (key: string, values?: Record<string, string>) => string,
+): string {
   if (!broker) return "";
-  return `${broker.label}은 현재 ${tradeMode} 모드를 지원하지 않습니다.`;
+  return t("unsupported_mode", { broker: broker.label, mode: tradeMode });
 }
 
 export default function PersonalSettingsPage() {
+  const t = useTranslations("settings");
   const router = useRouter();
   const { clearAuth, isAuthenticated, isInitialized, username: storedUsername } = useAuthStore();
   const [dbSettings, setDbSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
@@ -184,7 +190,7 @@ export default function PersonalSettingsPage() {
       onSuccess: applySettings,
       onError: (err) => {
         const error = err as Error;
-        toast.error(error.message || "설정을 불러오지 못했습니다.");
+        toast.error(error.message || t("load_failed"));
       },
       revalidateOnFocus: false,
     },
@@ -213,7 +219,7 @@ export default function PersonalSettingsPage() {
   );
   const requiresBrokerCredentials = Boolean(activeTradeMode?.requires_credentials);
   const selectedModeUnsupported = !supportsTradeMode(activeBrokerOption, dbSettings.trade_mode);
-  const selectedModeUnsupportedMessage = unsupportedTradeModeMessage(activeBrokerOption, dbSettings.trade_mode);
+  const selectedModeUnsupportedMessage = unsupportedTradeModeMessage(activeBrokerOption, dbSettings.trade_mode, t);
   const credentialModeUnsupported = !supportsTradeMode(credentialBrokerOption, dbSettings.trade_mode);
   const credentialSaveMode = requiresBrokerCredentials && !credentialModeUnsupported
     ? dbSettings.trade_mode
@@ -236,13 +242,13 @@ export default function PersonalSettingsPage() {
   }, [activeCred, dbSettings.trade_mode]);
 
   const credentialStatusLabel = useMemo(() => {
-    if (!activeCred) return "미저장";
-    if (activeCred.verification_status === "crypto_error") return "복호화 오류";
-    if (isCredentialVerifiedForSelectedMode) return "검증 완료";
-    if (activeCred.verification_status === "stored") return "키 저장됨";
-    if (activeCred.has_credentials) return "재검증 필요";
-    return "미저장";
-  }, [activeCred, isCredentialVerifiedForSelectedMode]);
+    if (!activeCred) return t("cred_status.unsaved");
+    if (activeCred.verification_status === "crypto_error") return t("cred_status.crypto_error");
+    if (isCredentialVerifiedForSelectedMode) return t("cred_status.verified");
+    if (activeCred.verification_status === "stored") return t("cred_status.stored");
+    if (activeCred.has_credentials) return t("cred_status.reverify");
+    return t("cred_status.unsaved");
+  }, [activeCred, isCredentialVerifiedForSelectedMode, t]);
 
   const handleVerifyCredential = async (provider: string) => {
     const broker = dbSettings.available_brokers.find((item) => item.id === provider);
@@ -252,12 +258,12 @@ export default function PersonalSettingsPage() {
 
     const form = forms[provider];
     if (!form) {
-      toast.error("선택한 증권사 입력 폼을 초기화하지 못했습니다.");
+      toast.error(t("toast.reset_form_failed"));
       return;
     }
     const isToss = provider === "TOSS";
     if (!form.app_key.trim() || !form.app_secret.trim() || (!isToss && !form.account_no.trim())) {
-      toast.error(isToss ? "APP KEY, APP SECRET을 모두 입력하세요." : "APP KEY, APP SECRET, ACCOUNT NO를 모두 입력하세요.");
+      toast.error(isToss ? t("toast.fill_keys_toss") : t("toast.fill_keys_kis"));
       return;
     }
 
@@ -275,14 +281,14 @@ export default function PersonalSettingsPage() {
         setLocalVerified(prev => ({ ...prev, [provider]: true }));
         toast.success(
           modeForCredential === "KEY_ONLY"
-            ? `${provider} 인증키가 저장되었습니다. 거래 실행 전 별도 검증이 필요합니다.`
-            : `${provider} 검증 및 저장이 완료되었습니다.`
+            ? t("toast.cred_saved_unverified", { provider })
+            : t("toast.cred_verified", { provider })
         );
       } else {
-        toast.error(res.data?.message || `${provider} 인증정보 검증에 실패했습니다.`);
+        toast.error(res.data?.message || t("toast.cred_verify_failed", { provider }));
       }
     } catch (err) {
-      toast.error((err as Error).message || `${provider} 인증정보 검증에 실패했습니다.`);
+      toast.error((err as Error).message || t("toast.cred_verify_failed", { provider }));
     } finally {
       setIsCredentialSaving(false);
     }
@@ -297,9 +303,9 @@ export default function PersonalSettingsPage() {
       } else {
         await fetchSettings();
       }
-      toast.success(`${provider} 인증정보가 삭제되었습니다.`);
+      toast.success(t("toast.cred_deleted", { provider }));
     } catch (err) {
-      toast.error((err as Error).message || `${provider} 인증정보 삭제에 실패했습니다.`);
+      toast.error((err as Error).message || t("toast.cred_delete_failed", { provider }));
     } finally {
       setIsCredentialDeleting(false);
     }
@@ -318,7 +324,7 @@ export default function PersonalSettingsPage() {
 
     if (requiresBrokerCredentials) {
       if (!isVerifiedForSelectedMode) {
-         toast.error(`${dbSettings.trade_mode} 모드를 저장하려면 선택한 증권사(${activeBroker})의 인증정보를 입력 후 검증해주세요.`);
+         toast.error(t("toast.need_cred_for_mode", { mode: dbSettings.trade_mode, broker: activeBroker }));
          return;
       }
     }
@@ -337,11 +343,11 @@ export default function PersonalSettingsPage() {
 
       const res = await adminAPI.saveSettings(payload);
       applySettings(res.data);
-      toast.success("설정이 통합 저장되었습니다.");
+      toast.success(t("toast.settings_saved"));
     } catch (err) {
-      toast.error((err as Error).message || "설정 저장에 실패했습니다.");
+      toast.error((err as Error).message || t("toast.settings_save_failed"));
       fetchSettings().catch(() => {
-        toast.error("설정 상태 동기화에 실패했습니다. 페이지를 새로고침해 주세요.");
+        toast.error(t("toast.sync_failed"));
       });
     } finally {
       setIsSaving(false);
@@ -352,11 +358,11 @@ export default function PersonalSettingsPage() {
     setIsDangerActionLoading(true);
     try {
       await accountAPI.resetBalance();
-      toast.success("가상 계좌 자산과 로그를 초기화했습니다.");
+      toast.success(t("toast.account_reset_done"));
       setShowResetModal(false);
       await fetchSettings();
     } catch (err) {
-      toast.error((err as Error).message || "계좌 초기화에 실패했습니다.");
+      toast.error((err as Error).message || t("toast.account_reset_failed"));
     } finally {
       setIsDangerActionLoading(false);
     }
@@ -366,10 +372,10 @@ export default function PersonalSettingsPage() {
     setIsDangerActionLoading(true);
     try {
       const res = await accountAPI.forceLiquidate();
-      toast.success(res.data.message || "보유 주식을 전량 청산했습니다.");
+      toast.success(res.data.message || t("toast.liquidate_done"));
       setShowLiquidateModal(false);
     } catch (err) {
-      toast.error((err as Error).message || "강제 청산 중 오류가 발생했습니다.");
+      toast.error((err as Error).message || t("toast.liquidate_failed"));
     } finally {
       setIsDangerActionLoading(false);
     }
@@ -379,9 +385,9 @@ export default function PersonalSettingsPage() {
     setIsPersonalReportSending(true);
     try {
       await reportAPI.triggerPersonalReport();
-      toast.success("본인 텔레그램으로 성적표가 발송되었습니다.");
+      toast.success(t("toast.report_sent"));
     } catch (err) {
-      toast.error((err as Error).message || "리포트 발송 중 오류가 발생했습니다.");
+      toast.error((err as Error).message || t("toast.report_failed"));
     } finally {
       setIsPersonalReportSending(false);
     }
@@ -389,15 +395,15 @@ export default function PersonalSettingsPage() {
 
   const handleChangePassword = async () => {
     if (!oldPassword || !newPassword || !confirmNewPassword) {
-      toast.error("비밀번호 입력란을 모두 채워주세요.");
+      toast.error(t("toast.fill_passwords"));
       return;
     }
     if (newPassword.length < 12) {
-      toast.error("새 비밀번호는 최소 12글자 이상이어야 합니다.");
+      toast.error(t("toast.password_too_short"));
       return;
     }
     if (newPassword !== confirmNewPassword) {
-      toast.error("새 비밀번호 확인이 일치하지 않습니다.");
+      toast.error(t("toast.password_mismatch"));
       return;
     }
 
@@ -405,10 +411,10 @@ export default function PersonalSettingsPage() {
     try {
       await authAPI.changePassword(oldPassword, newPassword);
       clearAuth();
-      toast.success("비밀번호가 변경되었습니다. 다시 로그인해주세요.");
+      toast.success(t("toast.password_changed"));
       router.replace("/login");
     } catch (err) {
-      toast.error((err as Error).message || "비밀번호 변경에 실패했습니다.");
+      toast.error((err as Error).message || t("toast.password_change_failed"));
     } finally {
       setIsPasswordChanging(false);
     }
@@ -429,7 +435,7 @@ export default function PersonalSettingsPage() {
     color: modeToneClasses[mode.tone] || modeToneClasses.blue,
     icon: modeIcons[mode.id] || Server,
     isUnsupported: !supportsTradeMode(activeBrokerOption, mode.id),
-    unsupportedMessage: unsupportedTradeModeMessage(activeBrokerOption, mode.id),
+    unsupportedMessage: unsupportedTradeModeMessage(activeBrokerOption, mode.id, t),
   }));
 
   if (isSettingsLoading || !isInitialized || !isAuthenticated) {
@@ -443,11 +449,11 @@ export default function PersonalSettingsPage() {
   const activeForm = forms[credentialBroker] || EMPTY_FORM;
   const credentialActionLabel = (() => {
     if (localVerified[credentialBroker]) {
-      return credentialSaveMode === "KEY_ONLY" ? "저장됨" : "검증 완료됨";
+      return credentialSaveMode === "KEY_ONLY" ? t("cred_button.saved") : t("cred_button.verified");
     }
     return credentialSaveMode === "KEY_ONLY"
-      ? `${credentialBroker} 키 저장`
-      : `${credentialBroker} 검증 및 저장`;
+      ? t("cred_button.key_only", { broker: credentialBroker })
+      : t("cred_button.verify", { broker: credentialBroker });
   })();
 
   return (
@@ -455,8 +461,8 @@ export default function PersonalSettingsPage() {
       <div className="max-w-4xl mx-auto p-6 mt-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-zinc-800 pb-4 mb-8 gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-zinc-100 mb-1">개인 투자 설정</h1>
-            <p className="text-zinc-400 text-xs">트레이딩 모드, 증권사 연동, 텔레그램 연결을 관리합니다.</p>
+            <h1 className="text-2xl font-extrabold text-zinc-100 mb-1">{t("title")}</h1>
+            <p className="text-zinc-400 text-xs">{t("subtitle")}</p>
           </div>
         </div>
 
@@ -499,8 +505,8 @@ export default function PersonalSettingsPage() {
                     <div className="flex flex-col items-center justify-center p-6 bg-red-500/10 border border-red-500/20 rounded-xl gap-3 text-center">
                       <AlertTriangle className="w-6 h-6 text-red-500" />
                       <div>
-                        <p className="text-xs font-bold text-red-400 mb-1">통신 또는 인증 오류로 설정을 불러오지 못했습니다.</p>
-                        <p className="text-[11px] text-red-400/80">페이지를 새로고침하거나 다시 로그인해 주세요.</p>
+                        <p className="text-xs font-bold text-red-400 mb-1">{t("load_error_title")}</p>
+                        <p className="text-[11px] text-red-400/80">{t("load_error_hint")}</p>
                       </div>
                     </div>
                   ) : (
@@ -544,13 +550,13 @@ export default function PersonalSettingsPage() {
                   <div className="flex flex-col gap-1.5 pb-2">
                     <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
                       <Server className="w-4 h-4 text-emerald-400" />
-                      Active Strategy (실행 전략)
+                      {t("active_strategy")}
                     </h2>
-                    <p className="text-[10px] text-zinc-500">이 계정의 트레이딩 봇이 실행할 퀀트 매매 전략을 고릅니다.</p>
+                    <p className="text-[10px] text-zinc-500">{t("active_strategy_hint")}</p>
                   </div>
                   
                   <div className="relative">
-                    <label className="block text-xs font-semibold text-zinc-400 mb-1.5">선택된 전략</label>
+                    <label className="block text-xs font-semibold text-zinc-400 mb-1.5">{t("selected_strategy")}</label>
                     {dbSettings.available_strategies && dbSettings.available_strategies.length > 0 ? (
                       <select
                         value={dbSettings.strategy_type || "regime_switching"}
@@ -565,7 +571,7 @@ export default function PersonalSettingsPage() {
                       </select>
                     ) : (
                       <div className="w-full py-3 rounded-lg border border-red-500/20 bg-red-500/5 text-red-400/80 text-xs text-center">
-                        사용 가능한 전략 정보를 불러오지 못했습니다.
+                        {t("strategy_load_failed")}
                       </div>
                     )}
                   </div>
@@ -585,7 +591,7 @@ export default function PersonalSettingsPage() {
                       <div className="flex gap-2">
                         {dbSettings.available_brokers.length === 0 ? (
                           <div className="w-full py-3 rounded-lg border border-red-500/20 bg-red-500/5 text-red-400/80 text-xs text-center">
-                            사용 가능한 증권사 정보를 불러오지 못했습니다.
+                            {t("broker_load_failed")}
                           </div>
                         ) : (
                           dbSettings.available_brokers.map((broker) => {
@@ -595,7 +601,7 @@ export default function PersonalSettingsPage() {
                               <button
                                 key={broker.id}
                                 type="button"
-                                title={brokerUnsupported ? unsupportedTradeModeMessage(broker, dbSettings.trade_mode) : undefined}
+                                title={brokerUnsupported ? unsupportedTradeModeMessage(broker, dbSettings.trade_mode, t) : undefined}
                                 onClick={() => {
                                   setCredentialBroker(broker.id);
                                   if (!brokerUnsupported) {
@@ -612,7 +618,7 @@ export default function PersonalSettingsPage() {
                               >
                                 {broker.label} ({broker.id})
                                 {brokerUnsupported && (
-                                  <span className="ml-1 text-[10px] text-red-400">키만</span>
+                                  <span className="ml-1 text-[10px] text-red-400">{t("key_only_badge")}</span>
                                 )}
                               </button>
                             );
@@ -625,7 +631,7 @@ export default function PersonalSettingsPage() {
                       <div className="p-4 rounded-lg border border-blue-500/20 bg-blue-500/5 flex items-center gap-3">
                         <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0" />
                         <p className="text-[11px] text-zinc-400 leading-relaxed">
-                          SIMULATED 모드에서는 인증키를 저장만 하며 자동매매에는 사용하지 않습니다.
+                          {t("simulated_key_note")}
                         </p>
                       </div>
                     )}
@@ -634,7 +640,7 @@ export default function PersonalSettingsPage() {
                       <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 flex items-start gap-3">
                         <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                         <p className="text-xs font-semibold text-amber-200 leading-relaxed">
-                          {unsupportedTradeModeMessage(credentialBrokerOption, dbSettings.trade_mode)} 인증키는 저장만 가능하며 거래 실행 전 별도 지원 검증이 필요합니다.
+                          {unsupportedTradeModeMessage(credentialBrokerOption, dbSettings.trade_mode, t)} {t("unsupported_key_note")}
                         </p>
                       </div>
                     )}
@@ -650,23 +656,23 @@ export default function PersonalSettingsPage() {
 
                       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                         <div className="rounded-lg border border-zinc-900 bg-zinc-900/20 p-3">
-                          <p className="text-[10px] text-zinc-500 mb-1">저장 상태</p>
+                          <p className="text-[10px] text-zinc-500 mb-1">{t("save_state")}</p>
                           <p className="text-xs font-bold text-zinc-200">
-                            {activeCred?.has_credentials ? "저장됨" : "없음"}
+                            {activeCred?.has_credentials ? t("saved") : t("none")}
                           </p>
                         </div>
                         <div className="rounded-lg border border-zinc-900 bg-zinc-900/20 p-3">
-                          <p className="text-[10px] text-zinc-500 mb-1">검증 상태</p>
+                          <p className="text-[10px] text-zinc-500 mb-1">{t("verify_state")}</p>
                           <p className={`text-xs font-bold ${isCredentialVerifiedForSelectedMode ? "text-emerald-400" : "text-amber-400"}`}>
                             {credentialStatusLabel}
                           </p>
                         </div>
                         <div className="rounded-lg border border-zinc-900 bg-zinc-900/20 p-3">
-                          <p className="text-[10px] text-zinc-500 mb-1">검증 모드</p>
+                          <p className="text-[10px] text-zinc-500 mb-1">{t("verify_mode")}</p>
                           <p className="text-xs font-bold text-zinc-200">{activeCred?.verified_trade_mode || "-"}</p>
                         </div>
                         <div className="rounded-lg border border-zinc-900 bg-zinc-900/20 p-3">
-                          <p className="text-[10px] text-zinc-500 mb-1">계좌</p>
+                          <p className="text-[10px] text-zinc-500 mb-1">{t("account")}</p>
                           <p className="text-xs font-bold text-zinc-200 font-mono">
                             {activeCred?.account_no_masked || "-"}
                           </p>
@@ -683,12 +689,12 @@ export default function PersonalSettingsPage() {
                         <div className="flex flex-col gap-1 border-b border-zinc-800/50 pb-3">
                           <h3 className="text-xs font-extrabold text-zinc-200 flex items-center gap-2">
                             <Key className="w-4 h-4 text-emerald-400" />
-                            {credentialBroker} 인증키 전용 관리
+                            {t("cred_manage_title", { broker: credentialBroker })}
                           </h3>
                           <p className="text-[10px] text-zinc-500">
                             {credentialSaveMode === "KEY_ONLY"
-                              ? "인증키는 암호화 저장되며 거래 실행 전 별도 통신 검증이 필요합니다."
-                              : "인증키는 서버를 통해 실시간 검증을 거친 후 암호화되어 분리 저장됩니다."}
+                              ? t("cred_note_store_only")
+                              : t("cred_note_verified")}
                           </p>
                         </div>
                         <div className="grid grid-cols-1 gap-3">
@@ -701,7 +707,7 @@ export default function PersonalSettingsPage() {
                               setForms((prev) => ({ ...prev, [credentialBroker]: { ...(prev[credentialBroker] || EMPTY_FORM), app_key: e.target.value } }));
                               setLocalVerified((prev) => ({ ...prev, [credentialBroker]: false }));
                             }}
-                            placeholder={activeCred?.has_credentials ? "•••••••••••••••• (새로 입력 시 덮어쓰기)" : "Enter APP KEY"}
+                            placeholder={activeCred?.has_credentials ? t("placeholder_overwrite") : "Enter APP KEY"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="off"
                           />
@@ -716,7 +722,7 @@ export default function PersonalSettingsPage() {
                               setForms((prev) => ({ ...prev, [credentialBroker]: { ...(prev[credentialBroker] || EMPTY_FORM), app_secret: e.target.value } }));
                               setLocalVerified((prev) => ({ ...prev, [credentialBroker]: false }));
                             }}
-                            placeholder={activeCred?.has_credentials ? "•••••••••••••••• (새로 입력 시 덮어쓰기)" : "Enter APP SECRET"}
+                            placeholder={activeCred?.has_credentials ? t("placeholder_overwrite") : "Enter APP SECRET"}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="new-password"
                           />
@@ -724,7 +730,7 @@ export default function PersonalSettingsPage() {
 
                         <div>
                           <label className="block text-xs font-semibold text-zinc-400 mb-1.5">
-                            {credentialBroker === "TOSS" ? "계좌 시퀀스 (Optional)" : "ACCOUNT NO"}
+                            {credentialBroker === "TOSS" ? t("account_seq_optional") : "ACCOUNT NO"}
                           </label>
                           <input
                             type="text"
@@ -733,7 +739,7 @@ export default function PersonalSettingsPage() {
                               setForms((prev) => ({ ...prev, [credentialBroker]: { ...(prev[credentialBroker] || EMPTY_FORM), account_no: e.target.value } }));
                               setLocalVerified((prev) => ({ ...prev, [credentialBroker]: false }));
                             }}
-                            placeholder={activeCred?.has_credentials ? `${activeCred.account_no_masked || "••••••••"} (새로 입력 시 덮어쓰기)` : (credentialBroker === "TOSS" ? "비워두면 자동 연동됩니다" : "Enter Account No")}
+                            placeholder={activeCred?.has_credentials ? `${activeCred.account_no_masked || "••••••••"} ${t("placeholder_overwrite")}` : (credentialBroker === "TOSS" ? t("account_no_toss_hint") : "Enter Account No")}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="off"
                           />
@@ -753,7 +759,7 @@ export default function PersonalSettingsPage() {
                             ) : (
                               <Trash2 className="w-3.5 h-3.5" />
                             )}
-                            인증정보 삭제
+                            {t("delete_cred")}
                           </button>
                         )}
                         <button
@@ -781,7 +787,7 @@ export default function PersonalSettingsPage() {
                     className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center gap-2 cursor-pointer shadow-md shadow-blue-900/30"
                   >
                     {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                    전체 설정 저장
+                    {t("save_all")}
                   </button>
                 </div>
               </div>
@@ -798,7 +804,7 @@ export default function PersonalSettingsPage() {
 
                 <div className="space-y-4">
                   <div className="flex justify-between items-center bg-zinc-900/30 border border-zinc-900 rounded-lg p-4">
-                    <span className="text-xs font-semibold text-zinc-300">텔레그램 알림 연동</span>
+                    <span className="text-xs font-semibold text-zinc-300">{t("telegram_link")}</span>
                     <label className="relative inline-flex items-center cursor-pointer select-none">
                       <input
                         type="checkbox"
@@ -811,7 +817,7 @@ export default function PersonalSettingsPage() {
                   </div>
 
                   <div className="p-4 rounded-lg border border-indigo-500/20 bg-indigo-500/5 space-y-3">
-                    <span className="text-xs font-bold text-indigo-400">1-Click 연결</span>
+                    <span className="text-xs font-bold text-indigo-400">{t("one_click_connect")}</span>
                     <a
                       href={
                         dbSettings.telegram_enabled && dbSettings.global_bot_username
@@ -821,7 +827,7 @@ export default function PersonalSettingsPage() {
                       onClick={(e) => {
                         if (!dbSettings.telegram_enabled) {
                           e.preventDefault();
-                          toast.warning("텔레그램 연동 스위치를 먼저 켜세요.");
+                          toast.warning(t("toast.telegram_switch_first"));
                         }
                       }}
                       target="_blank"
@@ -833,12 +839,12 @@ export default function PersonalSettingsPage() {
                       }`}
                     >
                       <Send className="w-3.5 h-3.5" />
-                      공식 텔레그램 연결
+                      {t("official_telegram_connect")}
                     </a>
                   </div>
 
                   <div className="p-4 rounded-lg border border-zinc-900 bg-zinc-900/10 space-y-3">
-                    <span className="text-xs font-bold text-zinc-400">수동 CHAT ID</span>
+                    <span className="text-xs font-bold text-zinc-400">{t("manual_chat_id")}</span>
                     <input
                       type="text"
                       value={dbSettings.telegram_chat_id || ""}
@@ -851,8 +857,8 @@ export default function PersonalSettingsPage() {
 
                   <div className="p-4 rounded-lg border border-indigo-500/20 bg-indigo-500/5 space-y-3">
                     <div className="flex flex-col gap-1">
-                      <span className="text-xs font-bold text-indigo-400">내 성적표 수동 발송</span>
-                      <p className="text-[10px] text-zinc-400">최근 24시간 거래 성적을 내 텔레그램으로 즉시 발송합니다.</p>
+                      <span className="text-xs font-bold text-indigo-400">{t("manual_report_send")}</span>
+                      <p className="text-[10px] text-zinc-400">{t("manual_report_hint")}</p>
                     </div>
                     <button
                       onClick={handleTriggerPersonalReport}
@@ -864,7 +870,7 @@ export default function PersonalSettingsPage() {
                       }`}
                     >
                       {isPersonalReportSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                      내 성적표 지금 받기
+                      {t("get_report_now")}
                     </button>
                   </div>
                 </div>
@@ -876,7 +882,7 @@ export default function PersonalSettingsPage() {
                     className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-900/30"
                   >
                     {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                    텔레그램 설정 저장
+                    {t("save_telegram")}
                   </button>
                 </div>
               </div>
@@ -896,10 +902,10 @@ export default function PersonalSettingsPage() {
                     <div>
                       <h3 className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
                         <Key className="w-3.5 h-3.5 text-zinc-400" />
-                        로그인 비밀번호 변경
+                        {t("change_password")}
                       </h3>
                       <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">
-                        변경 즉시 모든 기기의 Access Token과 Refresh Token이 폐기됩니다.
+                        {t("change_password_hint")}
                       </p>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
@@ -907,7 +913,7 @@ export default function PersonalSettingsPage() {
                         type="password"
                         value={oldPassword}
                         onChange={(event) => setOldPassword(event.target.value)}
-                        placeholder="현재 비밀번호"
+                        placeholder={t("current_password")}
                         autoComplete="current-password"
                         className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white text-xs outline-none focus:border-red-500"
                       />
@@ -915,7 +921,7 @@ export default function PersonalSettingsPage() {
                         type="password"
                         value={newPassword}
                         onChange={(event) => setNewPassword(event.target.value)}
-                        placeholder="새 비밀번호 (12글자 이상)"
+                        placeholder={t("new_password")}
                         autoComplete="new-password"
                         className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white text-xs outline-none focus:border-red-500"
                       />
@@ -923,7 +929,7 @@ export default function PersonalSettingsPage() {
                         type="password"
                         value={confirmNewPassword}
                         onChange={(event) => setConfirmNewPassword(event.target.value)}
-                        placeholder="새 비밀번호 확인"
+                        placeholder={t("confirm_password")}
                         autoComplete="new-password"
                         className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white text-xs outline-none focus:border-red-500"
                       />
@@ -934,7 +940,7 @@ export default function PersonalSettingsPage() {
                       disabled={isPasswordChanging}
                       className="mt-3 w-full py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50 text-red-400 border border-red-500/30 text-xs font-bold transition-all active:scale-[0.99]"
                     >
-                      {isPasswordChanging ? "변경 중..." : "비밀번호 변경 및 전체 세션 로그아웃"}
+                      {isPasswordChanging ? t("changing") : t("change_password_button")}
                     </button>
                   </div>
 
@@ -942,11 +948,10 @@ export default function PersonalSettingsPage() {
                     <div>
                       <h3 className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
                         <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
-                        모의투자 자산 초기화
+                        {t("reset_sim_title")}
                       </h3>
                       <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">
-                        SIMULATED 모드의 보유 주식, 거래 기록, 행동 로그를 초기화하고
-                        가상 시작자금 {dbSettings.simulated_initial_cash_krw.toLocaleString()}원 기준으로 복원합니다.
+                        {t("reset_sim_hint", { amount: dbSettings.simulated_initial_cash_krw.toLocaleString() })}
                       </p>
                     </div>
                     <div className="mt-4">
@@ -955,11 +960,11 @@ export default function PersonalSettingsPage() {
                           onClick={() => setShowResetModal(true)}
                           className="w-full py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold transition-all active:scale-[0.98] cursor-pointer"
                         >
-                          가상 잔고 초기화
+                          {t("reset_balance")}
                         </button>
                       ) : (
                         <p className="text-[10px] text-zinc-500 text-center font-semibold italic bg-zinc-950/50 py-2 rounded-lg">
-                          SIMULATED 전용
+                          {t("sim_only")}
                         </p>
                       )}
                     </div>
@@ -969,10 +974,10 @@ export default function PersonalSettingsPage() {
                     <div>
                       <h3 className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
                         <Ban className="w-3.5 h-3.5 text-zinc-400" />
-                        보유 주식 강제 청산
+                        {t("force_liquidate_title")}
                       </h3>
                       <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">
-                        현재 보유 중인 종목을 시장가 기준으로 청산합니다.
+                        {t("force_liquidate_hint")}
                       </p>
                     </div>
                     <div className="mt-4">
@@ -981,7 +986,7 @@ export default function PersonalSettingsPage() {
                         className="w-full py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all active:scale-[0.98] flex items-center justify-center gap-1 cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                        전량 청산
+                        {t("liquidate_all")}
                       </button>
                     </div>
                   </div>
@@ -1004,23 +1009,23 @@ export default function PersonalSettingsPage() {
                 <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center">
                   <ShieldAlert className="w-7 h-7 text-red-500" />
                 </div>
-                <h3 className="text-lg font-extrabold text-white">실전 모드 전환 확인</h3>
+                <h3 className="text-lg font-extrabold text-white">{t("real_confirm_title")}</h3>
                 <p className="text-xs text-red-300 font-semibold leading-relaxed">
-                  REAL 모드는 실제 계좌 자금으로 주문을 실행할 수 있습니다.
+                  {t("real_confirm_hint")}
                 </p>
                 <div className="flex gap-3 w-full pt-2">
                   <button
                     onClick={() => setShowRealWarning(false)}
                     className="flex-1 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-all cursor-pointer"
                   >
-                    취소
+                    {t("cancel")}
                   </button>
                   <button
                     onClick={() => handleSave(true)}
                     className="flex-1 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
                   >
                     <ShieldAlert className="w-3.5 h-3.5" />
-                    REAL 저장
+                    {t("save_real")}
                   </button>
                 </div>
               </div>
@@ -1041,14 +1046,14 @@ export default function PersonalSettingsPage() {
                 <div className="w-14 h-14 rounded-full bg-amber-500/10 flex items-center justify-center">
                   <RefreshCw className="w-7 h-7 text-amber-500" />
                 </div>
-                <h3 className="text-lg font-extrabold text-white">가상 잔고 초기화</h3>
-                <p className="text-xs text-red-300 font-semibold leading-relaxed">이 작업은 되돌릴 수 없습니다.</p>
+                <h3 className="text-lg font-extrabold text-white">{t("reset_confirm_title")}</h3>
+                <p className="text-xs text-red-300 font-semibold leading-relaxed">{t("reset_confirm_hint")}</p>
                 <div className="flex gap-3 w-full pt-2">
                   <button
                     onClick={() => setShowResetModal(false)}
                     className="flex-1 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-all cursor-pointer"
                   >
-                    취소
+                    {t("cancel")}
                   </button>
                   <button
                     onClick={handleResetBalance}
@@ -1060,7 +1065,7 @@ export default function PersonalSettingsPage() {
                     ) : (
                       <RefreshCw className="w-3.5 h-3.5" />
                     )}
-                    초기화
+                    {t("reset")}
                   </button>
                 </div>
               </div>
@@ -1081,16 +1086,16 @@ export default function PersonalSettingsPage() {
                 <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center">
                   <Ban className="w-7 h-7 text-red-500" />
                 </div>
-                <h3 className="text-lg font-extrabold text-white">전량 시장가 청산</h3>
+                <h3 className="text-lg font-extrabold text-white">{t("liquidate_confirm_title")}</h3>
                 <p className="text-xs text-red-300 font-semibold leading-relaxed">
-                  현재 보유 중인 모든 종목을 시장가로 즉시 매도합니다. 계속하시겠습니까?
+                  {t("liquidate_confirm_hint")}
                 </p>
                 <div className="flex gap-3 w-full pt-2">
                   <button
                     onClick={() => setShowLiquidateModal(false)}
                     className="flex-1 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-all cursor-pointer"
                   >
-                    취소
+                    {t("cancel")}
                   </button>
                   <button
                     onClick={handleForceLiquidate}
@@ -1102,7 +1107,7 @@ export default function PersonalSettingsPage() {
                     ) : (
                       <Trash2 className="w-3.5 h-3.5" />
                     )}
-                    청산 진행
+                    {t("liquidate_proceed")}
                   </button>
                 </div>
               </div>
