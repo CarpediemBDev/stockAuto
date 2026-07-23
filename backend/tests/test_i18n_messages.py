@@ -168,19 +168,50 @@ class TestFrontendConsumedKeysExist:
         missing = sorted(consumed - defined)
         assert not missing, f"프론트가 쓰는데 ko.json에 없는 키: {missing}"
 
-    def test_navbar_dynamic_label_keys_are_defined(self):
-        """NavBar는 t(item.labelKey)로 동적 호출해 위 정규식이 잡지 못한다.
+    def _namespace_of(self, source: str) -> str | None:
+        match = re.search(r"useTranslations\(\s*['\"]([^'\"]+)['\"]\s*\)", source)
+        return match.group(1) if match else None
 
-        navItems 배열에서 labelKey를 직접 읽어 딕셔너리와 대조한다 — 메뉴 라벨이
-        키 경로 그대로 상단바에 노출되는 사고를 막는 최소 방어선.
+    def test_dynamic_label_keys_are_defined(self):
+        """t(item.labelKey)처럼 동적으로 부르는 키는 위 정규식이 잡지 못한다.
+
+        모듈 상수에 담긴 labelKey를 파일별로 긁어, 그 파일이 선언한 네임스페이스와
+        합쳐 딕셔너리와 대조한다. 라벨이 키 경로 그대로 화면에 노출되는 사고를 막는
+        최소 방어선이며, 현재 NavBar(nav)와 ScannerTabs(scanner)가 이 패턴을 쓴다.
         """
-        source = (self.FRONTEND / "components" / "NavBar.tsx").read_text(encoding="utf-8")
-        label_keys = re.findall(r"labelKey:\s*['\"]([^'\"]+)['\"]", source)
-        assert label_keys, "navItems에서 labelKey를 찾지 못했다 — 구조가 바뀌었는지 확인 필요"
+        found = 0
+        for path in self.FRONTEND.rglob("*.tsx"):
+            if "node_modules" in path.parts or ".next" in str(path):
+                continue
+            source = path.read_text(encoding="utf-8", errors="ignore")
+            label_keys = re.findall(r"labelKey:\s*['\"]([^'\"]+)['\"]", source)
+            if not label_keys:
+                continue
+            namespace = self._namespace_of(source)
+            assert namespace, f"{path.name}: labelKey는 있는데 useTranslations 네임스페이스가 없다"
+            for lang in ("ko", "en"):
+                defined = set(_flatten(_load(lang)))
+                for key in label_keys:
+                    assert f"{namespace}.{key}" in defined, f"{lang}.json에 {namespace}.{key} 없음"
+                    found += 1
+        assert found, "labelKey 패턴을 하나도 찾지 못했다 — 구조가 바뀌었는지 확인 필요"
+
+    def test_after_hours_signal_labels_are_defined(self):
+        """AfterHoursScanner는 SIGNAL_LABEL 상수를 거쳐 t()를 템플릿 리터럴로 부른다.
+
+        상수 값이 곧 번역 키 접미사이므로, 딕셔너리에 실재하지 않으면 배지에
+        'label_strong' 같은 내부 식별자가 그대로 찍힌다.
+        """
+        source = (self.FRONTEND / "components" / "AfterHoursScanner.tsx").read_text(encoding="utf-8")
+        block = re.search(r"const SIGNAL_LABEL = \{(.*?)\}", source, re.S)
+        assert block, "SIGNAL_LABEL 상수를 찾지 못했다 — 구조가 바뀌었는지 확인 필요"
+        suffixes = re.findall(r":\s*['\"]([^'\"]+)['\"]", block.group(1))
+        assert suffixes, "SIGNAL_LABEL 값이 비어 있다"
         for lang in ("ko", "en"):
             defined = set(_flatten(_load(lang)))
-            for key in label_keys:
-                assert f"nav.{key}" in defined, f"{lang}.json에 nav.{key} 없음"
+            for suffix in suffixes:
+                assert f"scanner.after_hours.{suffix}" in defined, \
+                    f"{lang}.json에 scanner.after_hours.{suffix} 없음"
 
 
 class TestDiscoveryNotificationLocalized:

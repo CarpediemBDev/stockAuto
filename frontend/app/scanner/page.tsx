@@ -9,8 +9,10 @@ import { useAuthStore } from "@/store/authStore";
 import { useRouter } from "next/navigation";
 import type { ScannerTab } from "@/components/ScannerTabs";
 import { useWatchlistActions } from "@/hooks/useWatchlistActions";
+import { useTranslations } from "next-intl";
 
 export default function ScannerPage() {
+  const t = useTranslations("scanner");
   const router = useRouter();
   const { isAuthenticated, isInitialized } = useAuthStore();
   const [activeTab, setActiveTab] = useState<ScannerTab>("15m");
@@ -37,7 +39,7 @@ export default function ScannerPage() {
   if (!isInitialized || !isAuthenticated) {
     return (
       <div className="min-h-[calc(100vh-4rem)] bg-black flex items-center justify-center text-zinc-400 text-sm">
-        인증 정보 확인 중...
+        {t("auth_checking")}
       </div>
     );
   }
@@ -48,9 +50,9 @@ export default function ScannerPage() {
         <header className="mb-8">
           <div>
             <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-zinc-200 to-zinc-400 tracking-tight mb-2">
-              마켓 스캐너
+              {t("title")}
             </h1>
-            <p className="text-zinc-400 font-medium">봇의 실시간 정밀 스캔 결과와 나의 관심종목을 통합 관리합니다.</p>
+            <p className="text-zinc-400 font-medium">{t("subtitle")}</p>
           </div>
         </header>
 

@@ -11,6 +11,7 @@ import { useTimezone } from '@/store/timezoneStore';
 import { toast } from 'sonner';
 import { cn, reportHandledError, getScoreColor, getScoreBarColor } from '@/lib/utils';
 import { ScannerTabs, type ScannerTab } from '@/components/ScannerTabs';
+import { useTranslations } from "next-intl";
 
 interface SwingPredictorCardProps {
   activeTab?: ScannerTab;
@@ -37,6 +38,7 @@ interface SwingPredictionResponse {
 }
 
 export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingPredictorCardProps) {
+  const t = useTranslations("scanner");
   const { data: swrData, isLoading: swrLoading, mutate: mutateSwing } = useSWR('/scanner/swing-predict', fetcher, { refreshInterval: pollInterval(15000) });
   const payload: SwingPredictionResponse = swrData || { candidates: [], scope: "global", sync_status: "empty", updated_at: null };
   const candidates = payload.candidates;
@@ -64,7 +66,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
     setRefreshing(true);
     try {
       await scannerAPI.refreshSwingPredict();
-      toast.success("스윙 갱신이 백그라운드에서 시작되었습니다. 잠시 후 자동 갱신됩니다.");
+      toast.success(t("swing.toast_started"));
       // API가 백그라운드 태스크 시작을 알리고 너무 빨리 종료되므로,
       // 유저가 클릭 피드백을 눈으로 볼 수 있도록 3초 후 데이터 리프레시
       setTimeout(async () => {
@@ -73,10 +75,10 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
       }, 3000);
     } catch (error) {
       const msg = reportHandledError('Failed to refresh swing predictions', error);
-      toast.error(`스윙 예측 수동 갱신 실패: ${msg}`);
+      toast.error(t("swing.toast_failed", { msg }));
       setRefreshing(false);
     }
-  }, [mutateSwing]);
+  }, [mutateSwing, t]);
 
   if (loading) {
     return (
@@ -111,12 +113,12 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
           </div>
           <div>
             <h3 className="text-base font-black text-zinc-200 tracking-tight flex items-center gap-2">
-              내일 세력돌파 예측 스윙 스캐너
+              {t("swing.title")}
               <span className="text-[11px] bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-2 py-0.5 rounded font-black uppercase tracking-wider">
                 Daily Swing
               </span>
             </h3>
-            <p className="text-xs text-zinc-400 font-medium">공용 시장 주도주 풀의 120일 일봉을 분석하여 변동성 및 수급 수축 한계점에 도달한 종목을 포착합니다.</p>
+            <p className="text-xs text-zinc-400 font-medium">{t("swing.subtitle")}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 self-end md:self-auto">
@@ -142,10 +144,10 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
             onClick={() => refreshSwingCandidates()}
             disabled={refreshing}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50 border border-zinc-800 whitespace-nowrap"
-            title="모든 사용자가 공유하는 공용 시장 주도주 풀의 스윙 예측을 새로 계산합니다"
+            title={t("swing.refresh_title")}
           >
             <RefreshCw size={13} className={cn(refreshing && "animate-spin text-indigo-400")} />
-            {refreshing ? "갱신 중..." : "수동 갱신"}
+            {refreshing ? t("swing.refreshing") : t("swing.refresh")}
           </button>
         </div>
       </div>
@@ -156,13 +158,13 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
       {candidates.length === 0 ? (
         <div className="py-16 text-center bg-zinc-900/20 rounded-2xl border border-dashed border-zinc-800">
           <HelpCircle size={40} className="mx-auto text-zinc-600 mb-3" />
-          <p className="text-sm font-bold text-zinc-500">저장된 스윙 예측 후보가 없습니다.</p>
+          <p className="text-sm font-bold text-zinc-500">{t("swing.empty_title")}</p>
           <p className="text-xs text-zinc-600 mt-1">
             {syncStatus === "refreshing"
-              ? "현재 스윙 후보를 분석하는 중입니다."
+              ? t("swing.empty_analyzing")
               : syncStatus === "failed"
-                ? "최근 스윙 예측 갱신에 실패했습니다. 잠시 후 수동 갱신을 다시 실행해 주세요."
-                : "수동 갱신을 실행하면 공용 시장 주도주 풀을 새로 분석합니다."}
+                ? t("swing.empty_failed")
+                : t("swing.empty_hint")}
           </p>
         </div>
       ) : (
@@ -199,11 +201,11 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
                       )}
                       {c.is_bullish_trend ? (
                         <span className="text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-black select-none whitespace-nowrap">
-                          정배열 추세
+                          {t("swing.uptrend")}
                         </span>
                       ) : (
                         <span className="text-[11px] bg-zinc-800 text-zinc-500 border border-zinc-700/50 px-1.5 py-0.5 rounded font-black select-none whitespace-nowrap">
-                          보합/횡보
+                          {t("swing.sideways")}
                         </span>
                       )}
                     </div>
@@ -228,7 +230,7 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
                 {/* 내일 돌파 예측 확률 스코어 바 */}
                 <div className="mb-4">
                   <div className="flex justify-between items-center text-xs mb-1.5 font-bold">
-                    <span className="text-zinc-400">내일 세력돌파 예상 점수</span>
+                    <span className="text-zinc-400">{t("swing.score_label")}</span>
                     <span className={getScoreColor(c.score).split(' ')[0] + ' font-black'}>
                       {c.score} / 100
                     </span>
@@ -244,53 +246,53 @@ export function SwingPredictorCard({ activeTab = "swing", setActiveTab }: SwingP
                 <div className="flex flex-wrap gap-2 pt-2 border-t border-zinc-900 text-[11px] font-bold">
                   {/* VCP 수축 배지 */}
                   {c.vcp_triggered ? (
-                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg flex items-center gap-1 cursor-help" title="주가 변동성이 극도로 축소되며 세력이 에너지를 응축하는 VCP 패턴 완료 (호재)">
+                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg flex items-center gap-1 cursor-help" title={t("swing.vcp_done_tip")}>
                       <ShieldCheck size={11} className="text-amber-400" />
-                      VCP 수렴 완료
+                      {t("swing.vcp_done")}
                     </span>
                   ) : c.bollinger_band_width_percentile < 30.0 ? (
-                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg flex items-center gap-1 cursor-help" title="VCP 패턴 진행 중으로 변동성이 줄어들고 있음">
+                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg flex items-center gap-1 cursor-help" title={t("swing.vcp_compress_tip")}>
                       <Layers size={11} className="text-indigo-400" />
-                      VCP 진폭 압축 중
+                      {t("swing.vcp_compress")}
                     </span>
                   ) : null}
 
                   {/* Volume Dry-up 배지 */}
                   {c.vud_ratio <= 0.40 ? (
-                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg flex items-center gap-1 cursor-help" title="거래량이 극단적으로 마르며 매도세가 소진되었음을 의미 (강력한 반등 신호)">
+                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg flex items-center gap-1 cursor-help" title={t("swing.vud_extreme_tip")}>
                       <Activity size={11} className="animate-pulse text-emerald-400" />
-                      VUD 극감 (매도 씨 마름)
+                      {t("swing.vud_extreme")}
                     </span>
                   ) : c.vud_ratio <= 0.70 ? (
-                    <span className="bg-zinc-800/80 text-zinc-400 border border-zinc-700 px-2 py-1 rounded-lg cursor-help" title="최근 거래량이 줄어들며 조정 장세가 마무리되는 중">
-                      VUD 건조 ({Math.round(c.vud_ratio * 100)}%)
+                    <span className="bg-zinc-800/80 text-zinc-400 border border-zinc-700 px-2 py-1 rounded-lg cursor-help" title={t("swing.vud_dry_tip")}>
+                      {t("swing.vud_dry")} ({Math.round(c.vud_ratio * 100)}%)
                     </span>
                   ) : (
-                    <span className="bg-zinc-900 text-zinc-500 border border-zinc-800 px-2 py-1 rounded-lg cursor-help" title="평소와 비슷한 거래량 유지 중">
-                      거래량 보합 ({Math.round(c.vud_ratio * 100)}%)
+                    <span className="bg-zinc-900 text-zinc-500 border border-zinc-800 px-2 py-1 rounded-lg cursor-help" title={t("swing.vud_normal_tip")}>
+                      {t("swing.vud_normal")} ({Math.round(c.vud_ratio * 100)}%)
                     </span>
                   )}
 
                   {/* OBV 세력 매집 다이버전스 배지 */}
                   {c.obv_divergence > 10.0 ? (
-                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg flex items-center gap-1 cursor-help" title="거래량이 극단적으로 마르며 매도세가 소진되었음을 의미 (강력한 반등 신호)">
+                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg flex items-center gap-1 cursor-help" title={t("swing.obv_strong_tip")}>
                       <Flame size={11} className="text-amber-400" />
-                      OBV 세력 매집중 ({c.obv_divergence.toFixed(0)}%)
+                      {t("swing.obv_strong")} ({c.obv_divergence.toFixed(0)}%)
                     </span>
                   ) : c.obv_divergence > 1.0 ? (
-                    <span className="bg-zinc-800/80 text-zinc-400 border border-zinc-700 px-2 py-1 rounded-lg cursor-help" title="약한 수준의 세력 매집 시그널 포착">
-                      OBV 매집 포착 ({c.obv_divergence.toFixed(0)}%)
+                    <span className="bg-zinc-800/80 text-zinc-400 border border-zinc-700 px-2 py-1 rounded-lg cursor-help" title={t("swing.obv_weak_tip")}>
+                      {t("swing.obv_weak")} ({c.obv_divergence.toFixed(0)}%)
                     </span>
                   ) : null}
 
                   {/* BB 스퀴즈 압착 강도 배지 */}
                   {c.bollinger_band_width_percentile <= 20.0 ? (
-                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg cursor-help flex items-center gap-1" title="볼린저 밴드가 극도로 압착되어 조만간 폭발적인 추세가 나올 가능성 높음"><span className="text-indigo-400">🧭</span>
-                      BB 대압착 (에너지 100% 장착)
+                    <span className="bg-zinc-800/80 text-zinc-300 border border-zinc-700 px-2 py-1 rounded-lg cursor-help flex items-center gap-1" title={t("swing.bb_squeeze_tip")}><span className="text-indigo-400">🧭</span>
+                      {t("swing.bb_squeeze")}
                     </span>
                   ) : c.bollinger_band_width_percentile <= 40.0 ? (
-                    <span className="bg-zinc-800/80 text-zinc-400 border border-zinc-700 px-2 py-1 rounded-lg cursor-help flex items-center gap-1" title="볼린저 밴드가 수축되며 방향성을 탐색 중"><span className="text-purple-400">🧭</span>
-                      BB 수축 (에너지 충전중)
+                    <span className="bg-zinc-800/80 text-zinc-400 border border-zinc-700 px-2 py-1 rounded-lg cursor-help flex items-center gap-1" title={t("swing.bb_contract_tip")}><span className="text-purple-400">🧭</span>
+                      {t("swing.bb_contract")}
                     </span>
                   ) : null}
                 </div>
