@@ -26,6 +26,7 @@ import { fetcher } from "@/lib/api";
 import { toast } from "sonner";
 import { useTimezone } from "@/store/timezoneStore";
 import { ScannerTabs, type ScannerTab } from "@/components/ScannerTabs";
+import { useTranslations } from "next-intl";
 
 interface ScoreCardFactor {
   factor: string;
@@ -114,6 +115,7 @@ export function OverseasScanner({
   activeTab = "15m",
   setActiveTab
 }: OverseasScannerProps) {
+  const t = useTranslations("scanner");
   const [isManualScanning, setIsManualScanning] = useState(false);
   const wasScanningRef = React.useRef(false);
   
@@ -141,25 +143,25 @@ export function OverseasScanner({
       wasScanningRef.current = true;
     } else if (wasScanningRef.current && !isBackendScanning) {
       wasScanningRef.current = false;
-      toast.success("스캔 갱신이 완료되었습니다.");
+      toast.success(t("overseas.toast_done"));
     }
-  }, [isBackendScanning]);
+  }, [isBackendScanning, t]);
 
   const runManualScan = useCallback(async () => {
     setIsManualScanning(true);
     try {
       await scannerAPI.runOverseasScan();
-      toast.info("스캔이 백그라운드에서 시작되었습니다. 스캔 완료 시 자동으로 목록이 갱신됩니다.");
+      toast.info(t("overseas.toast_started"));
       
       await mutateScan();
       setIsManualScanning(false);
       
     } catch (error) {
       const msg = reportHandledError("Failed to run overseas scan", error);
-      toast.error(`수동 스캔 실패: ${msg}`);
+      toast.error(t("overseas.toast_failed", { msg }));
       setIsManualScanning(false);
     }
-  }, [mutateScan]);
+  }, [mutateScan, t]);
 
   return (
     <div className="bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-2xl shadow-xl flex flex-col h-full">
@@ -172,8 +174,8 @@ export function OverseasScanner({
             <Radar size={22} />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white tracking-tight">실시간 정밀 스캔</h2>
-            <p className="text-zinc-500 text-xs font-medium">실시간 전수 조사 (Gap, News, RVOL, RS)</p>
+            <h2 className="text-lg font-bold text-white tracking-tight">{t("overseas.title")}</h2>
+            <p className="text-zinc-500 text-xs font-medium">{t("overseas.subtitle")}</p>
           </div>
         </div>
 
@@ -190,10 +192,10 @@ export function OverseasScanner({
             onClick={() => runManualScan()}
             disabled={isLoading || isManualScanning}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium transition-all active:scale-95 disabled:opacity-50"
-            title="최신 시장 데이터를 기반으로 스캔을 새로 실행합니다"
+            title={t("overseas.refresh_title")}
           >
             <RefreshCw size={13} className={cn((isSpinning || isManualScanning) && "animate-spin text-indigo-400")} />
-            {isManualScanning ? "수동 스캔 중..." : isLoading ? "데이터 분석 중..." : "수동 스캔"}
+            {isManualScanning ? t("overseas.scanning") : isLoading ? t("overseas.analyzing") : t("overseas.manual_scan")}
           </button>
         </div>
       </div>
@@ -206,17 +208,17 @@ export function OverseasScanner({
           <div className="flex flex-col items-center justify-center py-20 text-zinc-500">
             <Radar size={40} className="animate-ping mb-4 opacity-20 text-indigo-500" />
             <p className="text-sm font-medium">
-              {isManualScanning ? "해외 마켓 수동 스캔을 실행 중입니다..." : "최신 시장 데이터를 실시간으로 분석하고 있습니다..."}
+              {isManualScanning ? t("overseas.loading_manual") : t("overseas.loading_auto")}
             </p>
             <p className="text-xs text-zinc-600 mt-2">
-              {isManualScanning ? "Stage 1: 15분봉 벌크 스캔 중 (7,000+ Tickers)" : "AI가 가장 최근 분석한 시그널 데이터를 불러오는 중"}
+              {isManualScanning ? t("overseas.stage_manual") : t("overseas.stage_auto")}
             </p>
           </div>
         ) : results.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-zinc-500">
             <Zap size={30} className="mb-3 opacity-20" />
-            <p className="text-sm">현재 분석 완료된 최신 시그널이 없습니다.</p>
-            <p className="text-xs text-zinc-600 mt-2">정규장 외에는 자동 분석 데이터가 없을 수 있습니다. 필요시 수동 스캔을 실행하세요.</p>
+            <p className="text-sm">{t("overseas.empty")}</p>
+            <p className="text-xs text-zinc-600 mt-2">{t("overseas.empty_hint")}</p>
           </div>
         ) : (
           <table className="w-full min-w-[850px] text-left border-collapse">
@@ -226,16 +228,16 @@ export function OverseasScanner({
                 <th className="py-4 px-2 font-semibold">Ticker / Name</th>
                 <th className="py-4 px-4 font-semibold text-right">Price</th>
                 <th className="py-4 px-4 font-semibold text-center">
-                  <HeaderTooltip title="Open Gap / RVOL" desc="Open Gap: 직전 거래일 마지막 15분봉 종가 대비 당일 첫 15분봉 시가의 갭 비율. RVOL: 최근 20개 마감 15분봉 평균 대비 마지막 마감 15분봉 거래량 비율." />
+                  <HeaderTooltip title="Open Gap / RVOL" desc={t("overseas.tip_gap")} />
                 </th>
                 <th className="py-4 px-4 font-semibold text-center">
-                  <HeaderTooltip title="Trend / RS" desc="Trend: EMA(9/20일 이평선) 정배열 상승 상태. RS: QQQ 지수 대비 실시간 초과수익 성향 (시장 극복 지표)." />
+                  <HeaderTooltip title="Trend / RS" desc={t("overseas.tip_trend")} />
                 </th>
                 <th className="py-4 px-4 font-semibold text-center">
-                  <HeaderTooltip title="Risk / Wick" desc="Risk: 고점 윗꼬리에 따른 물림 위험도. Wick: 1분봉 캔들의 윗꼬리 비율 (30% 이하인 꽉 찬 몸통이 안전)." />
+                  <HeaderTooltip title="Risk / Wick" desc={t("overseas.tip_risk")} />
                 </th>
                 <th className="py-4 px-4 font-semibold text-center">
-                  <HeaderTooltip title="Signal Score" desc="시장 추세, 거래량, 갭, 정배열, 윗꼬리, 뉴스 등 6대 핵심 지표를 종합 합산한 추천 점수 (80점 이상 STRONG BUY)." />
+                  <HeaderTooltip title="Signal Score" desc={t("overseas.tip_score")} />
                 </th>
                 <th className="py-4 px-5 font-semibold text-right w-12"></th>
               </tr>
@@ -296,7 +298,7 @@ export function OverseasScanner({
                               <button
                                 onClick={(e) => { e.stopPropagation(); setSelectedNewsItem(item); }}
                                 className="mt-0.5 overflow-hidden w-full cursor-pointer"
-                                title="클릭해서 AI 뉴스 분석 보기"
+                                title={t("overseas.news_click")}
                               >
                                 <div className={cn(
                                   "flex items-center gap-1 text-[11px] font-bold",
@@ -440,7 +442,7 @@ export function OverseasScanner({
                           <button
                             onClick={() => onAddToWatchlist?.(item.ticker, item.name)}
                             className="w-8 h-8 rounded-full bg-zinc-800 hover:bg-indigo-500/20 hover:text-indigo-400 flex items-center justify-center text-zinc-500 transition-all active:scale-90"
-                            title="관심종목 추가"
+                            title={t("overseas.add_watch")}
                           >
                             <Plus size={16} />
                           </button>
@@ -473,7 +475,7 @@ export function OverseasScanner({
         </div>
         <div className="text-[11px] text-zinc-500 italic flex items-center gap-1">
           <BarChart2 size={10} className="text-zinc-600" />
-          행 클릭: 스코어 상세 &nbsp;·&nbsp; AI 칩 클릭: 뉴스 분석
+          {t("overseas.footer_hint")}
         </div>
       </div>
 
@@ -527,7 +529,7 @@ export function OverseasScanner({
               {/* 스코어 게이지바 */}
               <div className="bg-zinc-950/60 p-5 rounded-xl border border-zinc-800 shadow-inner">
                 <div className="flex justify-between items-end mb-3">
-                  <span className="text-xs text-zinc-400 font-semibold tracking-wide">종합 추천 스코어</span>
+                  <span className="text-xs text-zinc-400 font-semibold tracking-wide">{t("overseas.total_score")}</span>
                   <span className="text-3xl font-black font-mono tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-400">
                     {selectedScoreItem.signal_score}
                     <span className="text-sm text-zinc-600 font-normal ml-1">/ 100</span>
@@ -586,7 +588,7 @@ export function OverseasScanner({
                   ))
                 ) : (
                   <span className="col-span-2 text-xs text-zinc-600 italic text-center py-6">
-                    세부 채점 내역이 제공되지 않는 종목입니다.
+                    {t("overseas.no_scorecard")}
                   </span>
                 )}
               </div>
@@ -595,10 +597,10 @@ export function OverseasScanner({
               {selectedScoreItem.score_card && selectedScoreItem.score_card.length > 0 && (
                 <div className="flex items-center justify-between px-4 py-3 bg-zinc-950/80 rounded-xl border border-zinc-800">
                   <span className="text-[11px] text-zinc-500 font-semibold">
-                    통과 {selectedScoreItem.score_card.filter(c => c.passed).length} / 전체 {selectedScoreItem.score_card.length} 항목
+                    {t("overseas.passed_count", { passed: selectedScoreItem.score_card.filter(c => c.passed).length, total: selectedScoreItem.score_card.length })}
                   </span>
                   <span className="text-[11px] font-black font-mono text-indigo-400">
-                    합산 +{selectedScoreItem.score_card.filter(c => c.passed).reduce((s, c) => s + c.score, 0)}pt
+                    {t("overseas.sum_points", { points: selectedScoreItem.score_card.filter(c => c.passed).reduce((s, c) => s + c.score, 0) })}
                   </span>
                 </div>
               )}
@@ -665,7 +667,7 @@ export function OverseasScanner({
               <div className="flex justify-between items-center text-[11px] text-zinc-500 font-extrabold tracking-wide">
                 <span>BEARISH 📉</span>
                 <span className="text-xs font-black text-white font-mono flex items-center gap-1.5">
-                  뉴스 심리 온도
+                  {t("overseas.sentiment_label")}
                   <span className={cn(
                     "px-1.5 py-0.5 rounded text-[11px] font-mono",
                     (selectedNewsItem.news_sentiment_score ?? 50) >= 60 ? "bg-emerald-500/10 text-emerald-400" :
@@ -702,7 +704,7 @@ export function OverseasScanner({
                 
                 <div className="relative pl-4 border-l-2 border-indigo-500/30">
                   <p className="text-xs text-zinc-300 font-semibold leading-relaxed tracking-wide">
-                    {selectedNewsItem.news_summary ?? "이 종목에 관한 호재나 악재 뉴스를 스캔하고 분석하는 중입니다."}
+                    {selectedNewsItem.news_summary ?? t("overseas.news_placeholder")}
                   </p>
                 </div>
               </div>
@@ -714,7 +716,7 @@ export function OverseasScanner({
                   rel="noopener noreferrer"
                   className="self-end flex items-center gap-1.5 mt-4 text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors font-black uppercase tracking-widest group/link"
                 >
-                  원문 기사 읽기
+                  {t("overseas.read_article")}
                   <ExternalLink size={11} className="group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5 transition-transform" />
                 </a>
               )}
@@ -726,7 +728,7 @@ export function OverseasScanner({
                 onClick={() => setSelectedNewsItem(null)}
                 className="px-4.5 py-2 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 rounded-lg text-xs font-bold transition-all active:scale-95 border border-zinc-750/30"
               >
-                닫기
+                {t("overseas.close")}
               </button>
             </div>
           </div>
