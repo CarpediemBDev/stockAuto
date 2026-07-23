@@ -11,6 +11,7 @@
 | 문서 | 소유 주제 (이 문서만 이 주제의 정본) |
 |---|---|
 | [AI_WORKFLOW.md](AI_WORKFLOW.md) | AI 작업 시작·검증·인수인계 절차, 변경 영향 기록 형식 |
+| [MULTI_SESSION_WORKTREE.md](MULTI_SESSION_WORKTREE.md) | 다중 세션 작업 격리(worktree) 규칙·세팅·공유자원 직렬화 |
 | [ARCHITECTURE_V2.md](ARCHITECTURE_V2.md) | 백엔드 동시성/락/Atomic 연산, PostgreSQL 이관 설계 |
 | [SCHEMA.md](SCHEMA.md) | DB 테이블·컬럼·관계 스키마 정본 |
 | [API_STANDARD.md](API_STANDARD.md) | 전역 응답 래퍼, API 계약 규격 |
