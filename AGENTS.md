@@ -44,6 +44,8 @@
     *   **백엔드**: `python -m py_compile [수정한 파일 경로]` 실행 ➔ 문법적 무결성 검증
     *   **프론트엔드**: `npm run lint` 및 `npx tsc --noEmit` 실행 ➔ TypeScript 및 ESLint 에러 0건 검증
     *   **120% 에이전트 보강 검증**: `python scripts/check_chaos_fuzzing.py` (다이나믹 카오스 퍼징) 및 `python scripts/auto_rollback_guard.py` (자율 롤백 안전 검증) 통과 입증
+    *   **마이그레이션 안전성 검사**: `python scripts/check_migration_safety.py` — 변경된 Alembic 마이그레이션의 f-string SQL 조립(R1), 무조건 `DELETE FROM`(R2), 무조건 `UPDATE`(R3), 되돌릴 컬럼값을 확인하지 않는 `SET col = NULL` 롤백(R4)을 정적 검출한다. 하네스 Step 2에 자동 편입되어 있으며, `--all` 인자로 전체 마이그레이션 전수 감사가 가능하다.
+    *   **현황판 자가 승격 차단**: 하네스는 변경된 `docs/tasks/YYYY-MM-DD.md`를 HEAD(로컬)/`CHANGE_BASE_SHA`(CI)와 대조하여, 사용자 승인 없이 `[R]`/`[/]`/`[ ]` → `[x]`로 자가 승격하거나 신규 항목을 처음부터 `[x]`로 등록하는 것을 자동 차단한다. 승인이 확인된 항목만 `- [x] 제목 <!-- APPROVED: 날짜/사유 -->` 마커로 통과시킨다. (SMART SKIP 문서 전용 커밋에서도 항상 가동)
 
 *   **완성형 한글 표준화 (NFC Encoding):**
     *   윈도우 환경 및 다양한 OS 간의 한글 깨짐(자소 분리 현상)을 방지하기 위해, 모든 마크다운과 파이썬 소스코드 내 한글 텍스트는 무조건 **완성형(NFC)** 표준으로 디스크에 저장 및 인코딩되어야 합니다.
