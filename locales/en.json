@@ -44,6 +44,26 @@
     "strategy_catalog_desc": "Browse StockAuto's trading strategies and apply one instantly. Each strategy is either tuned for a specific market regime or built to adapt across all of them.",
     "close": "Close"
   },
+  "report": {
+    "load_failed": "Failed to load data.",
+    "title": "Overall Trading Report",
+    "subtitle": "Analyzes core investment performance such as total cumulative profit and win rate for the account.",
+    "live_sync": "Live data sync",
+    "net_profit": "Total Net Profit",
+    "gross_profit": "Gross profit:",
+    "gross_loss": "Gross loss:",
+    "win_rate": "Win Rate",
+    "profit_factor": "Profit Factor",
+    "total_trades": "Total Trades",
+    "wins": "Wins:",
+    "losses": "Losses:",
+    "count_suffix": "",
+    "cumulative_profit": "Cumulative Profit Curve",
+    "cumulative_profit_series": "Cumulative net profit",
+    "no_trades": "No sell records (realized profit) yet.",
+    "view_all_logs": "View all live execution logs",
+    "close": "Close"
+  },
   "admin": {
     "users": {
       "title": "User Management & Live Arena",

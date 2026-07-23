@@ -44,6 +44,26 @@
     "strategy_catalog_desc": "StockAuto의 다양한 매매 전략을 확인하고 즉시 적용할 수 있습니다. 각 전략은 특정 장세에 최적화되어 있거나 모든 상황에 유연하게 대처할 수 있도록 설계되었습니다.",
     "close": "닫기"
   },
+  "report": {
+    "load_failed": "데이터를 불러오지 못했습니다.",
+    "title": "종합 매매 성적표",
+    "subtitle": "계좌의 전체 누적 수익금과 승률 등 핵심 투자 성과를 분석합니다.",
+    "live_sync": "실시간 라이브 데이터 동기화",
+    "net_profit": "총 실수익금",
+    "gross_profit": "총수익:",
+    "gross_loss": "총손실:",
+    "win_rate": "승률 (Win Rate)",
+    "profit_factor": "프로핏 팩터",
+    "total_trades": "총 거래 횟수",
+    "wins": "익절:",
+    "losses": "손절:",
+    "count_suffix": "회",
+    "cumulative_profit": "누적 수익 곡선",
+    "cumulative_profit_series": "누적 실수익금",
+    "no_trades": "아직 매도 내역(수익 실현)이 없습니다.",
+    "view_all_logs": "실시간 체결 로그 전체보기",
+    "close": "닫기"
+  },
   "admin": {
     "users": {
       "title": "사용자 관리 & 실시간 아레나",
