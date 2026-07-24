@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo } from "react";
 import { Wallet, TrendingUp, DollarSign, PieChart, ShieldAlert, Zap, Crown, Activity } from "lucide-react";
 import { cn, krwToUsd } from "@/lib/utils";
 import useSWR from "swr";
@@ -47,6 +47,31 @@ export function AccountBalance({
   const { serverOffsetMs } = useSseConnection();
   const freshness = useFreshness(balance?.captured_at, { staleAfterSec: 90, serverOffsetMs });
 
+  // 격리형 지갑 파생 목록·합계는 SSE push마다 재렌더되므로 balance 참조가 바뀔 때만 재계산한다.
+  // (조기 반환 아래에 두면 hooks 호출 순서가 깨지므로 반드시 이 위치에 유지한다)
+  // 지역 상수로 뽑아 useMemo 내부의 읽기와 의존성을 정확히 일치시킨다
+  // (react-hooks/preserve-manual-memoization 규칙 요구사항).
+  const walletAllocation = balance?.wallet_allocation;
+  const walletAllocations = useMemo(
+    () =>
+      walletAllocation
+        ? Object.entries(walletAllocation).map(([key, value]) => ({
+            key,
+            cash: value.cash,
+            stock_value: value.stock_value,
+            total: value.cash + value.stock_value,
+            name: value.name || key.replaceAll("_", " "),
+            weight: value.weight || 0.5
+          }))
+        : [],
+    [walletAllocation]
+  );
+
+  const totalCalculated = useMemo(
+    () => walletAllocations.reduce((sum, item) => sum + item.total, 0),
+    [walletAllocations]
+  );
+
   const formatMoney = useCallback((amount: number) => {
     if (!balance) return "";
     if (displayCurrency === "KRW") {
@@ -92,19 +117,6 @@ export function AccountBalance({
   const isStaleSnapshot = freshness.isStale;
   const capturedAgeLabel = freshness.label;
 
-  // 격리형 지갑 동적 분배 리스트 획득 및 폴백 처리
-  const walletAllocations = balance.wallet_allocation
-    ? Object.entries(balance.wallet_allocation).map(([key, value]) => ({
-        key,
-        cash: value.cash,
-        stock_value: value.stock_value,
-        total: value.cash + value.stock_value,
-        name: value.name || key.replaceAll("_", " "),
-        weight: value.weight || 0.5
-      }))
-    : [];
-
-  const totalCalculated = walletAllocations.reduce((sum, item) => sum + item.total, 0);
   const denom = totalCalculated > 0 ? totalCalculated : 1;
 
   return (
