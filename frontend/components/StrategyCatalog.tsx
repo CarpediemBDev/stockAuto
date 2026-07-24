@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import useSWR from "swr";
 import { fetcher, adminAPI } from "@/lib/api";
 import { Loader2, CheckCircle2, Shield, Zap, TrendingUp, Target } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 interface Strategy {
   id: string;
@@ -17,6 +18,7 @@ interface Strategy {
 }
 
 export function StrategyCatalog() {
+  const t = useTranslations("components");
   const { data: strategies, error: strategiesError } = useSWR<Strategy[]>('/strategies/catalog', fetcher);
   const { data: adminSettings, error: adminError, mutate: mutateSettings } = useSWR('/admin', fetcher);
   
@@ -47,7 +49,7 @@ export function StrategyCatalog() {
       await mutateSettings();
     } catch (err) {
       console.error(err);
-      alert('전략 변경에 실패했습니다.');
+      alert(t("strategy_catalog.change_failed"));
     } finally {
       setIsUpdating(false);
       setSelectedId(null);
@@ -55,7 +57,7 @@ export function StrategyCatalog() {
   };
 
   if (strategiesError || adminError) {
-    return <div className="p-4 bg-red-950/20 text-red-400 rounded-xl border border-red-900/30">설정 데이터를 불러올 수 없습니다.</div>;
+    return <div className="p-4 bg-red-950/20 text-red-400 rounded-xl border border-red-900/30">{t("strategy_catalog.settings_load_failed")}</div>;
   }
 
   if (!strategies || !adminSettings) {
@@ -88,10 +90,10 @@ export function StrategyCatalog() {
 
   const getRegimeLabel = (regime: string) => {
     switch(regime) {
-      case 'ALL': return '전천후 오케스트레이터';
-      case 'BULLISH': return '상승장 특화 돌파';
-      case 'BEARISH': return '하락장 방어 매집';
-      case 'NEUTRAL': return '횡보장 스퀴즈 타격';
+      case 'ALL': return t("strategy_catalog.regime_all");
+      case 'BULLISH': return t("strategy_catalog.regime_bullish");
+      case 'BEARISH': return t("strategy_catalog.regime_bearish");
+      case 'NEUTRAL': return t("strategy_catalog.regime_neutral");
       default: return regime;
     }
   };
@@ -134,7 +136,7 @@ export function StrategyCatalog() {
               
               <div className="flex-grow">
                 <p className="text-sm text-zinc-300 leading-relaxed line-clamp-3">
-                  {strategy.summary_ko || strategy.description || "전략 설명이 없습니다."}
+                  {strategy.summary_ko || strategy.description || t("strategy_catalog.no_description")}
                 </p>
               </div>
               
@@ -154,7 +156,7 @@ export function StrategyCatalog() {
                         : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
                     }`}
                   >
-                    {isSelected ? '선택됨' : '선택'}
+                    {isSelected ? t("strategy_catalog.selected") : t("strategy_catalog.select")}
                   </button>
                 )}
               </div>

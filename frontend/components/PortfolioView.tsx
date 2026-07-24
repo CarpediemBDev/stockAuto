@@ -9,6 +9,7 @@ import useSWR from 'swr';
 import { pollInterval } from '@/lib/sse';
 import { fetcher } from '@/lib/api';
 import { cn, usdToKrw, formatKrw } from '@/lib/utils';
+import { useTranslations } from "next-intl";
 
 interface Holding {
   id: number;
@@ -44,6 +45,7 @@ function NewsModal({
   news: NewsInfo;
   onClose: () => void;
 }) {
+  const t = useTranslations("components");
   const isPositive = news.sentiment === 'POSITIVE';
   const isNegative = news.sentiment === 'NEGATIVE';
 
@@ -91,7 +93,7 @@ function NewsModal({
             <div className="flex justify-between items-center text-[10px] text-zinc-500 font-extrabold tracking-wide mb-2.5">
               <span>BEARISH 📉</span>
               <span className="text-xs font-black text-white font-mono flex items-center gap-1.5">
-                뉴스 심리 온도
+                {t("common.sentiment_label")}
                 <span className={cn(
                   'px-1.5 py-0.5 rounded text-[10px] font-mono',
                   news.sentiment_score >= 60 ? 'bg-emerald-500/10 text-emerald-400' :
@@ -136,7 +138,7 @@ function NewsModal({
                 rel="noopener noreferrer"
                 className="self-end flex items-center gap-1.5 text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors font-black uppercase tracking-widest group/link"
               >
-                원문 기사 읽기
+                {t("common.read_article")}
                 <ExternalLink size={11} className="group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5 transition-transform" />
               </a>
             )}
@@ -147,7 +149,7 @@ function NewsModal({
               onClick={onClose}
               className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-bold transition-all active:scale-95 border border-zinc-700/30"
             >
-              닫기
+              {t("common.close")}
             </button>
           </div>
         </div>
@@ -157,6 +159,7 @@ function NewsModal({
 }
 
 const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | "USD" }) => {
+  const t = useTranslations("components");
   const [activeNewsItem, setActiveNewsItem] = useState<{ ticker: string; name: string; news: NewsInfo } | null>(null);
 
   const { data: holdingsData, isLoading } = useSWR('/account/holdings', fetcher, { refreshInterval: pollInterval(15000) });
@@ -188,8 +191,8 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
         <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
           <Target className="text-slate-600" size={32} />
         </div>
-        <h3 className="text-lg font-bold text-slate-300">보유 종목이 없습니다</h3>
-        <p className="text-slate-500 text-sm mt-2">봇이 시그널을 감시하며 매수 기회를 찾고 있습니다.</p>
+        <h3 className="text-lg font-bold text-slate-300">{t("portfolio.empty_title")}</h3>
+        <p className="text-slate-500 text-sm mt-2">{t("portfolio.empty_hint")}</p>
       </div>
     );
   }
@@ -241,7 +244,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                     <button
                       onClick={() => setActiveNewsItem({ ticker: cleanTicker, name: h.ticker_name, news })}
                       className="mt-1.5 overflow-hidden w-full text-left"
-                      title="클릭해서 AI 뉴스 분석 보기"
+                      title={t("common.news_click")}
                     >
                       <div className={cn(
                         'flex items-center gap-1 text-[9px] font-bold',
@@ -276,7 +279,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                   {/* 핵심 투자 지표 */}
                   <div className="grid grid-cols-2 gap-2 p-3 bg-slate-950/60 rounded-xl border border-slate-800/40 text-xs">
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold">평단가</span>
+                      <span className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold">{t("portfolio.avg_price")}</span>
                       <span className="text-slate-200 font-mono font-medium">
                         {displayCurrency === "USD"
                           ? `$${h.avg_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
@@ -285,11 +288,11 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                       </span>
                     </div>
                     <div className="flex flex-col gap-0.5 text-right">
-                      <span className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold">보유 수량</span>
-                      <span className="text-slate-200 font-mono font-medium">{h.quantity.toLocaleString()}주</span>
+                      <span className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold">{t("portfolio.quantity")}</span>
+                      <span className="text-slate-200 font-mono font-medium">{h.quantity.toLocaleString()}{t("common.shares_suffix")}</span>
                     </div>
                     <div className="flex flex-col gap-0.5 mt-1.5 pt-1.5 border-t border-slate-800/40">
-                      <span className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold">투자 원금</span>
+                      <span className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold">{t("portfolio.principal")}</span>
                       <span className="text-slate-400 font-mono font-medium">
                         {displayCurrency === "USD"
                           ? `$${(h.avg_price * h.quantity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -298,7 +301,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                       </span>
                     </div>
                     <div className="flex flex-col gap-0.5 text-right mt-1.5 pt-1.5 border-t border-slate-800/40">
-                      <span className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold">평가 금액</span>
+                      <span className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold">{t("portfolio.market_value")}</span>
                       <span className={`font-mono font-bold ${profitRate >= 0 ? 'text-rose-400' : 'text-blue-400'}`}>
                         {displayCurrency === "USD"
                           ? `$${(currentPrice * h.quantity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -312,12 +315,12 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                   <div className="space-y-1.5 mt-4">
                     <div className="flex justify-between text-[10px] font-bold tracking-tight">
                       <span className="group/drop relative inline-flex items-center gap-1 cursor-help text-slate-500 w-fit">
-                        <span>DROP FROM PEAK (최고가 대비)</span>
+                        <span>{t("portfolio.drop_from_peak")}</span>
                         <Info size={10} className="text-slate-600 group-hover/drop:text-slate-400 transition-colors" />
                         <span className="pointer-events-none absolute bottom-full left-0 mb-2 w-64 scale-95 opacity-0 group-hover/drop:scale-100 group-hover/drop:opacity-100 transition-all duration-200 bg-slate-950 text-slate-300 text-[10px] font-normal normal-case leading-relaxed p-3 rounded-xl shadow-2xl border border-slate-700 z-50 text-left whitespace-normal">
-                          매수 이후 찍었던 <b>최고가(Peak)</b> 대비 현재 주가가 몇 % 떨어졌는지 보여줍니다.<br/><br/>
-                          <span className="text-blue-400">📉 마이너스(-)</span> : 고점 대비 하락 (봇이 변동성을 계산해 동적 방어선을 감시합니다).<br/>
-                          <span className="text-rose-400">🚀 플러스(+)</span> : 이전 최고가를 돌파하며 상승 중입니다!
+                          {t("portfolio.drop_tip_intro")}<b>{t("portfolio.drop_tip_peak")}</b>{t("portfolio.drop_tip_rest")}<br/><br/>
+                          <span className="text-blue-400">{t("portfolio.drop_tip_minus")}</span>{t("portfolio.drop_tip_minus_desc")}<br/>
+                          <span className="text-rose-400">{t("portfolio.drop_tip_plus")}</span>{t("portfolio.drop_tip_plus_desc")}
                         </span>
                       </span>
                       <span className={dropFromPeak < -5 ? 'text-amber-500' : 'text-slate-400'}>
@@ -336,10 +339,10 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                 <div className="flex items-center justify-between pt-3 border-t border-slate-800/50 mt-6">
                   <div className="flex flex-col">
                     <span className="group/tip relative inline-flex items-center gap-1 cursor-help text-[10px] text-slate-500 uppercase select-none w-fit">
-                      <span>최고가(Peak)</span>
+                      <span>{t("portfolio.peak")}</span>
                       <Info size={10} className="text-slate-600 group-hover/tip:text-slate-400 transition-colors" />
                       <span className="pointer-events-none absolute bottom-full left-0 mb-2 w-64 scale-95 opacity-0 group-hover/tip:scale-100 group-hover/tip:opacity-100 transition-all duration-200 bg-slate-950 text-slate-400 text-[9px] font-normal normal-case leading-relaxed p-2.5 rounded-lg shadow-2xl border border-slate-800 z-50 text-left whitespace-normal">
-                        매수 평단가로 최초 시작(초기화)되며, 주가가 상승하면 최고가로 자동 갱신됩니다. 최고가가 평단가를 초과한 이력이 있어야만 익절(트레일링 스탑) 비상탈출 시스템이 활성화됩니다.
+                        {t("portfolio.peak_tip")}
                       </span>
                     </span>
                     <span className="text-sm font-bold text-slate-300">
@@ -352,7 +355,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                   {dropFromPeak < -3 && h.highest_price > h.avg_price && (
                     <div className="flex items-center text-amber-500 animate-pulse">
                       <ShieldAlert size={16} className="mr-1" />
-                      <span className="text-[11px] font-bold">동적 탈출 감시중</span>
+                      <span className="text-[11px] font-bold">{t("portfolio.dynamic_exit")}</span>
                     </div>
                   )}
                 </div>
