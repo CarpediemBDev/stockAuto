@@ -54,6 +54,20 @@ export class EventStreamClient {
     this.onState?.("closed");
   }
 
+  /**
+   * 세션 완전 만료 처리. 스트림을 닫고 인증 상태를 비운 뒤 로그인 화면으로 보낸다.
+   * 이미 로그인·회원가입 화면이면 리다이렉트하지 않는다(무의미한 새로고침 방지).
+   */
+  private endSession(): void {
+    this.stop();
+    useAuthStore.getState().clearAuth();
+    if (typeof window === "undefined") return;
+    const { pathname } = window.location;
+    if (!pathname.startsWith("/login") && !pathname.startsWith("/signup")) {
+      window.location.href = "/login";
+    }
+  }
+
   private async connect(): Promise<void> {
     if (this.closed) return;
     this.onState?.("connecting");
@@ -78,7 +92,9 @@ export class EventStreamClient {
           await refreshAuthSession();
           this.scheduleReconnect(0);
         } catch {
-          this.scheduleReconnect();
+          // 리프레시 토큰까지 만료 = 세션 종료. 재연결을 반복해도 계속 401이므로
+          // 백오프 재시도 대신 세션을 끊는다(axios 인터셉터의 401 터미널 처리와 동일 규약 — lib/api.ts).
+          this.endSession();
         }
         return;
       }
