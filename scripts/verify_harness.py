@@ -195,36 +195,82 @@ def is_daily_task_path(path: str) -> bool:
     )
 
 
-def find_complete_contract_record(content: str) -> tuple[bool, list[str], str]:
+def last_contract_section_values(content: str) -> dict[str, str] | None:
+    """본문에서 '가장 마지막' 변경 영향 기록 섹션의 필드값을 파싱한다.
+
+    새 기록은 파일 하단에 덧붙이는 것이 현 관행이므로, 최하단 섹션이 곧
+    '이번 변경'의 기록이다. 상단의 완성된 이전 기록으로 무임승차하는 것을 막으려면
+    반드시 최하단 섹션만 평가해야 한다.
+    """
     if CONTRACT_RECORD_HEADING not in content:
-        return False, list(CONTRACT_RECORD_FIELDS), ""
+        return None
 
     sections = content.split(CONTRACT_RECORD_HEADING)[1:]
-    best_missing = list(CONTRACT_RECORD_FIELDS)
-    best_docs_value = ""
-    for raw_section in sections:
-        section = raw_section.split("\n## ", 1)[0]
-        values: dict[str, str] = {}
-        for line in section.splitlines():
-            stripped = line.strip()
-            for field in CONTRACT_RECORD_FIELDS:
-                prefix = f"- {field}:"
-                if stripped.startswith(prefix):
-                    values[field] = stripped[len(prefix):].strip()
+    last_section = sections[-1].split("\n## ", 1)[0]
+    values: dict[str, str] = {}
+    for line in last_section.splitlines():
+        stripped = line.strip()
+        for field in CONTRACT_RECORD_FIELDS:
+            prefix = f"- {field}:"
+            if stripped.startswith(prefix):
+                values[field] = stripped[len(prefix):].strip()
+    return values
 
-        missing = [
-            field
-            for field in CONTRACT_RECORD_FIELDS
-            if not values.get(field)
-            or values[field] in {"TODO", "TBD", "작성 필요"}
-        ]
-        if len(missing) < len(best_missing):
-            best_missing = missing
-            best_docs_value = values.get("문서 반영", "")
-        if not missing:
-            return True, [], values.get("문서 반영", "")
 
-    return False, best_missing, best_docs_value
+def find_complete_contract_record(content: str) -> tuple[bool, list[str], str]:
+    """최하단 계약 기록 섹션이 완성됐는지 판정한다.
+
+    (과거에는 파일 내 '아무' 완성 섹션이나 발견하면 통과시켜, 이전 작업의 기록으로
+    새 변경이 무임승차하는 우회 경로가 있었다. 이제 최하단 섹션만 본다.)
+    """
+    values = last_contract_section_values(content)
+    if values is None:
+        return False, list(CONTRACT_RECORD_FIELDS), ""
+
+    missing = [
+        field
+        for field in CONTRACT_RECORD_FIELDS
+        if not values.get(field)
+        or values[field] in {"TODO", "TBD", "작성 필요"}
+    ]
+    return (not missing), missing, values.get("문서 반영", "")
+
+
+def producer_reference_warnings(root: Path, changed_files: list[str]) -> list[str]:
+    """최하단 기록의 '생산자'가 이번 변경 민감 파일을 실제로 가리키는지 대조.
+
+    어휘 블랙리스트와 달리 경로 문자열 대조는 말바꾸기로 우회되지 않는다.
+    1단계는 마찰을 줄이기 위해 '민감 파일 중 최소 1개 언급'만 요구하는 경고(WARN)다.
+    (차단이 아니므로 반환값은 check_change_contract가 출력만 하고 통과시킨다.)
+    """
+    sensitive_files = [path for path in changed_files if is_contract_sensitive(path)]
+    if not sensitive_files:
+        return []
+
+    task_paths = sorted(path for path in changed_files if is_daily_task_path(path))
+    values: dict[str, str] | None = None
+    for task_path in reversed(task_paths):
+        absolute_path = root / task_path
+        if absolute_path.exists():
+            values = last_contract_section_values(absolute_path.read_text(encoding="utf-8"))
+            if values:
+                break
+
+    if not values:
+        return []
+
+    producer = values.get("생산자", "")
+    referenced = any(
+        Path(path).name in producer or path in producer
+        for path in sensitive_files
+    )
+    if referenced:
+        return []
+
+    return [
+        "최하단 계약 기록의 '생산자'가 이번 변경 민감 파일을 하나도 가리키지 않습니다. "
+        f"변경된 민감 파일: {', '.join(sensitive_files)}"
+    ]
 
 
 def contract_format_hint() -> str:
@@ -315,6 +361,10 @@ def check_change_contract(root: Path) -> bool:
             safe_print(f"    - {error}")
         return False
 
+    warnings = producer_reference_warnings(root, changed_files)
+    for warning in warnings:
+        safe_print(f"  {YELLOW}[WARN] {warning}{RESET}")
+
     if sensitive_files:
         safe_print(
             f"  {GREEN}[OK] Change contract recorded for "
@@ -326,7 +376,7 @@ def check_change_contract(root: Path) -> bool:
 
 
 def check_release_risk_invariants(root: Path) -> bool:
-    safe_print(f"{BOLD}[2/8] [RISK] Numeric, process, chaos fuzzing & rollback invariant checks...{RESET}")
+    safe_print(f"{BOLD}[2/8] [RISK] Numeric, process, chaos fuzzing, migration safety & rollback invariant checks...{RESET}")
     python_exe = backend_python(root)
     checks = (
         root / "scripts" / "check_numeric_invariants.py",
@@ -334,6 +384,7 @@ def check_release_risk_invariants(root: Path) -> bool:
         root / "scripts" / "check_chaos_fuzzing.py",
         root / "scripts" / "auto_rollback_guard.py",
         root / "scripts" / "check_strategy_consistency.py",
+        root / "scripts" / "check_migration_safety.py",
     )
 
 
@@ -551,6 +602,146 @@ def check_frontend_e2e(root: Path) -> bool:
     return True
 
 
+TASK_ITEM_RE = re.compile(r"^\s*-\s*\[([ xX/Rr\-])\]\s*(.+?)\s*$")
+APPROVAL_MARKER_RE = re.compile(r"<!--\s*APPROVED\b", re.IGNORECASE)
+
+
+def parse_task_items(content: str) -> dict[str, str]:
+    """현황판 본문에서 '- [상태] 제목'을 {제목: 상태} 로 파싱한다.
+
+    상태 문자는 소문자로 정규화한다([X]→x). 제목 뒤 승인 마커
+    (<!-- APPROVED ... -->)는 제목 키에서 떼어내되 별도로 감지한다.
+    """
+    items: dict[str, str] = {}
+    for line in content.splitlines():
+        match = TASK_ITEM_RE.match(line)
+        if not match:
+            continue
+        status = match.group(1).lower()
+        title = APPROVAL_MARKER_RE.split(match.group(2))[0].strip()
+        if title:
+            items[title] = status
+    return items
+
+
+def git_show(root: Path, ref: str, rel_path: str) -> str | None:
+    """<ref>:<rel_path> 파일 내용을 반환한다. 해당 ref에 파일이 없으면 None."""
+    result = run_command(
+        ["git", "show", f"{ref}:{rel_path}"],
+        cwd=root,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.decode("utf-8", errors="ignore")
+
+
+def base_ref_for_diff() -> str:
+    """변경 전 상태를 비교할 git ref. CI는 병합 기준 sha, 로컬은 HEAD."""
+    if os.environ.get("CI"):
+        base_sha = os.environ.get("CHANGE_BASE_SHA", "").strip()
+        if base_sha and set(base_sha) != {"0"}:
+            return base_sha
+    return "HEAD"
+
+
+def base_refs_for_task_diff(root: Path) -> list[str]:
+    """자가 승격 판정의 '이전 상태' ref 목록.
+
+    병합 충돌 해결 중에는 HEAD만 보면 안 된다. 병합해 들어오는 쪽(MERGE_HEAD)에
+    이미 승인·커밋된 [x] 항목이 있으면, HEAD 기준으로는 '신규 [x]'로 보여
+    남의 정당한 완료 항목을 오탐 차단한다. 두 부모를 모두 이전 상태로 취급한다.
+    """
+    refs = [base_ref_for_diff()]
+    result = run_command(
+        ["git", "rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
+        cwd=root,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        refs.append("MERGE_HEAD")
+    return refs
+
+
+def combined_previous_items(root: Path, refs: list[str], rel_path: str) -> dict[str, str]:
+    """여러 ref의 현황판 항목을 합쳐 '이전 상태'를 만든다.
+
+    어느 한 부모에서라도 이미 [x]였다면 그 항목은 이번 변경이 승격시킨 것이
+    아니므로 [x]를 우선한다.
+    """
+    combined: dict[str, str] = {}
+    for ref in refs:
+        content = git_show(root, ref, rel_path)
+        if content is None:
+            continue
+        for title, status in parse_task_items(content).items():
+            if combined.get(title) == "x":
+                continue
+            combined[title] = status
+    return combined
+
+
+def check_task_status_promotion(root: Path) -> bool:
+    """[R]/[/]/[ ] → [x] 자가 승격 및 신규 [x] 등록을 차단한다.
+
+    2026-07-23 사고: 이전 세션이 사용자 승인 없이 태스크를 [x]로 자체 승격했다.
+    AGENTS.md §3은 '유저의 최종 승인이 떨어졌을 때만 [x]'를 규정한다.
+    승인 사실은 제목 옆 마커로만 우회할 수 있다: `- [x] 제목 <!-- APPROVED: 사유 -->`
+    (환경변수 우회는 diff에 흔적이 없어 조용히 켜지므로 채택하지 않는다.)
+    """
+    safe_print(f"{BOLD}[TASK] 현황판 상태 자가 승격 차단 검사...{RESET}")
+    changed_files = get_changed_files(root)
+    task_paths = [path for path in changed_files if is_daily_task_path(path)]
+
+    if not task_paths:
+        safe_print(f"  {GREEN}[OK] 변경된 현황판 없음.{RESET}\n")
+        return True
+
+    base_refs = base_refs_for_task_diff(root)
+    violations: list[str] = []
+
+    for rel_path in task_paths:
+        absolute = root / rel_path
+        if not absolute.exists():
+            continue
+        after_content = absolute.read_text(encoding="utf-8")
+        after = parse_task_items(after_content)
+        approved_titles = {
+            APPROVAL_MARKER_RE.split(TASK_ITEM_RE.match(line).group(2))[0].strip()
+            for line in after_content.splitlines()
+            if TASK_ITEM_RE.match(line) and APPROVAL_MARKER_RE.search(line)
+        }
+
+        before = combined_previous_items(root, base_refs, rel_path)
+
+        for title, status in after.items():
+            if status != "x":
+                continue
+            if title in approved_titles:
+                continue
+            prev = before.get(title)
+            if prev is None:
+                violations.append(
+                    f"{rel_path}: 신규 항목이 처음부터 [x]로 등록됨 → \"{title}\" "
+                    "(선등록·승인 절차 없이 완료 표기 금지)"
+                )
+            elif prev != "x":
+                violations.append(
+                    f"{rel_path}: [{prev}] → [x] 자가 승격 감지 → \"{title}\""
+                )
+
+    if violations:
+        safe_print(f"  {RED}[FAIL] 사용자 승인 없는 [x] 승격이 감지되었습니다.{RESET}")
+        for violation in violations:
+            safe_print(f"    - {violation}")
+        safe_print(
+            f"  {YELLOW}승인이 확인된 항목만 '- [x] 제목 <!-- APPROVED: 날짜/사유 -->' "
+            f"형태로 마커를 남겨 통과시키세요.{RESET}\n"
+        )
+        return False
+
+    safe_print(f"  {GREEN}[OK] 무단 상태 승격 없음.{RESET}\n")
+    return True
+
+
 def should_run_full_harness(root: Path) -> bool:
     """
     Check if full harness should run based on staged files.
@@ -580,6 +771,7 @@ def main() -> int:
     if run_full:
         checks = [
             check_change_contract,
+            check_task_status_promotion,
             check_release_risk_invariants,
             check_backend_compile,
             check_nfc_encoding,
@@ -592,6 +784,7 @@ def main() -> int:
         safe_print(f"  {YELLOW}[SMART SKIP] 단순 문서(Markdown 등) 수정만 감지되었습니다. 무거운 5가지 테스트를 건너뜁니다.{RESET}\n")
         checks = [
             check_change_contract,
+            check_task_status_promotion, # 문서만 수정하는 경우가 자가 승격 가드의 핵심 케이스
             check_release_risk_invariants,
             check_nfc_encoding, # 문서를 수정했어도 한글 자소 분리 방어선은 무조건 가동
         ]
