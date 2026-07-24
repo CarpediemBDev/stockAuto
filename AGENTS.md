@@ -44,6 +44,8 @@
     *   **백엔드**: `python -m py_compile [수정한 파일 경로]` 실행 ➔ 문법적 무결성 검증
     *   **프론트엔드**: `npm run lint` 및 `npx tsc --noEmit` 실행 ➔ TypeScript 및 ESLint 에러 0건 검증
     *   **120% 에이전트 보강 검증**: `python scripts/check_chaos_fuzzing.py` (다이나믹 카오스 퍼징) 및 `python scripts/auto_rollback_guard.py` (자율 롤백 안전 검증) 통과 입증
+    *   **마이그레이션 안전성 검사**: `python scripts/check_migration_safety.py` — 변경된 Alembic 마이그레이션의 f-string SQL 조립(R1), 무조건 `DELETE FROM`(R2), 무조건 `UPDATE`(R3), 되돌릴 컬럼값을 확인하지 않는 `SET col = NULL` 롤백(R4)을 정적 검출한다. 하네스 Step 2에 자동 편입되어 있으며, `--all` 인자로 전체 마이그레이션 전수 감사가 가능하다.
+    *   **현황판 자가 승격 차단**: 하네스는 변경된 `docs/tasks/YYYY-MM-DD.md`를 HEAD(로컬)/`CHANGE_BASE_SHA`(CI)와 대조하여, 사용자 승인 없이 `[R]`/`[/]`/`[ ]` → `[x]`로 자가 승격하거나 신규 항목을 처음부터 `[x]`로 등록하는 것을 자동 차단한다. 승인이 확인된 항목만 `- [x] 제목 <!-- APPROVED: 날짜/사유 -->` 마커로 통과시킨다. (SMART SKIP 문서 전용 커밋에서도 항상 가동)
 
 *   **완성형 한글 표준화 (NFC Encoding):**
     *   윈도우 환경 및 다양한 OS 간의 한글 깨짐(자소 분리 현상)을 방지하기 위해, 모든 마크다운과 파이썬 소스코드 내 한글 텍스트는 무조건 **완성형(NFC)** 표준으로 디스크에 저장 및 인코딩되어야 합니다.
@@ -249,4 +251,13 @@ npm run lint    # ESLint 정적 분석 통과 검증
 *   **예외적 분업 기준(결합도 기반)**: 계약 결합도가 낮고 분량만 큰 작업(테스트 픽스처/더미데이터 대량 생성, 문서 번역·대량 주석 정리, 서로 얽히지 않는 독립 모듈 스캐폴딩, 반복 보일러플레이트)에 한해 토큰 여유가 큰 Antigravity에 위임할 수 있습니다.
 *   **코어는 위임 금지**: 손익·수수료·수량·주문 등 금융 계산, 스키마/API 계약 변경, 레이스 컨디션·소수점 오차가 걸린 로직, SSOT 중복 차단·아키텍처 결정은 결합도가 높으므로 분할 위임하지 않습니다.
 *   **작업 지시서 필수 항목**: 위임 시 위임하는 에이전트는 현황판에 ①대상 파일·함수·라인과 건드리면 안 되는 경계, ②입출력 계약(`docs/SCHEMA.md`·`docs/API_STANDARD.md` 기준), ③재사용할 기존 SSOT 지점, ④통과 기준(`python scripts/verify_harness.py` + 엣지케이스 N개), ⑤프로젝트 불문율(자율 git 금지·계약 9필드 형식 등)을 못박아 남깁니다. 받는 에이전트는 판단 부담 없이 이 지시서 범위 내에서만 구현합니다.
+
+### 9-2. 작업 격리: 세션별 worktree 필수 (Session Isolation)
+
+> 상세 규칙·세팅 체크리스트는 **[`docs/MULTI_SESSION_WORKTREE.md`](docs/MULTI_SESSION_WORKTREE.md)** 참조.
+
+*   **핵심 규칙**: worktree는 "AI 종류"당 1개가 아니라 **"동시에 파일을 수정하는 세션"당 1개**입니다. Claude 세션 여러 개끼리도, Claude↔Antigravity도, 사람이 IDE로 편집하는 것도 **같은 워킹트리를 공유하면 동일하게 충돌**합니다.
+*   **쓰기 세션은 자기 전용 폴더에서만** 작업합니다. 현재 배치: `D:\dev\workspace\stockAuto\`(쓰기 #1) / `D:\dev\workspace\stockAuto-ag\`(쓰기 #2). 읽기 전용(분석·리뷰) 세션은 worktree가 필요 없습니다.
+*   **남의 변경을 쓸어 담지 않기**: 작업 전 `git worktree list` · `git branch --show-current` · `git status --short`로 자가 점검하고, **내가 만들지 않은 미커밋 변경이 보이면 `git add -A`/`commit -a` 금지**, 자기 파일만 명시적으로 스테이징합니다. 브랜치가 예상과 다르면 즉시 멈추고 보고하며, 임의 `checkout`/`reset --hard`로 남의 작업을 지우지 않습니다.
+*   **공유 자원 직렬화**: worktree는 파일·브랜치만 분리합니다. 백엔드 포트(8000, `run.py` 하드코딩)·Redis 락(6379)은 여전히 공유되므로 **앱(백엔드) 구동과 `verify_harness` 실행은 한 번에 한 폴더만** 수행합니다(동시 실행 시 포트·DB·락 경합으로 서로의 검증이 깨집니다).
 

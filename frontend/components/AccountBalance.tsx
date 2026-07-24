@@ -8,6 +8,7 @@ import { pollInterval } from "@/lib/sse";
 import { useFreshness } from "@/hooks/useFreshness";
 import { useSseConnection } from "@/providers/EventStreamProvider";
 import { fetcher } from "@/lib/api";
+import { useTranslations } from "next-intl";
 
 interface WalletSlot {
   cash: number;
@@ -38,6 +39,7 @@ export function AccountBalance({
   displayCurrency?: "KRW" | "USD";
   onTotalAssetClick?: () => void;
 }) {
+  const t = useTranslations("components");
   const { data: balanceData, error: swrError } = useSWR('/account/balance', fetcher, { refreshInterval: pollInterval(15000) });
   const balance: BalanceData | null = balanceData || null;
   const error = swrError ? (swrError.message || "Failed to fetch account balance") : null;
@@ -75,12 +77,12 @@ export function AccountBalance({
   const formatMoney = useCallback((amount: number) => {
     if (!balance) return "";
     if (displayCurrency === "KRW") {
-      return `${amount.toLocaleString()}원`;
+      return `${amount.toLocaleString()}${t("common.krw_suffix")}`;
     } else {
       const usdAmount = krwToUsd(amount, balance.fx_rate);
       return `$${usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
-  }, [balance, displayCurrency]);
+  }, [balance, displayCurrency, t]);
 
   if (error) {
     return (
@@ -89,7 +91,7 @@ export function AccountBalance({
           <DollarSign size={20} />
         </div>
         <div>
-          <h3 className="font-bold text-sm">계좌 정보를 불러올 수 없습니다</h3>
+          <h3 className="font-bold text-sm">{t("balance.load_failed")}</h3>
           <p className="text-xs opacity-80">{error}</p>
         </div>
       </div>
@@ -136,9 +138,9 @@ export function AccountBalance({
               </div>
               <div>
                 <h3 className="text-zinc-400 font-medium text-sm flex items-center gap-1.5">
-                  Total Asset (총 자산)
+                  {t("balance.total_asset")}
                   <span className="text-[10px] text-indigo-400 opacity-60 group-hover:opacity-100 transition-opacity font-bold">
-                    (차트 📊)
+                    {t("balance.chart_hint")}
                   </span>
                 </h3>
               </div>
@@ -154,7 +156,7 @@ export function AccountBalance({
               </span>
               {isStaleSnapshot && (
                 <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border tracking-wide bg-zinc-500/15 text-zinc-400 border-zinc-500/30">
-                  ⚠️ {capturedAgeLabel} 전 기준
+                  {t("balance.stale_warning", { age: capturedAgeLabel })}
                 </span>
               )}
             </div>
@@ -181,7 +183,7 @@ export function AccountBalance({
             <div className={cn("p-2 rounded-lg", isProfit ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>
               <TrendingUp size={20} className={cn(!isProfit && "rotate-180")} />
             </div>
-            <h3 className="text-zinc-400 font-medium text-sm">Profit Rate (수익률)</h3>
+            <h3 className="text-zinc-400 font-medium text-sm">{t("balance.profit_rate")}</h3>
           </div>
           <div className={cn("text-3xl font-extrabold tracking-tight", isProfit ? "text-emerald-400" : "text-rose-400")}>
             {isProfit ? "+" : ""}{balance.profit_rate}%
@@ -194,7 +196,7 @@ export function AccountBalance({
             <div className="p-2 bg-blue-500/20 rounded-lg text-blue-400">
               <DollarSign size={20} />
             </div>
-            <h3 className="text-zinc-400 font-medium text-sm">Cash (예수금)</h3>
+            <h3 className="text-zinc-400 font-medium text-sm">{t("balance.cash")}</h3>
           </div>
           <div className="text-2xl font-bold text-white tracking-tight mt-1">
             {formatMoney(balance.cash_balance)}
@@ -207,7 +209,7 @@ export function AccountBalance({
             <div className="p-2 bg-amber-500/20 rounded-lg text-amber-400">
               <PieChart size={20} />
             </div>
-            <h3 className="text-zinc-400 font-medium text-sm">Stock (주식 평가금)</h3>
+            <h3 className="text-zinc-400 font-medium text-sm">{t("balance.stock")}</h3>
           </div>
           <div className="text-2xl font-bold text-white tracking-tight mt-1">
             {formatMoney(balance.stock_balance)}
@@ -230,13 +232,13 @@ export function AccountBalance({
                 <h3 className="text-lg font-black text-white tracking-tight flex items-center gap-2.5">
                   <ShieldAlert size={20} className="text-indigo-400" />
                   {walletAllocations.length === 1 
-                    ? `${walletAllocations[0].name} 실시간 자산 원장 (Strategy Asset Ledger)` 
-                    : "전략 격리 통합 자산 원장 (Unified Strategy Asset Ledger)"}
+                    ? t("balance.ledger_single", { name: walletAllocations[0].name }) 
+                    : t("balance.ledger_unified")}
                 </h3>
                 <p className="text-[11px] text-zinc-400 mt-0.5">
                   {walletAllocations.length === 1 
-                    ? `가동 중인 ${walletAllocations[0].name} 전략의 실시간 예수금 및 주식 평가 지분 비율을 모니터링하는 자산 원장입니다.` 
-                    : "대결에 가동 중인 각 전략의 실시간 예수금 및 주식 평가 지분 비율을 감시하는 자산 원장입니다."}
+                    ? t("balance.ledger_desc_single", { name: walletAllocations[0].name }) 
+                    : t("balance.ledger_desc_unified")}
                 </p>
               </div>
             </div>
@@ -245,10 +247,10 @@ export function AccountBalance({
             <div className="bg-zinc-950/70 border border-zinc-800/50 rounded-2xl p-5 shadow-inner">
               <div className="flex justify-between items-center mb-3">
                 <span className="text-[10px] uppercase font-bold tracking-widest text-zinc-500">
-                  Total Capital Allocation Gauge (통합 자산 지분 게이지)
+                  {t("balance.gauge_title")}
                 </span>
                 <span className="text-[10px] text-zinc-400 font-bold font-mono">
-                  총 자산 평가: {formatMoney(balance.total_asset)}
+                  {t("balance.total_eval", { amount: formatMoney(balance.total_asset) })}
                 </span>
               </div>
               
@@ -274,7 +276,7 @@ export function AccountBalance({
                         <div 
                           className={cn("h-full bg-gradient-to-r transition-all duration-500 shrink-0", color.stock)}
                           style={{ width: `${stockPct}%` }}
-                          title={`${item.name} 주식: ${formatMoney(item.stock_value)} (${stockPct.toFixed(1)}%)`}
+                          title={t("balance.bar_stock", { name: item.name, amount: formatMoney(item.stock_value), pct: stockPct.toFixed(1) })}
                         />
                       )}
                       {cashPct > 0 && (
@@ -285,8 +287,8 @@ export function AccountBalance({
                           )}
                           style={{ width: `${cashPct}%` }}
                           title={item.key === "regime_switching" && regime !== "BULLISH"
-                            ? `${item.name} 격리현금 보호: ${formatMoney(item.cash)} (${cashPct.toFixed(1)}%)`
-                            : `${item.name} 예수금: ${formatMoney(item.cash)} (${cashPct.toFixed(1)}%)`
+                            ? t("balance.bar_cash_isolated", { name: item.name, amount: formatMoney(item.cash), pct: cashPct.toFixed(1) })
+                            : t("balance.bar_cash", { name: item.name, amount: formatMoney(item.cash), pct: cashPct.toFixed(1) })
                           }
                         />
                       )}
@@ -313,7 +315,7 @@ export function AccountBalance({
                     <React.Fragment key={item.key}>
                       <div className="flex items-center gap-1.5">
                         <span className={cn("w-2 h-2 rounded-full", color.stock)} />
-                        <span>{item.name} 주식 ({stockPct.toFixed(1)}%)</span>
+                        <span>{t("balance.legend_stock", { name: item.name, pct: stockPct.toFixed(1) })}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <span className={cn(
@@ -322,8 +324,8 @@ export function AccountBalance({
                         )} />
                         <span>
                           {item.key === "regime_switching" && regime !== "BULLISH"
-                            ? `${item.name} 격리현금`
-                            : `${item.name} 예수금`
+                            ? t("balance.legend_cash_isolated", { name: item.name })
+                            : t("balance.legend_cash", { name: item.name })
                           } ({cashPct.toFixed(1)}%)
                         </span>
                       </div>
@@ -377,12 +379,12 @@ export function AccountBalance({
                               ? "bg-amber-500/15 text-amber-400 border-amber-500/20"
                               : "bg-emerald-500/15 text-emerald-400 border-emerald-500/20 animate-pulse"
                           )}>
-                            {(item.key === "regime_switching" && regime !== "BULLISH") ? "격리중 🛡️" : "가동중 ℹ️"}
+                            {(item.key === "regime_switching" && regime !== "BULLISH") ? t("balance.status_isolated") : t("balance.status_running")}
                           </span>
                           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 bg-zinc-950 border border-zinc-800 text-[10px] text-zinc-300 rounded-xl opacity-0 pointer-events-none group-hover/tooltip:opacity-100 transition-opacity duration-200 z-50 shadow-2xl leading-normal text-left font-normal normal-case">
                             {item.key === "regime_switching" && regime !== "BULLISH"
-                              ? "상승장이 아닐 때는 리스크 보호를 위해 봇 매수를 차단하고 지분 자산을 100% 현금 상태로 금고에 안전하게 격리 보호 중입니다."
-                              : `계좌 총 자산의 ${(item.weight * 100).toFixed(0)}% 비중을 할당받아 ${item.name} 전략에 입각하여 안전하게 실시간 기동 중입니다.`}
+                              ? t("balance.status_isolated_desc")
+                              : t("balance.status_running_desc", { pct: (item.weight * 100).toFixed(0), name: item.name })}
                           </div>
                         </div>
                       </div>
@@ -390,7 +392,7 @@ export function AccountBalance({
                       <div className="space-y-3 mt-4">
                         <div>
                           <div className="flex justify-between text-xs text-zinc-400 mb-1">
-                            <span>가용 예수금 (Cash)</span>
+                            <span>{t("balance.available_cash")}</span>
                             <span className="font-bold text-white">{formatMoney(item.cash)}</span>
                           </div>
                           <div className="h-2 bg-zinc-800/60 rounded-full overflow-hidden">
@@ -403,7 +405,7 @@ export function AccountBalance({
                         
                         <div>
                           <div className="flex justify-between text-xs text-zinc-400 mb-1">
-                            <span>주식 평가금 (Stock)</span>
+                            <span>{t("balance.stock_value")}</span>
                             <span className="font-bold text-white">{formatMoney(item.stock_value)}</span>
                           </div>
                           <div className="h-2 bg-zinc-800/60 rounded-full overflow-hidden">
@@ -418,9 +420,9 @@ export function AccountBalance({
                     
                     <div className="mt-4 pt-3 border-t border-zinc-800/50 flex justify-between items-center text-xs">
                       <span className="text-zinc-500 font-medium flex items-center gap-1">
-                        전략 총자산 (지분 {(item.weight * 100).toFixed(0)}%)
+                        {t("balance.strategy_total", { pct: (item.weight * 100).toFixed(0) })}
                         {item.key === "regime_switching" && regime !== "BULLISH" && (
-                          <span className="text-amber-500 text-[8px] font-black bg-amber-500/10 px-1 rounded border border-amber-500/20">🛡️ 100% 현금 격리</span>
+                          <span className="text-amber-500 text-[8px] font-black bg-amber-500/10 px-1 rounded border border-amber-500/20">{t("balance.cash_isolated_badge")}</span>
                         )}
                       </span>
                       <span className={cn("font-black", textHighlight)}>{formatMoney(total)}</span>
@@ -442,10 +444,10 @@ export function AccountBalance({
             <div>
               <h3 className="text-base font-extrabold text-white tracking-tight flex items-center gap-2 border-b border-zinc-800/60 pb-4">
                 <Activity className="text-blue-400 animate-pulse" size={18} />
-                QQQ 레짐 관제탑 (Sluice Controller)
+                {t("balance.regime_tower")}
               </h3>
               <p className="text-[11px] text-zinc-400 mt-3 leading-relaxed">
-                나스닥 100 지수의 실시간 추세를 체크하여 각 격리 슬롯의 자금 가동 한도를 동적으로 통제하고 제어하는 시스템 핵심 관제탑입니다.
+                {t("balance.regime_tower_desc")}
               </p>
             </div>
             
@@ -503,21 +505,21 @@ export function AccountBalance({
                   regime === "BULLISH" ? "text-emerald-400" :
                   regime === "NEUTRAL" ? "text-amber-400" : "text-rose-400"
                 )}>
-                  {regime === "BULLISH" ? "▲ 상승국면 (BULLISH)" :
-                   regime === "NEUTRAL" ? "■ 조정국면 (NEUTRAL)" : "▼ 하락국면 (BEARISH)"}
+                  {regime === "BULLISH" ? t("balance.regime_bullish") :
+                   regime === "NEUTRAL" ? t("balance.regime_neutral") : t("balance.regime_bearish")}
                 </span>
                 <p className="text-[9px] text-zinc-500 mt-1 font-semibold leading-relaxed max-w-[170px]">
-                  {regime === "BULLISH" ? "상승추세 가시화로 두 슬롯 모두 적극 가동중 (EP 50% | RS 50%)" :
-                   regime === "NEUTRAL" ? "횡보로 인한 리스크 차단을 위해 RS 50% 현금 격리 보존 모드 가동" : 
-                   "하락세 심화로 위기 감지. RS 50% 현금 완벽 피난 격리 및 EP 단독 방어"}
+                  {regime === "BULLISH" ? t("balance.regime_bullish_desc") :
+                   regime === "NEUTRAL" ? t("balance.regime_neutral_desc") : 
+                   t("balance.regime_bearish_desc")}
                 </p>
               </div>
             </div>
             
             <div className="bg-zinc-900/30 rounded-2xl border border-zinc-800/40 p-4 space-y-1.5">
-              <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider block">관제탑 제어 규칙</span>
+              <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider block">{t("balance.control_rule")}</span>
               <p className="text-[9px] text-zinc-500 leading-relaxed leading-normal">
-                QQQ 이평 배열을 상시 진단하며, 하락장 진입 시 RS 슬롯의 가동 한도를 즉각 0% 차단 격리함으로써 계좌 파산 리스크를 기계적으로 차단합니다.
+                {t("balance.control_rule_desc")}
               </p>
             </div>
           </div>

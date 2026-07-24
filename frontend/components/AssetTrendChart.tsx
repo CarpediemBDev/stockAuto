@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect, useRef } from "react";
 import { TradeLog } from "./TradeLogs";
 import { accountAPI, isCancel } from "@/lib/api";
 import { reportHandledError, DEFAULT_FX_RATE, krwToUsd, usdToKrw } from "@/lib/utils";
+import { useTranslations } from "next-intl";
 
 interface AssetTrendChartProps {
   displayCurrency: "KRW" | "USD";
@@ -11,6 +12,7 @@ interface AssetTrendChartProps {
 }
 
 export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps) {
+  const t = useTranslations("components");
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [realTotalAsset, setRealTotalAsset] = useState<number | null>(null);
@@ -157,7 +159,7 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
       return `$${usdVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     } else {
       const krwVal = Math.round(usdToKrw(usdVal, fxRate));
-      return `${krwVal.toLocaleString()}원`;
+      return `${krwVal.toLocaleString()}${t("common.krw_suffix")}`;
     }
   };
 
@@ -204,7 +206,7 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
           <div className="h-8 bg-zinc-900 rounded w-1/3"></div>
         </div>
         <div className="w-full h-[180px] bg-zinc-900/50 rounded-xl flex items-center justify-center">
-          <span className="text-xs text-zinc-600 font-bold">100% 리얼 자산 데이터 추적 연산 중...</span>
+          <span className="text-xs text-zinc-600 font-bold">{t("asset_chart.loading")}</span>
         </div>
       </div>
     );
@@ -224,7 +226,7 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
         <div>
           <span className="text-[10px] text-zinc-500 font-black tracking-widest uppercase flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
-            실시간 자산 변화 흐름 (100% Real-Time Track)
+            {t("asset_chart.title")}
           </span>
           <div className="flex items-baseline gap-3 mt-1">
             <h3 className="text-2xl font-black text-white tracking-tight">
@@ -245,10 +247,10 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
           </div>
           <p className="text-[10px] text-zinc-600 mt-1">
             {hoveredIndex !== null
-              ? `조회 시점: ${chartData[hoveredIndex].date}`
+              ? t("asset_chart.hover_date", { date: chartData[hoveredIndex].date })
               : logs && logs.length > 0
-              ? `계좌 잔고 기반 누적 거래 이력 역산 반영 완료`
-              : `거래 내역이 없어 현재 총 자산 가치 안정 유지 상태`}
+              ? t("asset_chart.has_history")
+              : t("asset_chart.no_history")}
           </p>
         </div>
       </div>
@@ -395,10 +397,10 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
       <div className="flex justify-between items-center mt-4 pt-3 border-t border-zinc-900/50">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500" />
-          <span className="text-[10px] text-zinc-500 font-black">실전/모의 실시간 평가 자산</span>
+          <span className="text-[10px] text-zinc-500 font-black">{t("asset_chart.live_asset")}</span>
         </div>
         <div className="flex gap-4">
-          <span className="text-[9px] text-zinc-600 font-bold">1 USD = {fxRate.toLocaleString()}원 기준</span>
+          <span className="text-[9px] text-zinc-600 font-bold">{t("asset_chart.fx_note", { rate: fxRate.toLocaleString() })}</span>
         </div>
       </div>
     </div>
