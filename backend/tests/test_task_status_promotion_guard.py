@@ -99,6 +99,51 @@ def test_ignores_x_already_present_in_head(tmp_path, monkeypatch):
     assert verify_harness.check_task_status_promotion(tmp_path) is True
 
 
+def test_merge_does_not_flag_x_arriving_from_other_parent(tmp_path, monkeypatch):
+    """병합 중 MERGE_HEAD(main)에서 이미 승인·커밋된 [x]는 오탐하지 않는다.
+
+    실제 사고: feat 브랜치에 origin/main을 병합할 때, main에서 승인 완료된 남의
+    [x] 항목이 HEAD 기준으로는 '신규 [x]'로 보여 잘못 차단됐다.
+    """
+    task_path = tmp_path / TASK_REL
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_text(
+        board("- [x] 남의 세션이 main에서 승인받아 완료한 작업", "- [R] 내 작업"),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(verify_harness, "get_changed_files", lambda root: [TASK_REL])
+    monkeypatch.setattr(
+        verify_harness, "base_refs_for_task_diff", lambda root: ["HEAD", "MERGE_HEAD"]
+    )
+
+    def fake_git_show(root, ref, rel_path):
+        if ref == "HEAD":  # 내 브랜치: 남의 항목이 아직 없음
+            return board("- [R] 내 작업")
+        return board("- [x] 남의 세션이 main에서 승인받아 완료한 작업")  # MERGE_HEAD
+
+    monkeypatch.setattr(verify_harness, "git_show", fake_git_show)
+
+    assert verify_harness.check_task_status_promotion(tmp_path) is True
+
+
+def test_merge_still_blocks_genuine_self_promotion(tmp_path, monkeypatch):
+    """병합 중이라도 어느 부모에도 [x]가 아니었던 항목의 승격은 여전히 차단한다."""
+    task_path = tmp_path / TASK_REL
+    task_path.parent.mkdir(parents=True, exist_ok=True)
+    task_path.write_text(board("- [x] 내 작업"), encoding="utf-8")
+
+    monkeypatch.setattr(verify_harness, "get_changed_files", lambda root: [TASK_REL])
+    monkeypatch.setattr(
+        verify_harness, "base_refs_for_task_diff", lambda root: ["HEAD", "MERGE_HEAD"]
+    )
+    monkeypatch.setattr(
+        verify_harness, "git_show", lambda root, ref, rel_path: board("- [R] 내 작업")
+    )
+
+    assert verify_harness.check_task_status_promotion(tmp_path) is False
+
+
 def test_passes_when_no_task_file_changed(tmp_path, monkeypatch):
     monkeypatch.setattr(
         verify_harness, "get_changed_files", lambda root: ["scripts/verify_harness.py"]

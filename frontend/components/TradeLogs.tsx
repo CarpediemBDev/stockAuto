@@ -1,6 +1,7 @@
 "use client";
 
 import { useTimezone } from "@/store/timezoneStore";
+import { useTranslations } from "next-intl";
 
 export interface TradeLog {
   id: number;
@@ -20,6 +21,7 @@ interface TradeLogsProps {
 }
 
 export function TradeLogs({ logs, isModalMode = false }: TradeLogsProps) {
+  const t = useTranslations("components");
   const { selectedTimezone } = useTimezone();
   return (
     <div className={isModalMode 
@@ -29,7 +31,7 @@ export function TradeLogs({ logs, isModalMode = false }: TradeLogsProps) {
       <div className={`shrink-0 p-6 border-b border-zinc-800 flex justify-between items-center ${isModalMode ? 'bg-transparent px-0 pt-0' : 'bg-zinc-950/20'}`}>
         <h3 className="text-lg font-semibold text-white tracking-tight flex items-center gap-2">
           <span className="w-1.5 h-4 bg-emerald-500 rounded-full animate-pulse"></span>
-          실시간 체결 로그 (Execution Logs)
+          {t("trade_logs.title")}
         </h3>
       </div>
       <div className="overflow-auto flex-1 min-h-0">
@@ -82,7 +84,7 @@ export function TradeLogs({ logs, isModalMode = false }: TradeLogsProps) {
                       </span>
                     </td>
                     <td className="p-4 text-zinc-300 font-mono text-sm">${log.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    <td className="p-4 text-zinc-300 font-mono text-sm">{log.quantity.toLocaleString()}주</td>
+                    <td className="p-4 text-zinc-300 font-mono text-sm">{log.quantity.toLocaleString()}{t("common.shares_suffix")}</td>
                     <td className="p-4 font-medium text-zinc-300 font-mono text-sm">
                       ${(log.price * log.quantity).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>

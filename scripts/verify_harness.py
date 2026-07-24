@@ -644,6 +644,41 @@ def base_ref_for_diff() -> str:
     return "HEAD"
 
 
+def base_refs_for_task_diff(root: Path) -> list[str]:
+    """자가 승격 판정의 '이전 상태' ref 목록.
+
+    병합 충돌 해결 중에는 HEAD만 보면 안 된다. 병합해 들어오는 쪽(MERGE_HEAD)에
+    이미 승인·커밋된 [x] 항목이 있으면, HEAD 기준으로는 '신규 [x]'로 보여
+    남의 정당한 완료 항목을 오탐 차단한다. 두 부모를 모두 이전 상태로 취급한다.
+    """
+    refs = [base_ref_for_diff()]
+    result = run_command(
+        ["git", "rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
+        cwd=root,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        refs.append("MERGE_HEAD")
+    return refs
+
+
+def combined_previous_items(root: Path, refs: list[str], rel_path: str) -> dict[str, str]:
+    """여러 ref의 현황판 항목을 합쳐 '이전 상태'를 만든다.
+
+    어느 한 부모에서라도 이미 [x]였다면 그 항목은 이번 변경이 승격시킨 것이
+    아니므로 [x]를 우선한다.
+    """
+    combined: dict[str, str] = {}
+    for ref in refs:
+        content = git_show(root, ref, rel_path)
+        if content is None:
+            continue
+        for title, status in parse_task_items(content).items():
+            if combined.get(title) == "x":
+                continue
+            combined[title] = status
+    return combined
+
+
 def check_task_status_promotion(root: Path) -> bool:
     """[R]/[/]/[ ] → [x] 자가 승격 및 신규 [x] 등록을 차단한다.
 
@@ -660,7 +695,7 @@ def check_task_status_promotion(root: Path) -> bool:
         safe_print(f"  {GREEN}[OK] 변경된 현황판 없음.{RESET}\n")
         return True
 
-    base_ref = base_ref_for_diff()
+    base_refs = base_refs_for_task_diff(root)
     violations: list[str] = []
 
     for rel_path in task_paths:
@@ -675,8 +710,7 @@ def check_task_status_promotion(root: Path) -> bool:
             if TASK_ITEM_RE.match(line) and APPROVAL_MARKER_RE.search(line)
         }
 
-        before_content = git_show(root, base_ref, rel_path)
-        before = parse_task_items(before_content) if before_content is not None else {}
+        before = combined_previous_items(root, base_refs, rel_path)
 
         for title, status in after.items():
             if status != "x":
