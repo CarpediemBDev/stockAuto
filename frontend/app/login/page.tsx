@@ -6,8 +6,10 @@ import Link from "next/link";
 import { authAPI } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 export default function LoginPage() {
+  const t = useTranslations("auth");
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -25,7 +27,7 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password) {
-      toast.error("아이디와 비밀번호를 모두 입력해 주세요.");
+      toast.error(t("login.toast.empty_fields"));
       return;
     }
 
@@ -38,10 +40,10 @@ export default function LoginPage() {
       const newRole = res.data.role;
 
       setAuth(newToken, newUsername, newRole);
-      toast.success("성공적으로 로그인되었습니다!");
+      toast.success(t("login.toast.success"));
       router.push("/");
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "로그인에 실패했습니다. 다시 시도해 주세요.";
+      const errorMessage = err instanceof Error ? err.message : t("login.toast.failed");
       toast.error(errorMessage);
     } finally {
       setIsLoading(false);
@@ -60,13 +62,13 @@ export default function LoginPage() {
           <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-emerald-500 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-blue-500/20 mb-4 animate-pulse">
             SA
           </div>
-          <h2 className="text-2xl font-bold tracking-tight text-white mb-2">StockAuto 로그인</h2>
-          <p className="text-xs text-zinc-400">자율 트레이딩 퀀트 플랫폼에 오신 것을 환영합니다</p>
+          <h2 className="text-2xl font-bold tracking-tight text-white mb-2">{t("login.title")}</h2>
+          <p className="text-xs text-zinc-400">{t("login.subtitle")}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-zinc-300 block">아이디</label>
+            <label className="text-xs font-semibold text-zinc-300 block">{t("login.username")}</label>
             <input
               type="text"
               placeholder="Username"
@@ -78,7 +80,7 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-zinc-300 block">비밀번호</label>
+            <label className="text-xs font-semibold text-zinc-300 block">{t("login.password")}</label>
             <input
               type="password"
               placeholder="Password"
@@ -94,15 +96,15 @@ export default function LoginPage() {
             disabled={isLoading}
             className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white font-semibold text-sm shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none mt-6"
           >
-            {isLoading ? "로그인 중..." : "로그인"}
+            {isLoading ? t("login.submitting") : t("login.submit")}
           </button>
         </form>
 
         <div className="mt-8 text-center border-t border-zinc-800/80 pt-6">
           <p className="text-xs text-zinc-400">
-            아직 계정이 없으신가요?{" "}
+            {t("login.no_account")}{" "}
             <Link href="/signup" className="text-blue-400 hover:text-blue-300 font-semibold transition-colors duration-200">
-              무료 회원가입
+              {t("login.signup_link")}
             </Link>
           </p>
         </div>
