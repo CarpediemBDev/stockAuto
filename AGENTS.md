@@ -250,3 +250,12 @@ npm run lint    # ESLint 정적 분석 통과 검증
 *   **코어는 위임 금지**: 손익·수수료·수량·주문 등 금융 계산, 스키마/API 계약 변경, 레이스 컨디션·소수점 오차가 걸린 로직, SSOT 중복 차단·아키텍처 결정은 결합도가 높으므로 분할 위임하지 않습니다.
 *   **작업 지시서 필수 항목**: 위임 시 위임하는 에이전트는 현황판에 ①대상 파일·함수·라인과 건드리면 안 되는 경계, ②입출력 계약(`docs/SCHEMA.md`·`docs/API_STANDARD.md` 기준), ③재사용할 기존 SSOT 지점, ④통과 기준(`python scripts/verify_harness.py` + 엣지케이스 N개), ⑤프로젝트 불문율(자율 git 금지·계약 9필드 형식 등)을 못박아 남깁니다. 받는 에이전트는 판단 부담 없이 이 지시서 범위 내에서만 구현합니다.
 
+### 9-2. 작업 격리: 세션별 worktree 필수 (Session Isolation)
+
+> 상세 규칙·세팅 체크리스트는 **[`docs/MULTI_SESSION_WORKTREE.md`](docs/MULTI_SESSION_WORKTREE.md)** 참조.
+
+*   **핵심 규칙**: worktree는 "AI 종류"당 1개가 아니라 **"동시에 파일을 수정하는 세션"당 1개**입니다. Claude 세션 여러 개끼리도, Claude↔Antigravity도, 사람이 IDE로 편집하는 것도 **같은 워킹트리를 공유하면 동일하게 충돌**합니다.
+*   **쓰기 세션은 자기 전용 폴더에서만** 작업합니다. 현재 배치: `D:\dev\workspace\stockAuto\`(쓰기 #1) / `D:\dev\workspace\stockAuto-ag\`(쓰기 #2). 읽기 전용(분석·리뷰) 세션은 worktree가 필요 없습니다.
+*   **남의 변경을 쓸어 담지 않기**: 작업 전 `git worktree list` · `git branch --show-current` · `git status --short`로 자가 점검하고, **내가 만들지 않은 미커밋 변경이 보이면 `git add -A`/`commit -a` 금지**, 자기 파일만 명시적으로 스테이징합니다. 브랜치가 예상과 다르면 즉시 멈추고 보고하며, 임의 `checkout`/`reset --hard`로 남의 작업을 지우지 않습니다.
+*   **공유 자원 직렬화**: worktree는 파일·브랜치만 분리합니다. 백엔드 포트(8000, `run.py` 하드코딩)·Redis 락(6379)은 여전히 공유되므로 **앱(백엔드) 구동과 `verify_harness` 실행은 한 번에 한 폴더만** 수행합니다(동시 실행 시 포트·DB·락 경합으로 서로의 검증이 깨집니다).
+
