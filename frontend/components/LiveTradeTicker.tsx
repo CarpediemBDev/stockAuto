@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { TradeLog } from "./TradeLogs";
 import { cn } from "@/lib/utils";
 import { useTimezone } from "@/store/timezoneStore";
+import { useTranslations } from "next-intl";
 
 interface LiveTradeTickerProps {
   latestLog?: TradeLog;
@@ -11,6 +12,7 @@ interface LiveTradeTickerProps {
 }
 
 export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
+  const t = useTranslations("components");
   const [timeAgo, setTimeAgo] = useState<string>("");
   const { selectedTimezone } = useTimezone();
 
@@ -24,13 +26,13 @@ export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
       const diffMins = Math.floor(diffMs / 60000);
 
       if (diffMins < 1) {
-        setTimeAgo("방금 전");
+        setTimeAgo(t("ticker.just_now"));
       } else if (diffMins < 60) {
-        setTimeAgo(`${diffMins}분 전`);
+        setTimeAgo(t("ticker.minutes_ago", { minutes: String(diffMins) }));
       } else {
         const diffHours = Math.floor(diffMins / 60);
         if (diffHours < 24) {
-          setTimeAgo(`${diffHours}시간 전`);
+          setTimeAgo(t("ticker.hours_ago", { hours: String(diffHours) }));
         } else {
           setTimeAgo(date.toLocaleDateString());
         }
@@ -38,7 +40,7 @@ export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
     };
 
     updateTime();
-  }, [latestLog]);
+  }, [latestLog, t]);
 
   if (!latestLog) {
     return (
@@ -48,7 +50,7 @@ export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
           </span>
-          <span className="font-medium tracking-tight">📡 자율 트레이딩 엔진이 작동 중이며, 실시간 글로벌 마켓을 감시하고 있습니다...</span>
+          <span className="font-medium tracking-tight">{t("ticker.idle")}</span>
         </div>
         <span className="text-[10px] text-zinc-600 font-mono select-none">SYSTEM MONITOR ACTIVE</span>
       </div>
@@ -72,7 +74,7 @@ export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
     <div 
       onClick={onClick}
       className="w-full bg-zinc-950/60 backdrop-blur-md border border-zinc-800/80 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-6 shadow-lg animate-in fade-in slide-in-from-top-2 duration-300 cursor-pointer hover:bg-zinc-900/60 hover:border-zinc-700/80 active:scale-[0.99] transition-all group"
-      title="클릭하여 전체 거래 내역 보기"
+      title={t("ticker.view_all_title")}
     >
       {/* 왼쪽: 라이브 상태 표시 및 최근 활동 요약 */}
       <div className="flex items-center gap-3">
@@ -108,7 +110,7 @@ export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
           </span>
 
           <span className="text-zinc-400">
-            <span className="font-mono text-zinc-300 font-bold">{latestLog.quantity}주</span> 체결 완료
+            <span className="font-mono text-zinc-300 font-bold">{latestLog.quantity}{t("common.shares_suffix")}</span> {t("ticker.filled")}
           </span>
 
           <span className="text-zinc-500 font-mono text-[11px] font-semibold">
@@ -123,7 +125,7 @@ export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
                 "font-bold flex items-center gap-0.5",
                 isProfit ? "text-emerald-400" : "text-rose-400"
               )}>
-                실수익률 {isProfit ? "▲" : "▼"} {Math.abs(rate).toFixed(2)}%
+                {t("ticker.net_return")} {isProfit ? "▲" : "▼"} {Math.abs(rate).toFixed(2)}%
               </span>
               <span className={cn(
                 "font-mono font-black",
@@ -143,7 +145,7 @@ export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
         <span className="text-zinc-700 font-extrabold">•</span>
         <span className="bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800/50 text-zinc-400 font-semibold">{timeAgo}</span>
         <span className="text-zinc-700 font-extrabold shrink-0">•</span>
-        <span className="bg-indigo-950/40 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded font-sans font-bold group-hover:bg-indigo-600 group-hover:text-white transition-all duration-200">🔍 상세보기</span>
+        <span className="bg-indigo-950/40 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded font-sans font-bold group-hover:bg-indigo-600 group-hover:text-white transition-all duration-200">{t("ticker.detail")}</span>
       </div>
     </div>
   );

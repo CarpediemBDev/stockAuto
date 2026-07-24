@@ -17,6 +17,11 @@ export default defineConfig({
     baseURL,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // i18n.ts는 NEXT_LOCALE 쿠키가 없으면 Accept-Language로 로케일을 정하고,
+    // 한국어가 아니면 en으로 배정한다. Playwright 기본값은 en-US라 화면이 영어로
+    // 렌더되어 한글 문구를 찾는 기존 단언들이 깨진다. 테스트가 전제하는 한국어 UI를
+    // 결정적으로 고정하기 위해 로케일을 명시한다.
+    locale: "ko-KR",
   },
   projects: [
     {

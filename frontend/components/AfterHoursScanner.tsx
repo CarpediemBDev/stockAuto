@@ -10,6 +10,7 @@ import { fetcher, scannerAPI } from '@/lib/api';
 import { cn, reportHandledError, getScoreColor, getScoreBarColor } from '@/lib/utils';
 import { useTimezone } from '@/store/timezoneStore';
 import { ScannerTabs, type ScannerTab } from '@/components/ScannerTabs';
+import { useTranslations } from "next-intl";
 
 interface AfterHoursDetails {
   regular_change_pct: number;
@@ -54,9 +55,9 @@ interface AfterHoursScannerProps {
 }
 
 const SIGNAL_LABEL = {
-  STRONG_AFTER_HOURS: '강한 후보',
-  AFTER_HOURS_WATCH: '관찰 후보',
-  WATCH: '대기',
+  STRONG_AFTER_HOURS: 'label_strong',
+  AFTER_HOURS_WATCH: 'label_watch',
+  WATCH: 'label_wait',
 };
 
 export function AfterHoursScanner({
@@ -65,6 +66,7 @@ export function AfterHoursScanner({
   onAddToWatchlist,
   watchlistTickers = [],
 }: AfterHoursScannerProps) {
+  const t = useTranslations("scanner");
   const { data: swrData, isLoading, mutate } = useSWR('/scanner/after-hours-candidates', fetcher, {
     refreshInterval: pollInterval(15000),
   });
@@ -94,17 +96,17 @@ export function AfterHoursScanner({
     setRefreshing(true);
     try {
       await scannerAPI.refreshAfterHoursCandidates();
-      toast.info('에프터장 후보 스캔이 백그라운드에서 시작되었습니다.');
+      toast.info(t("after_hours.toast_started"));
       setTimeout(async () => {
         await mutate();
         setRefreshing(false);
       }, 3000);
     } catch (error) {
       const msg = reportHandledError('Failed to refresh after-hours candidates', error);
-      toast.error(`에프터장 후보 갱신 실패: ${msg}`);
+      toast.error(t("after_hours.toast_failed", { msg }));
       setRefreshing(false);
     }
-  }, [mutate]);
+  }, [mutate, t]);
 
   const status = refreshing ? 'refreshing' : payload.sync_status;
   const candidates = payload.candidates;
@@ -117,8 +119,8 @@ export function AfterHoursScanner({
             <Moon size={21} />
           </div>
           <div>
-            <h2 className="text-lg font-black text-white tracking-tight">에프터장 상승 후보</h2>
-            <p className="text-xs text-zinc-500 font-medium">정규장 마감 품질과 에프터장 확인 신호를 분리 채점합니다.</p>
+            <h2 className="text-lg font-black text-white tracking-tight">{t("after_hours.title")}</h2>
+            <p className="text-xs text-zinc-500 font-medium">{t("after_hours.subtitle")}</p>
           </div>
         </div>
 
@@ -143,10 +145,10 @@ export function AfterHoursScanner({
             onClick={() => refreshCandidates()}
             disabled={refreshing || status === 'refreshing'}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-bold transition-all active:scale-95 disabled:opacity-50 border border-zinc-700/50"
-            title="정규장 흐름과 에프터장 체결 데이터를 다시 분석합니다"
+            title={t("after_hours.refresh_title")}
           >
             <RefreshCw size={13} className={cn((refreshing || status === 'refreshing') && 'animate-spin text-emerald-400')} />
-            {refreshing || status === 'refreshing' ? '갱신 중...' : '후보 갱신'}
+            {refreshing || status === 'refreshing' ? t("after_hours.refreshing") : t("after_hours.refresh")}
           </button>
         </div>
       </div>
@@ -156,13 +158,13 @@ export function AfterHoursScanner({
       {isLoading ? (
         <div className="flex flex-col items-center justify-center py-20 text-zinc-500">
           <Activity size={36} className="animate-pulse mb-3 text-emerald-500/50" />
-          <p className="text-sm font-bold">에프터장 후보 캐시를 불러오는 중입니다.</p>
+          <p className="text-sm font-bold">{t("after_hours.loading")}</p>
         </div>
       ) : candidates.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-zinc-500">
           <Moon size={34} className="mb-3 text-zinc-700" />
-          <p className="text-sm font-bold">저장된 에프터장 후보가 없습니다.</p>
-          <p className="text-xs text-zinc-600 mt-2">미국 에프터장 시간에 후보 갱신을 실행하면 정규장 마감 이후 체결 흐름까지 반영합니다.</p>
+          <p className="text-sm font-bold">{t("after_hours.empty_title")}</p>
+          <p className="text-xs text-zinc-600 mt-2">{t("after_hours.empty_hint")}</p>
         </div>
       ) : (
         <div className="overflow-auto custom-scrollbar">
@@ -198,7 +200,7 @@ export function AfterHoursScanner({
                             watch ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
                             'bg-zinc-800 text-zinc-500 border-zinc-700'
                           )}>
-                            {SIGNAL_LABEL[candidate.signal_type]}
+                            {t(`after_hours.${SIGNAL_LABEL[candidate.signal_type]}`)}
                           </span>
                         </div>
                         <span className="text-[11px] text-zinc-500 font-medium truncate max-w-[180px]">{candidate.name}</span>
@@ -214,19 +216,19 @@ export function AfterHoursScanner({
                     <td className="py-4 px-3">
                       <div className="flex flex-col items-center gap-1.5 text-[11px] font-bold">
                         <span className={candidate.details.regular_change_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                          정규장 {candidate.details.regular_change_pct >= 0 ? '+' : ''}{candidate.details.regular_change_pct}%
+                          {t("after_hours.regular")} {candidate.details.regular_change_pct >= 0 ? '+' : ''}{candidate.details.regular_change_pct}%
                         </span>
-                        <span className="text-zinc-400">마감 1h {candidate.details.final_hour_return_pct >= 0 ? '+' : ''}{candidate.details.final_hour_return_pct}%</span>
-                        <span className="text-zinc-500">고가권 {candidate.details.close_position_pct}%</span>
+                        <span className="text-zinc-400">{t("after_hours.final_hour")} {candidate.details.final_hour_return_pct >= 0 ? '+' : ''}{candidate.details.final_hour_return_pct}%</span>
+                        <span className="text-zinc-500">{t("after_hours.close_position")} {candidate.details.close_position_pct}%</span>
                       </div>
                     </td>
                     <td className="py-4 px-3">
                       <div className="flex flex-col items-center gap-1.5 text-[11px] font-bold">
                         <span className={candidate.details.after_hours_change_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                          에프터 {candidate.details.after_hours_change_pct >= 0 ? '+' : ''}{candidate.details.after_hours_change_pct}%
+                          {t("after_hours.after")} {candidate.details.after_hours_change_pct >= 0 ? '+' : ''}{candidate.details.after_hours_change_pct}%
                         </span>
-                        <span className="text-zinc-400">거래량비 {(candidate.details.after_hours_volume_ratio * 100).toFixed(1)}%</span>
-                        <span className="text-zinc-600 font-mono">{candidate.details.after_hours_volume.toLocaleString()}주</span>
+                        <span className="text-zinc-400">{t("after_hours.volume_ratio")} {(candidate.details.after_hours_volume_ratio * 100).toFixed(1)}%</span>
+                        <span className="text-zinc-600 font-mono">{candidate.details.after_hours_volume.toLocaleString()}{t("after_hours.shares")}</span>
                       </div>
                     </td>
                     <td className="py-4 px-3">
@@ -275,14 +277,14 @@ export function AfterHoursScanner({
                             ? "bg-zinc-800/70 text-zinc-400 border-zinc-700"
                             : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
                         )}
-                        title="관심종목에 등록합니다"
+                        title={t("after_hours.add_watch_title")}
                       >
                         {isAdding ? (
                           <RefreshCw size={13} className="animate-spin" />
                         ) : (
                           <Star size={13} className="fill-emerald-400/20" />
                         )}
-                        <span>{isInWatchlist ? '등록됨' : '관심등록'}</span>
+                        <span>{isInWatchlist ? t("after_hours.registered") : t("after_hours.add_watch")}</span>
                       </button>
                     </td>
                   </tr>

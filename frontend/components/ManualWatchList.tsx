@@ -9,6 +9,7 @@ import { pollInterval } from '@/lib/sse';
 import { fetcher } from '@/lib/api';
 import { reportHandledError, getScoreColor, getScoreBarColor } from '@/lib/utils';
 import { useWatchlistActions } from '@/hooks/useWatchlistActions';
+import { useTranslations } from "next-intl";
 
 interface TranslationItem {
   ticker: string;
@@ -22,6 +23,7 @@ interface ScannerSignal {
 }
 
 const ManualWatchList = () => {
+  const t = useTranslations("scanner");
   const {
     items,
     isLoading: watchLoading,
@@ -205,12 +207,12 @@ const ManualWatchList = () => {
                             )}
                           </span>
                         </div>
-                        <span className="text-[11px] text-zinc-500 group-hover:text-zinc-400 font-medium">나스닥</span>
+                        <span className="text-[11px] text-zinc-500 group-hover:text-zinc-400 font-medium">{t("watchlist.nasdaq")}</span>
                       </div>
                     );
                   })}
                   <div className="px-3.5 py-1.5 bg-zinc-950/40 text-[11px] text-zinc-600 flex items-center justify-between">
-                    <span>ⓘ 사전 매핑된 한글명을 클릭하면 즉시 등록됩니다.</span>
+                    <span>{t("watchlist.autocomplete_hint")}</span>
                     <span className="text-zinc-700">StockAuto i18n</span>
                   </div>
                 </div>
@@ -228,12 +230,12 @@ const ManualWatchList = () => {
           {/* 모바일/태블릿 접이식 요약 (lg 미만에서만 표시) */}
           <div className="lg:hidden p-4 border-b border-zinc-800/50">
             <div className="flex justify-between items-center mb-3">
-              <span className="text-[11px] font-bold text-zinc-400">MY LIST 요약 (시그널 발생 종목)</span>
+              <span className="text-[11px] font-bold text-zinc-400">{t("watchlist.summary_title")}</span>
               <button 
                 onClick={() => setIsExpanded(!isExpanded)}
                 className="text-[11px] text-blue-400 bg-blue-500/10 px-2 py-1 rounded font-bold"
               >
-                {isExpanded ? "접기" : "전체 보기"}
+                {isExpanded ? t("watchlist.collapse") : t("watchlist.expand")}
               </button>
             </div>
             {!isExpanded && (
@@ -254,7 +256,7 @@ const ManualWatchList = () => {
                   const sig = signals.find(s => s.ticker.toUpperCase() === item.ticker.toUpperCase() && (!s.source || s.source.includes("WATCHLIST")));
                   return sig && sig.signal_score > 0;
                 }).length === 0 && (
-                  <span className="text-[11px] text-zinc-500">현재 포착된 시그널 없음</span>
+                  <span className="text-[11px] text-zinc-500">{t("watchlist.no_signal")}</span>
                 )}
               </div>
             )}
@@ -273,8 +275,8 @@ const ManualWatchList = () => {
                 {sortedItems.length === 0 ? (
                   <tr>
                     <td colSpan={3} className="px-5 py-12 text-center text-zinc-500 text-xs">
-                      <p className="mb-1">관심종목이 비어있습니다.</p>
-                      <p className="text-[11px] text-zinc-600">위의 + 버튼을 눌러 티커를 추가하세요.</p>
+                      <p className="mb-1">{t("watchlist.empty_title")}</p>
+                      <p className="text-[11px] text-zinc-600">{t("watchlist.empty_hint")}</p>
                     </td>
                   </tr>
                 ) : (
@@ -304,7 +306,7 @@ const ManualWatchList = () => {
                         ) : (
                           <div className="flex items-center space-x-2 py-0.5">
                             <div className="w-1.5 h-1.5 rounded-full bg-zinc-700"></div>
-                            <span className="text-[11px] text-zinc-600 font-medium tracking-tight">대기중</span>
+                            <span className="text-[11px] text-zinc-600 font-medium tracking-tight">{t("watchlist.waiting")}</span>
                           </div>
                         )}
                       </td>
@@ -313,7 +315,7 @@ const ManualWatchList = () => {
                           onClick={() => handleDelete(item.id)}
                           disabled={deletingId === item.id}
                           className="p-1.5 text-zinc-600 hover:text-rose-400 hover:bg-rose-400/10 rounded-md transition-all opacity-40 group-hover:opacity-100 cursor-pointer"
-                          title="관심종목 삭제"
+                          title={t("watchlist.delete_title")}
                         >
                           <Trash2 size={14} />
                         </button>

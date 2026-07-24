@@ -12,6 +12,7 @@ import {
 import { reportAPI, tradeAPI } from '@/lib/api';
 import { TradeLogs, TradeLog } from '@/components/TradeLogs';
 import { reportHandledError } from '@/lib/utils';
+import { useTranslations } from 'next-intl';
 
 interface TradeItem {
   id: number;
@@ -39,6 +40,7 @@ interface StatsData {
 }
 
 export default function ReportPage() {
+  const t = useTranslations('report');
   const router = useRouter();
   const { isAuthenticated, isInitialized } = useAuthStore();
   const [loading, setLoading] = useState(true);
@@ -89,7 +91,7 @@ export default function ReportPage() {
     return (
       <div className="flex justify-center items-center h-64 text-slate-500">
         <Activity className="w-6 h-6 mr-2 opacity-50" />
-        데이터를 불러오지 못했습니다.
+        {t('load_failed')}
       </div>
     );
   }
@@ -105,10 +107,10 @@ export default function ReportPage() {
         <header className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-zinc-800 pb-5">
           <div>
             <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-zinc-200 to-zinc-400 tracking-tight mb-2">
-              종합 매매 성적표
+              {t('title')}
             </h1>
             <p className="text-zinc-400 font-medium tracking-wide">
-              계좌의 전체 누적 수익금과 승률 등 핵심 투자 성과를 분석합니다.
+              {t('subtitle')}
             </p>
           </div>
           <div className="flex items-center space-x-2 text-xs font-bold text-zinc-300 bg-zinc-900/50 px-4 py-2 rounded-lg border border-zinc-800">
@@ -116,7 +118,7 @@ export default function ReportPage() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </div>
-            <span>실시간 라이브 데이터 동기화</span>
+            <span>{t('live_sync')}</span>
           </div>
         </header>
 
@@ -127,7 +129,7 @@ export default function ReportPage() {
         <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl hover:border-zinc-600 transition-colors duration-300">
           <div className="flex flex-col justify-between h-full space-y-4">
             <div className="flex items-center justify-between text-zinc-400">
-              <span className="font-bold text-xs tracking-wider uppercase">총 실수익금</span>
+              <span className="font-bold text-xs tracking-wider uppercase">{t('net_profit')}</span>
               <DollarSign className="w-5 h-5 text-zinc-500" />
             </div>
             <div className="flex flex-col gap-1">
@@ -138,10 +140,10 @@ export default function ReportPage() {
               </div>
               <div className="flex items-center gap-2 text-xs font-bold tracking-tight mt-1.5">
                 <span className="text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded-md border border-emerald-500/30">
-                  총수익: <span className="font-mono">${(kpi.gross_profit || 0).toLocaleString()}</span>
+                  {t('gross_profit')} <span className="font-mono">${(kpi.gross_profit || 0).toLocaleString()}</span>
                 </span>
                 <span className="text-rose-300 bg-rose-500/15 px-2 py-0.5 rounded-md border border-rose-500/30">
-                  총손실: <span className="font-mono">${(kpi.gross_loss || 0).toLocaleString()}</span>
+                  {t('gross_loss')} <span className="font-mono">${(kpi.gross_loss || 0).toLocaleString()}</span>
                 </span>
               </div>
             </div>
@@ -152,7 +154,7 @@ export default function ReportPage() {
         <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl hover:border-zinc-600 transition-colors duration-300">
           <div className="flex flex-col justify-between h-full space-y-4">
             <div className="flex items-center justify-between text-zinc-400">
-              <span className="font-bold text-xs tracking-wider uppercase">승률 (Win Rate)</span>
+              <span className="font-bold text-xs tracking-wider uppercase">{t('win_rate')}</span>
               <Target className="w-5 h-5 text-zinc-500" />
             </div>
             <div className="flex flex-col gap-1">
@@ -172,7 +174,7 @@ export default function ReportPage() {
         <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl hover:border-zinc-600 transition-colors duration-300">
           <div className="flex flex-col justify-between h-full space-y-4">
             <div className="flex items-center justify-between text-zinc-400">
-              <span className="font-bold text-xs tracking-wider uppercase">프로핏 팩터</span>
+              <span className="font-bold text-xs tracking-wider uppercase">{t('profit_factor')}</span>
               <TrendingUp className="w-5 h-5 text-zinc-500" />
             </div>
             <div className="flex flex-col gap-1">
@@ -192,7 +194,7 @@ export default function ReportPage() {
         <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl hover:border-zinc-600 transition-colors duration-300">
           <div className="flex flex-col justify-between h-full space-y-4">
             <div className="flex items-center justify-between text-zinc-400">
-              <span className="font-bold text-xs tracking-wider uppercase">총 거래 횟수</span>
+              <span className="font-bold text-xs tracking-wider uppercase">{t('total_trades')}</span>
               <Activity className="w-5 h-5 text-zinc-500" />
             </div>
             <div className="flex flex-col gap-1">
@@ -203,10 +205,10 @@ export default function ReportPage() {
               </div>
               <div className="flex items-center gap-2 text-xs font-bold tracking-tight mt-1.5">
                 <span className="text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded-md border border-emerald-500/30">
-                  익절: <span className="font-mono">{kpi.win_trades || 0}</span>회
+                  {t('wins')} <span className="font-mono">{kpi.win_trades || 0}</span>{t('count_suffix')}
                 </span>
                 <span className="text-rose-300 bg-rose-500/15 px-2 py-0.5 rounded-md border border-rose-500/30">
-                  손절: <span className="font-mono">{kpi.loss_trades || 0}</span>회
+                  {t('losses')} <span className="font-mono">{kpi.loss_trades || 0}</span>{t('count_suffix')}
                 </span>
               </div>
             </div>
@@ -218,7 +220,7 @@ export default function ReportPage() {
       <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 md:p-8 shadow-xl">
         <h2 className="text-xl font-bold text-white mb-6 flex items-center space-x-2">
           <TrendingUp className="w-5 h-5 text-zinc-400" />
-          <span>누적 수익 곡선 <span className="text-zinc-500 font-normal ml-1 text-sm">Cumulative Profit</span></span>
+          <span>{t('cumulative_profit')}</span>
         </h2>
         <div className="h-96 min-h-96 w-full min-w-0 overflow-hidden">
           {chart_data.length > 0 ? (
@@ -254,7 +256,7 @@ export default function ReportPage() {
                 <Area
                   type="monotone"
                   dataKey="cumulative_pnl"
-                  name="누적 실수익금"
+                  name={t('cumulative_profit_series')}
                   stroke={isProfitable ? '#10b981' : '#f43f5e'}
                   strokeWidth={4}
                   fillOpacity={1}
@@ -267,7 +269,7 @@ export default function ReportPage() {
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-slate-500">
               <Activity className="w-12 h-12 mb-4 opacity-50" />
-              <p>아직 매도 내역(수익 실현)이 없습니다.</p>
+              <p>{t('no_trades')}</p>
             </div>
           )}
         </div>
@@ -280,7 +282,7 @@ export default function ReportPage() {
           className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-6 py-3 rounded-xl border border-zinc-700 font-semibold transition-all duration-300 flex items-center gap-2 active:scale-95 shadow-lg"
         >
           <Activity className="w-4 h-4 text-zinc-400" />
-          <span>실시간 체결 로그 전체보기</span>
+          <span>{t('view_all_logs')}</span>
         </button>
       </div>
 
@@ -297,7 +299,7 @@ export default function ReportPage() {
             <button
               onClick={() => setIsLogsModalOpen(false)}
               className="absolute top-4 right-4 text-zinc-500 hover:text-white p-2 rounded-lg hover:bg-zinc-800 active:scale-95 transition-all z-10 font-bold"
-              aria-label="닫기"
+              aria-label={t('close')}
             >
               ✕
             </button>
