@@ -8,6 +8,7 @@ import { fetcher } from '@/lib/api';
 import { toast } from "sonner";
 import { cn, reportHandledError } from '@/lib/utils';
 import { useTimezone } from '@/store/timezoneStore';
+import { useTranslations } from "next-intl";
 
 interface ActionLog {
   id: number;
@@ -17,6 +18,7 @@ interface ActionLog {
 }
 
 export function SystemHealth() {
+  const t = useTranslations("admin_ui");
   const { data: swrData, isLoading } = useSWR('/admin/system-logs', fetcher, { refreshInterval: 15000 });
   const logs: ActionLog[] = Array.isArray(swrData) ? swrData : (swrData?.data || []);
   const loading = isLoading;
@@ -39,10 +41,10 @@ export function SystemHealth() {
     try {
       setIsReportSending(true);
       const res = await reportAPI.triggerManualReport();
-      toast.success(res.serverMessage || "관리자 본인의 텔레그램 일일 결산 리포트 발송에 성공했습니다.");
+      toast.success(res.serverMessage || t("health.self_report_success"));
     } catch (error) {
       const msg = reportHandledError("Failed to trigger manual report", error);
-      toast.error(`리포트 발송 실패: ${msg}`);
+      toast.error(t("health.self_report_failed", { msg }));
     } finally {
       setIsReportSending(false);
     }
@@ -52,10 +54,10 @@ export function SystemHealth() {
     try {
       setIsGlobalReportSending(true);
       const res = await reportAPI.triggerGlobalReport();
-      toast.success(res.serverMessage || "전체 사용자의 텔레그램 리포트 발송이 완료되었습니다.");
+      toast.success(res.serverMessage || t("health.all_report_success"));
     } catch (error) {
       const msg = reportHandledError("Failed to trigger global report", error);
-      toast.error(`전체 리포트 발송 실패: ${msg}`);
+      toast.error(t("health.all_report_failed", { msg }));
     } finally {
       setIsGlobalReportSending(false);
     }
@@ -77,7 +79,7 @@ export function SystemHealth() {
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <Server size={18} className="text-blue-400" />
-            시스템 헬스 실시간 모니터링
+            {t("health.title")}
           </h2>
           <span className="text-[10px] text-zinc-400 font-semibold bg-zinc-800 px-2 py-0.5 rounded flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -91,10 +93,10 @@ export function SystemHealth() {
             <div>
               <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
-                수동 결산 및 리포트 즉시 발송
+                {t("health.manual_report_title")}
               </h3>
               <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
-                현재 로그인된 관리자 본인에 한해 손익 및 거래 현황을 즉시 집계하여, 본인의 텔레그램 채널로 결산 보고서를 즉시 발송합니다. (테스트 목적)
+                {t("health.manual_report_desc")}
               </p>
             </div>
             <div className="flex items-center justify-end space-x-2">
@@ -111,11 +113,11 @@ export function SystemHealth() {
                 {isReportSending ? (
                   <>
                     <Loader2 size={12} className="animate-spin text-zinc-500" />
-                    내게 테스트 발송 중...
+                    {t("health.sending_self")}
                   </>
                 ) : (
                   <>
-                    <span>📨 내게 테스트 발송</span>
+                    <span>{t("health.send_self")}</span>
                   </>
                 )}
               </button>
@@ -133,11 +135,11 @@ export function SystemHealth() {
                 {isGlobalReportSending ? (
                   <>
                     <Loader2 size={12} className="animate-spin text-zinc-500" />
-                    전체 발송 중...
+                    {t("health.sending_all")}
                   </>
                 ) : (
                   <>
-                    <span>🚀 전체 사용자 발송</span>
+                    <span>{t("health.send_all")}</span>
                   </>
                 )}
               </button>
@@ -148,16 +150,16 @@ export function SystemHealth() {
             <div>
               <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-                시스템 데이터 동기화
+                {t("health.sync_title")}
               </h3>
               <div className="grid grid-cols-2 gap-2 mt-2">
                 <div className="bg-zinc-900/40 p-2 rounded-lg border border-zinc-800/40 text-center">
-                  <span className="text-[10px] text-zinc-500 block">시스템 로그 수신</span>
-                  <span className="text-xs font-bold text-slate-300">{logs.length}개 갱신됨</span>
+                  <span className="text-[10px] text-zinc-500 block">{t("health.log_received")}</span>
+                  <span className="text-xs font-bold text-slate-300">{t("health.log_updated", { count: String(logs.length) })}</span>
                 </div>
                 <div className="bg-zinc-900/40 p-2 rounded-lg border border-zinc-800/40 text-center">
-                  <span className="text-[10px] text-zinc-500 block">통신 감도</span>
-                  <span className="text-xs font-bold text-emerald-400">네트워크 정상</span>
+                  <span className="text-[10px] text-zinc-500 block">{t("health.comm_sensitivity")}</span>
+                  <span className="text-xs font-bold text-emerald-400">{t("health.network_normal")}</span>
                 </div>
               </div>
             </div>
@@ -169,7 +171,7 @@ export function SystemHealth() {
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
               <Activity size={16} className="text-pink-400" />
-              크롤링 엔진 모니터링 (Discovery Stats)
+              {t("health.crawler_title")}
             </h3>
             <span className={cn(
               "text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-1.5",
@@ -199,7 +201,7 @@ export function SystemHealth() {
                   <span className={cn("text-lg font-bold", stats.toss.status === 'ERROR' ? 'text-rose-400' : 'text-slate-200')}>
                     {stats.toss.status === 'ERROR' ? 'FAIL' : stats.toss.count}
                   </span>
-                  {stats.toss.status === 'SUCCESS' && <span className="text-[9px] text-zinc-500">종목</span>}
+                  {stats.toss.status === 'SUCCESS' && <span className="text-[9px] text-zinc-500">{t("health.stocks")}</span>}
                 </div>
               </div>
             </div>
@@ -215,7 +217,7 @@ export function SystemHealth() {
                   <span className={cn("text-lg font-bold", stats.naver.status === 'ERROR' ? 'text-rose-400' : 'text-slate-200')}>
                     {stats.naver.status === 'ERROR' ? 'FAIL' : stats.naver.count}
                   </span>
-                  {stats.naver.status === 'SUCCESS' && <span className="text-[9px] text-zinc-500">종목</span>}
+                  {stats.naver.status === 'SUCCESS' && <span className="text-[9px] text-zinc-500">{t("health.stocks")}</span>}
                 </div>
               </div>
             </div>
@@ -231,7 +233,7 @@ export function SystemHealth() {
                   <span className={cn("text-lg font-bold", stats.yahoo.status === 'ERROR' ? 'text-rose-400' : 'text-slate-200')}>
                     {stats.yahoo.status === 'ERROR' ? 'FAIL' : stats.yahoo.count}
                   </span>
-                  {stats.yahoo.status === 'SUCCESS' && <span className="text-[9px] text-zinc-500">종목</span>}
+                  {stats.yahoo.status === 'SUCCESS' && <span className="text-[9px] text-zinc-500">{t("health.stocks")}</span>}
                 </div>
               </div>
             </div>
@@ -247,7 +249,7 @@ export function SystemHealth() {
                   <span className="text-lg font-bold text-indigo-300">
                     {stats.total_universe}
                   </span>
-                  <span className="text-[9px] text-indigo-500/60">최종 분석 풀</span>
+                  <span className="text-[9px] text-indigo-500/60">{t("health.final_pool")}</span>
                 </div>
               </div>
             </div>
@@ -255,7 +257,7 @@ export function SystemHealth() {
           
           {stats.last_run && (
             <div className="text-[10px] text-zinc-500 flex items-center justify-end">
-              최근 업데이트: {new Date(stats.last_run).toLocaleTimeString('ko-KR', {
+              {t("health.last_updated")}{new Date(stats.last_run).toLocaleTimeString('ko-KR', {
                 timeZone: selectedTimezone.timeZone,
                 hour12: false,
                 hour: '2-digit',
@@ -284,7 +286,7 @@ export function SystemHealth() {
             {loading && logs.length === 0 ? (
               <div className="py-20 flex flex-col items-center justify-center gap-3">
                 <Loader2 size={36} className="animate-spin text-zinc-500" />
-                <span className="text-xs text-zinc-500 font-semibold">로그 데이터 로딩 중...</span>
+                <span className="text-xs text-zinc-500 font-semibold">{t("health.log_loading")}</span>
               </div>
             ) : logs.length === 0 ? (
               <div className="text-slate-700 italic">No system activity recorded yet.</div>

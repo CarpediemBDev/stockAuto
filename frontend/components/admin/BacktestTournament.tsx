@@ -59,8 +59,10 @@ interface StrategyResult {
 }
 
 import useSWR from 'swr';
+import { useTranslations } from "next-intl";
 
 export function BacktestTournament() {
+  const t = useTranslations("admin_ui");
   const [startDate, setStartDate] = useState("2025-01-01");
   const [endDate, setEndDate] = useState("2025-12-31");
   const [activeStartDate, setActiveStartDate] = useState("2025-01-01");
@@ -107,14 +109,14 @@ export function BacktestTournament() {
 
   const handleRunSimulation = () => {
     if (!startDate || !endDate) {
-      toast.error("시작일과 종료일을 입력해주세요.");
+      toast.error(t("backtest.fill_dates"));
       return;
     }
     if (new Date(startDate) > new Date(endDate)) {
-      toast.error("시작일은 종료일보다 이전이어야 합니다.");
+      toast.error(t("backtest.start_before_end"));
       return;
     }
-    toast.info(`${startDate} ~ ${endDate} 기간에 대한 HIL 시뮬레이션 배틀을 실행합니다.`);
+    toast.info(t("backtest.battle_start_info", { start: startDate, end: endDate }));
     setSelectedStrategy(null); // 새 시뮬레이션 시 선택 초기화
     setActiveStartDate(startDate);
     setActiveEndDate(endDate);
@@ -218,10 +220,10 @@ export function BacktestTournament() {
           <div className="space-y-1">
             <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2.5">
               <Trophy className="text-amber-400 animate-pulse" size={22} />
-              배틀 아레나 (종합 백테스트 대항전)
+              {t("backtest.title")}
             </h2>
             <p className="text-xs text-zinc-400">
-              스윙 스캐너가 실시간 발굴한 포트폴리오를 대입하여 각 전략이 과거 시간 축에서 일궈낸 자산 성장 곡선을 동적으로 시뮬레이션합니다.
+              {t("backtest.subtitle")}
             </p>
           </div>
           
@@ -229,7 +231,7 @@ export function BacktestTournament() {
           <div className="flex flex-wrap items-center gap-3 bg-zinc-950/80 p-2 rounded-xl border border-zinc-850 shadow-inner">
             <div className="flex items-center gap-2 px-2.5">
               <Calendar size={14} className="text-zinc-500" />
-              <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">시뮬레이션 기간</span>
+              <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">{t("backtest.period")}</span>
             </div>
             
             <input
@@ -256,7 +258,7 @@ export function BacktestTournament() {
               ) : (
                 <RefreshCw size={13} className="text-white" />
               )}
-              대항전 매칭 실행
+              {t("backtest.run_match")}
             </button>
           </div>
         </div>
@@ -269,17 +271,17 @@ export function BacktestTournament() {
                 <>
                   <div className="flex items-center justify-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-xs text-emerald-400 font-bold tracking-wider">서버에서 백그라운드 시뮬레이션을 진행 중입니다...</span>
+                    <span className="text-xs text-emerald-400 font-bold tracking-wider">{t("backtest.running_bg")}</span>
                   </div>
                   <span className="text-[11px] text-zinc-400 block font-mono bg-zinc-900/50 py-1 px-3 rounded-full border border-zinc-800 inline-block">
-                    HIL 백테스트 연산 중... (전체 서버 리소스 가동, 약 3~4분 소요)
+                    {t("backtest.computing")}
                   </span>
-                  <span className="text-[10px] text-zinc-500 block">이 화면을 벗어나도 백테스트는 계속 진행됩니다.</span>
+                  <span className="text-[10px] text-zinc-500 block">{t("backtest.keep_running")}</span>
                 </>
               ) : (
                 <>
-                  <span className="text-xs text-slate-300 font-bold tracking-wider animate-pulse block">HIL 시뮬레이터 가상 환경 기동 중...</span>
-                  <span className="text-[10px] text-zinc-500 block">yfinance 로컬 캐시로부터 15개 기술 지표 오실레이터 및 수급 벡터 로딩 중</span>
+                  <span className="text-xs text-slate-300 font-bold tracking-wider animate-pulse block">{t("backtest.booting")}</span>
+                  <span className="text-[10px] text-zinc-500 block">{t("backtest.loading_indicators")}</span>
                 </>
               )}
             </div>
@@ -287,9 +289,9 @@ export function BacktestTournament() {
         ) : data.length === 0 ? (
           <div className="py-24 text-center space-y-3">
             <AlertTriangle className="mx-auto text-amber-500/80" size={48} />
-            <h3 className="text-slate-300 font-bold">대항전 시뮬레이션 결과 없음</h3>
+            <h3 className="text-slate-300 font-bold">{t("backtest.no_result_title")}</h3>
             <p className="text-xs text-zinc-500 max-w-sm mx-auto">
-              입력하신 기간({startDate} ~ {endDate})에 매칭된 거래 이력이 없거나 데이터를 수집하지 못했습니다. 날짜 범위를 다시 확인해 주세요.
+              {t("backtest.no_result_body", { start: startDate, end: endDate })}
             </p>
           </div>
         ) : (
@@ -298,7 +300,7 @@ export function BacktestTournament() {
             {/* 상단 비교 곡선 차트 패널 */}
             <div className="bg-slate-950/80 border border-zinc-900 rounded-2xl p-5 shadow-2xl space-y-4">
               <span className="text-[10px] uppercase font-bold tracking-widest text-zinc-500 block">
-                Relative Asset Growth Curves (누적 자산 성장 곡선 비교)
+                {t("backtest.growth_curves")}
               </span>
               
               <div className="h-[320px] min-h-[320px] w-full min-w-0 overflow-hidden text-slate-400">
@@ -362,13 +364,13 @@ export function BacktestTournament() {
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="bg-zinc-900/60 border-b border-zinc-800/60 text-zinc-400 font-semibold text-[11px] uppercase tracking-wider">
-                          <th className="py-3 px-4 text-center w-12">순위</th>
-                          <th className="py-3 px-4">전략 명칭</th>
-                          <th className="py-3 px-4 text-right">선발 점수</th>
-                          <th className="py-3 px-4 text-right">최종 자산</th>
-                          <th className="py-3 px-4">누적수익률</th>
+                          <th className="py-3 px-4 text-center w-12">{t("backtest.th_rank")}</th>
+                          <th className="py-3 px-4">{t("backtest.th_strategy")}</th>
+                          <th className="py-3 px-4 text-right">{t("backtest.th_score")}</th>
+                          <th className="py-3 px-4 text-right">{t("backtest.th_final_asset")}</th>
+                          <th className="py-3 px-4">{t("backtest.th_return")}</th>
                           <th className="py-3 px-4 text-right">MDD</th>
-                          <th className="py-3 px-4 text-center">총 거래</th>
+                          <th className="py-3 px-4 text-center">{t("backtest.th_total_trades")}</th>
                           <th className="py-3 px-4 text-center w-8"></th>
                         </tr>
                       </thead>
@@ -412,7 +414,7 @@ export function BacktestTournament() {
                                 {r.mdd.toFixed(2)}%
                               </td>
                               <td className="py-3.5 px-4 text-center font-mono text-zinc-400 font-medium">
-                                {r.total_trades}회
+                                {r.total_trades}{t("backtest.trades_suffix")}
                               </td>
                               <td className="py-3.5 px-4 text-center text-zinc-600">
                                 <ChevronRight size={14} className={isSelected ? 'text-blue-400 animate-pulse' : 'text-zinc-600'} />
@@ -428,12 +430,10 @@ export function BacktestTournament() {
                 <div className="bg-gradient-to-br from-blue-950/10 via-zinc-900/40 to-slate-900/60 rounded-2xl border border-blue-900/10 p-5 space-y-2 shadow-inner">
                   <div className="flex items-center gap-2 text-blue-400 font-bold text-xs uppercase">
                     <Activity size={14} />
-                    동적 포트폴리오 감시 규칙
+                    {t("backtest.rule_title")}
                   </div>
                   <p className="text-[11px] text-zinc-400 leading-relaxed">
-                    선택하신 기간 동안 yfinance OHLCV 시계열 데이터가 동적 가상화되어 흘러갔습니다. 
-                    지갑 분할 오케스트레이션과 QQQ 레짐 모드가 과거 날짜축 상에서 완벽히 동기화되어 매입/매도를 정밀 집행했습니다.
-                    RVOL 2.0배 이상 매집 흔적이 수렴된 종목들만 매칭된 결과를 제공합니다.
+                    {t("backtest.rule_body")}
                   </p>
                 </div>
               </div>
@@ -444,10 +444,10 @@ export function BacktestTournament() {
                   <>
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] uppercase font-bold tracking-widest text-zinc-500 block">
-                        Slot Detail: {selectedStrategy.name.replace(/[^a-zA-Z0-9가-힣\s]/g, "").trim()}
+                        Slot Detail: {selectedStrategy.name.replace(/[^a-zA-Z0-9\uAC00-\uD7A3\s]/g, "").trim()}
                       </span>
                       <span className="text-[10px] text-zinc-400 font-bold font-mono bg-zinc-800 px-2 py-0.5 rounded">
-                        승률 {selectedStrategy.win_rate.toFixed(2)}%
+                        {t("backtest.win_rate", { rate: selectedStrategy.win_rate.toFixed(2) })}
                       </span>
                     </div>
 
@@ -456,7 +456,7 @@ export function BacktestTournament() {
                       <div className="grid grid-cols-2 gap-3">
                         <div className="bg-zinc-900/40 rounded-xl p-3.5 border border-zinc-800/40">
                           <span className="text-[9px] uppercase font-bold tracking-wider text-zinc-500 block mb-1">
-                            누적 순손익
+                            {t("backtest.cumulative_pnl")}
                           </span>
                           <span className={`text-base font-mono font-extrabold block
                             ${selectedStrategy.total_pnl > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -465,7 +465,7 @@ export function BacktestTournament() {
                         </div>
                         <div className="bg-zinc-900/40 rounded-xl p-3.5 border border-zinc-800/40">
                           <span className="text-[9px] uppercase font-bold tracking-wider text-zinc-500 block mb-1">
-                            수익률 및 MDD
+                            {t("backtest.return_mdd")}
                           </span>
                           <div className="flex items-baseline gap-1.5">
                             <span className={`text-base font-mono font-extrabold block
@@ -483,7 +483,7 @@ export function BacktestTournament() {
                         <div className="grid grid-cols-3 gap-3">
                           <div className="bg-zinc-900/40 rounded-xl p-3 border border-zinc-800/40">
                             <span className="text-[9px] uppercase font-bold tracking-wider text-zinc-500 block mb-1">
-                              선발 점수
+                              {t("backtest.selection_score")}
                             </span>
                             <span className="text-sm font-mono font-extrabold text-blue-300">
                               {selectedStrategy.selection_score.toFixed(2)}
@@ -499,7 +499,7 @@ export function BacktestTournament() {
                           </div>
                           <div className="bg-zinc-900/40 rounded-xl p-3 border border-zinc-800/40">
                             <span className="text-[9px] uppercase font-bold tracking-wider text-zinc-500 block mb-1">
-                              데이터 근거
+                              {t("backtest.data_basis")}
                             </span>
                             <span className="text-[10px] font-bold text-slate-300">
                               {selectedStrategy.data_basis ?? '-'}
@@ -512,41 +512,41 @@ export function BacktestTournament() {
                         <div className="flex gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] leading-relaxed text-amber-200">
                           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
                           <span>
-                            기본 10개 선발에서 제외됩니다. {selectedStrategy.selection_exclusion_reasons?.join(' ')}
+                            {t("backtest.excluded_reason", { reasons: selectedStrategy.selection_exclusion_reasons?.join(' ') ?? "" })}
                           </span>
                         </div>
                       )}
 
                       <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-zinc-800">
                         <div className="flex text-[10px] uppercase font-bold tracking-wider text-zinc-500 px-3 border-b border-zinc-800/50 pb-2">
-                          <div className="w-16">종목</div>
-                          <div className="w-20 text-center">거래 (매수/매도)</div>
-                          <div className="flex-1 text-right">총 실현손익</div>
+                          <div className="w-16">{t("backtest.col_ticker")}</div>
+                          <div className="w-20 text-center">{t("backtest.col_trades")}</div>
+                          <div className="flex-1 text-right">{t("backtest.col_pnl")}</div>
                         </div>
                         
-                        {Object.keys(selectedStrategy.ticker_stats || {}).map((t) => {
-                          const stat = selectedStrategy.ticker_stats[t] || { buys: 0, sells: 0, pnl: 0 };
+                        {Object.keys(selectedStrategy.ticker_stats || {}).map((ticker) => {
+                          const stat = selectedStrategy.ticker_stats[ticker] || { buys: 0, sells: 0, pnl: 0 };
                           const total = stat.buys + stat.sells;
                           const isProfit = stat.pnl > 0;
                           const isZero = total === 0;
 
                           return (
                             <div
-                              key={t}
+                              key={ticker}
                               className={`flex items-center text-xs px-3 py-2.5 rounded-xl border transition-colors
                                 ${isZero 
                                   ? 'bg-transparent border-transparent text-zinc-650' 
                                   : 'bg-zinc-900/20 border-zinc-800/40 hover:bg-zinc-800/30'}`}
                             >
                               <div className="w-16 font-extrabold text-slate-300">
-                                {t}
+                                {ticker}
                               </div>
                               
                               <div className="w-20 text-center font-mono font-semibold text-zinc-400 text-[11px]">
                                 {isZero ? (
-                                  <span className="text-zinc-700 italic">스킵 (0회)</span>
+                                  <span className="text-zinc-700 italic">{t("backtest.skip")}</span>
                                 ) : (
-                                  `${total}회 (${stat.buys}/${stat.sells})`
+                                  t("backtest.trade_count", { total: String(total), buys: String(stat.buys), sells: String(stat.sells) })
                                 )}
                               </div>
 
