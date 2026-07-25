@@ -108,6 +108,48 @@ def test_contract_change_without_doc_requires_explicit_reason(tmp_path):
     ) == []
 
 
+def test_freeloading_on_earlier_complete_record_is_blocked(tmp_path):
+    """상단에 완성된 이전 기록이 있어도, 최하단 섹션이 비면 통과되면 안 된다."""
+    board = (
+        complete_record("`docs/SCANNER_DATA_FLOW.md`")
+        + "\n### 변경 영향 기록\n- 변경 분류: `API 계약`\n"
+    )
+    task_path = write_task(tmp_path, board)
+
+    errors = verify_harness.validate_change_contract(
+        tmp_path,
+        ["backend/app/scanner/router.py", task_path, "docs/API_STANDARD.md"],
+    )
+
+    assert any("필수 항목" in error for error in errors), errors
+
+
+def test_producer_reference_warning_when_producer_omits_changed_file(tmp_path):
+    """생산자 필드가 이번 변경 민감 파일을 가리키지 않으면 경고를 낸다."""
+    task_path = write_task(
+        tmp_path,
+        complete_record("`docs/SCANNER_DATA_FLOW.md`"),
+    )
+    # complete_record의 생산자는 backend/app/scanner/router.py 만 언급한다.
+    warnings = verify_harness.producer_reference_warnings(
+        tmp_path,
+        ["backend/app/core/config.py", task_path],
+    )
+    assert any("생산자" in warning for warning in warnings), warnings
+
+
+def test_producer_reference_no_warning_when_file_referenced(tmp_path):
+    task_path = write_task(
+        tmp_path,
+        complete_record("`docs/SCANNER_DATA_FLOW.md`"),
+    )
+    warnings = verify_harness.producer_reference_warnings(
+        tmp_path,
+        ["backend/app/scanner/router.py", task_path],
+    )
+    assert warnings == []
+
+
 def test_release_risk_check_runs_numeric_and_process_scripts(tmp_path, monkeypatch):
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
@@ -116,6 +158,7 @@ def test_release_risk_check_runs_numeric_and_process_scripts(tmp_path, monkeypat
     (scripts_dir / "check_chaos_fuzzing.py").write_text("", encoding="utf-8")
     (scripts_dir / "auto_rollback_guard.py").write_text("", encoding="utf-8")
     (scripts_dir / "check_strategy_consistency.py").write_text("", encoding="utf-8")
+    (scripts_dir / "check_migration_safety.py").write_text("", encoding="utf-8")
     calls = []
 
     def fake_run_command(command, **kwargs):
@@ -133,4 +176,5 @@ def test_release_risk_check_runs_numeric_and_process_scripts(tmp_path, monkeypat
         "check_chaos_fuzzing.py",
         "auto_rollback_guard.py",
         "check_strategy_consistency.py",
+        "check_migration_safety.py",
     }
