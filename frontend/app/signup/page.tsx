@@ -6,8 +6,10 @@ import Link from "next/link";
 import { authAPI } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 export default function SignupPage() {
+  const t = useTranslations("auth");
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -26,22 +28,22 @@ export default function SignupPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password || !confirmPassword) {
-      toast.error("모든 빈칸을 채워주세요.");
+      toast.error(t("signup.toast.empty_fields"));
       return;
     }
 
     if (username.length < 3) {
-      toast.error("아이디는 최소 3글자 이상이어야 합니다.");
+      toast.error(t("signup.toast.username_too_short"));
       return;
     }
 
     if (password.length < 12) {
-      toast.error("비밀번호는 최소 12글자 이상이어야 합니다.");
+      toast.error(t("signup.toast.password_too_short"));
       return;
     }
 
     if (password !== confirmPassword) {
-      toast.error("비밀번호가 서로 일치하지 않습니다.");
+      toast.error(t("signup.toast.password_mismatch"));
       return;
     }
 
@@ -53,10 +55,10 @@ export default function SignupPage() {
       const newRole = res.data.role;
 
       setAuth(newToken, newUsername, newRole);
-      toast.success("회원가입이 완료되었으며, 성공적으로 로그인되었습니다!");
+      toast.success(t("signup.toast.success"));
       router.push("/");
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "회원가입에 실패했습니다. 다시 시도해 주세요.";
+      const errorMessage = err instanceof Error ? err.message : t("signup.toast.failed");
       toast.error(errorMessage);
     } finally {
       setIsLoading(false);
@@ -75,13 +77,13 @@ export default function SignupPage() {
           <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500 to-blue-500 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-emerald-500/20 mb-4 animate-pulse">
             SA
           </div>
-          <h2 className="text-2xl font-bold tracking-tight text-white mb-2">StockAuto 회원가입</h2>
-          <p className="text-xs text-zinc-400">간편하게 회원가입 후 퀀트 자동매매를 시작하세요</p>
+          <h2 className="text-2xl font-bold tracking-tight text-white mb-2">{t("signup.title")}</h2>
+          <p className="text-xs text-zinc-400">{t("signup.subtitle")}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-zinc-300 block">아이디 (3글자 이상)</label>
+            <label className="text-xs font-semibold text-zinc-300 block">{t("signup.username")}</label>
             <input
               type="text"
               placeholder="Username"
@@ -93,7 +95,7 @@ export default function SignupPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-zinc-300 block">비밀번호 (12글자 이상)</label>
+            <label className="text-xs font-semibold text-zinc-300 block">{t("signup.password")}</label>
             <input
               type="password"
               placeholder="Password"
@@ -105,7 +107,7 @@ export default function SignupPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-zinc-300 block">비밀번호 확인</label>
+            <label className="text-xs font-semibold text-zinc-300 block">{t("signup.password_confirm")}</label>
             <input
               type="password"
               placeholder="Confirm Password"
@@ -121,15 +123,15 @@ export default function SignupPage() {
             disabled={isLoading}
             className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 text-white font-semibold text-sm shadow-lg shadow-emerald-500/10 hover:shadow-emerald-500/20 active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none mt-6"
           >
-            {isLoading ? "가입 처리 중..." : "회원가입"}
+            {isLoading ? t("signup.submitting") : t("signup.submit")}
           </button>
         </form>
 
         <div className="mt-8 text-center border-t border-zinc-800/80 pt-6">
           <p className="text-xs text-zinc-400">
-            이미 계정이 있으신가요?{" "}
+            {t("signup.have_account")}{" "}
             <Link href="/login" className="text-blue-400 hover:text-blue-300 font-semibold transition-colors duration-200">
-              로그인하기
+              {t("signup.login_link")}
             </Link>
           </p>
         </div>

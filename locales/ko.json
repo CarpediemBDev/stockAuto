@@ -385,5 +385,41 @@
       "control_rule": "관제탑 제어 규칙",
       "control_rule_desc": "QQQ 이평 배열을 상시 진단하며, 하락장 진입 시 RS 슬롯의 가동 한도를 즉각 0% 차단 격리함으로써 계좌 파산 리스크를 기계적으로 차단합니다."
     }
+  },
+  "auth": {
+    "login": {
+      "title": "StockAuto 로그인",
+      "subtitle": "자율 트레이딩 퀀트 플랫폼에 오신 것을 환영합니다",
+      "username": "아이디",
+      "password": "비밀번호",
+      "submitting": "로그인 중...",
+      "submit": "로그인",
+      "no_account": "아직 계정이 없으신가요?",
+      "signup_link": "무료 회원가입",
+      "toast": {
+        "empty_fields": "아이디와 비밀번호를 모두 입력해 주세요.",
+        "success": "성공적으로 로그인되었습니다!",
+        "failed": "로그인에 실패했습니다. 다시 시도해 주세요."
+      }
+    },
+    "signup": {
+      "title": "StockAuto 회원가입",
+      "subtitle": "간편하게 회원가입 후 퀀트 자동매매를 시작하세요",
+      "username": "아이디 (3글자 이상)",
+      "password": "비밀번호 (12글자 이상)",
+      "password_confirm": "비밀번호 확인",
+      "submitting": "가입 처리 중...",
+      "submit": "회원가입",
+      "have_account": "이미 계정이 있으신가요?",
+      "login_link": "로그인하기",
+      "toast": {
+        "empty_fields": "모든 빈칸을 채워주세요.",
+        "username_too_short": "아이디는 최소 3글자 이상이어야 합니다.",
+        "password_too_short": "비밀번호는 최소 12글자 이상이어야 합니다.",
+        "password_mismatch": "비밀번호가 서로 일치하지 않습니다.",
+        "success": "회원가입이 완료되었으며, 성공적으로 로그인되었습니다!",
+        "failed": "회원가입에 실패했습니다. 다시 시도해 주세요."
+      }
+    }
   }
 }

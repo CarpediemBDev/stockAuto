@@ -385,5 +385,41 @@
       "control_rule": "Controller rules",
       "control_rule_desc": "Continuously diagnoses QQQ moving-average alignment and, on entering a bear market, immediately cuts the RS slot's limit to 0% to mechanically block account-ruin risk."
     }
+  },
+  "auth": {
+    "login": {
+      "title": "StockAuto Login",
+      "subtitle": "Welcome to the autonomous quant trading platform",
+      "username": "Username",
+      "password": "Password",
+      "submitting": "Signing in...",
+      "submit": "Sign in",
+      "no_account": "Don't have an account yet?",
+      "signup_link": "Sign up free",
+      "toast": {
+        "empty_fields": "Please enter both your username and password.",
+        "success": "Signed in successfully!",
+        "failed": "Sign-in failed. Please try again."
+      }
+    },
+    "signup": {
+      "title": "StockAuto Sign Up",
+      "subtitle": "Sign up quickly and start automated quant trading",
+      "username": "Username (3+ characters)",
+      "password": "Password (12+ characters)",
+      "password_confirm": "Confirm password",
+      "submitting": "Creating account...",
+      "submit": "Sign up",
+      "have_account": "Already have an account?",
+      "login_link": "Sign in",
+      "toast": {
+        "empty_fields": "Please fill in all fields.",
+        "username_too_short": "The username must be at least 3 characters.",
+        "password_too_short": "The password must be at least 12 characters.",
+        "password_mismatch": "The passwords do not match.",
+        "success": "Your account was created and you are now signed in!",
+        "failed": "Sign-up failed. Please try again."
+      }
+    }
   }
 }
