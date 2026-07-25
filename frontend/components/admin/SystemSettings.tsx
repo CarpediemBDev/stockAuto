@@ -6,6 +6,7 @@ import useSWR from 'swr';
 import { adminAPI, fetcher } from '@/lib/api';
 import { toast } from 'sonner';
 import { getErrorMessage } from '@/lib/utils';
+import { useTranslations } from "next-intl";
 
 interface SystemSettingItem {
   key: string;
@@ -31,8 +32,8 @@ const SCANNER_RELAY_SETTING_KEY = 'enable_scanner_relay';
 // 설정이 늘어나면 이 맵 대신 목록 순회 렌더링으로 일반화할 것(i18n 라벨 전략 확정 후).
 const MANAGED_SETTING_KEYS = [GEMINI_NEWS_SETTING_KEY, SCANNER_RELAY_SETTING_KEY];
 const SETTING_TITLES: Record<string, string> = {
-  [GEMINI_NEWS_SETTING_KEY]: 'Gemini 뉴스 분석',
-  [SCANNER_RELAY_SETTING_KEY]: '스캐너 릴레이',
+  [GEMINI_NEWS_SETTING_KEY]: 'label_gemini',
+  [SCANNER_RELAY_SETTING_KEY]: 'label_relay',
 };
 
 function formatBool(value: SystemSettingItem['value']) {
@@ -46,12 +47,13 @@ interface SettingCardProps {
 }
 
 function SettingCard({ item, saving, onChange }: SettingCardProps) {
+  const t = useTranslations("admin_ui");
   return (
     <div className="bg-slate-950/50 border border-zinc-800/60 rounded-2xl p-5">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-bold text-slate-100">{SETTING_TITLES[item.key] || item.key}</h3>
+            <h3 className="text-sm font-bold text-slate-100">{SETTING_TITLES[item.key] ? t(`settings.${SETTING_TITLES[item.key]}`) : item.key}</h3>
             <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
               item.value
                 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
@@ -70,15 +72,15 @@ function SettingCard({ item, saving, onChange }: SettingCardProps) {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
             <div className="rounded-xl border border-zinc-800/60 bg-zinc-900/30 p-3">
-              <span className="block text-zinc-500 mb-1">기본값</span>
+              <span className="block text-zinc-500 mb-1">{t("settings.default_value")}</span>
               <strong className="text-slate-200">{formatBool(item.default)}</strong>
             </div>
             <div className="rounded-xl border border-zinc-800/60 bg-zinc-900/30 p-3">
-              <span className="block text-zinc-500 mb-1">런타임 반영</span>
+              <span className="block text-zinc-500 mb-1">{t("settings.runtime_applied")}</span>
               <strong className="text-slate-200">{item.is_runtime ? 'YES' : 'NO'}</strong>
             </div>
             <div className="rounded-xl border border-zinc-800/60 bg-zinc-900/30 p-3">
-              <span className="block text-zinc-500 mb-1">마지막 변경</span>
+              <span className="block text-zinc-500 mb-1">{t("settings.last_changed")}</span>
               <strong className="text-slate-200">
                 {item.updated_at ? new Date(item.updated_at).toLocaleString() : '-'}
               </strong>
@@ -105,6 +107,7 @@ function SettingCard({ item, saving, onChange }: SettingCardProps) {
 }
 
 export function SystemSettings() {
+  const t = useTranslations("admin_ui");
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const { data, isLoading, mutate } = useSWR<SystemSettingsResponse>(
     '/admin/system-settings',
@@ -122,9 +125,9 @@ export function SystemSettings() {
     try {
       await adminAPI.updateSystemSetting(key, { value });
       await mutate();
-      toast.success('시스템 설정이 저장되었습니다.');
+      toast.success(t("settings.save_success"));
     } catch (error) {
-      toast.error(`시스템 설정 저장 실패: ${getErrorMessage(error)}`);
+      toast.error(t("settings.save_failed", { error: getErrorMessage(error) }));
     } finally {
       setSavingKey(null);
     }
@@ -137,10 +140,10 @@ export function SystemSettings() {
           <div>
             <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
               <SlidersHorizontal size={18} className="text-emerald-400" />
-              시스템 전역 설정
+              {t("settings.title")}
             </h2>
             <p className="text-xs text-zinc-400 mt-1">
-              사용자별 투자 설정이 아닌 서비스 전체 런타임 정책만 관리합니다.
+              {t("settings.subtitle")}
             </p>
           </div>
           <span className="text-[10px] text-emerald-300 font-semibold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
@@ -167,7 +170,7 @@ export function SystemSettings() {
           <div className="flex items-center gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-5">
             <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
             <span className="text-sm font-bold text-red-300">
-              등록된 시스템 설정을 불러오지 못했습니다.
+              {t("settings.load_failed")}
             </span>
           </div>
         )}

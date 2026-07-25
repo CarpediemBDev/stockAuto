@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useSystemHealth } from '../../../hooks/useSystemHealth';
 import { Server, Database, Bot, RefreshCw, HardDrive, Cpu, ShieldAlert, CheckCircle2, XCircle } from 'lucide-react';
+import { useTranslations } from "next-intl";
 
 const StatusBadge = ({ status }: { status: string }) => {
   if (status === 'connected') {
@@ -61,6 +62,7 @@ const MetricCard = ({
 );
 
 export default function SystemHealthPage() {
+  const t = useTranslations("admin_ui");
   const [refreshInterval, setRefreshInterval] = useState<number>(0); // 0 means manual only
   const { core, bot, brokers, loadingCore, loadingBot, loadingBrokers, refetch } = useSystemHealth(refreshInterval);
 
@@ -195,14 +197,14 @@ export default function SystemHealthPage() {
             <MetricCard 
               title="Korea Investment (KIS)" 
               value={brokers?.kis ? <StatusBadge status={brokers.kis.status} /> : '...'}
-              subtitle={brokers ? (brokers.kis.latency_ms != null ? `${brokers.kis.latency_ms}ms API ping` : '미구현 (ping 미측정)') : ''}
+              subtitle={brokers ? (brokers.kis.latency_ms != null ? `${brokers.kis.latency_ms}ms API ping` : t("system_page.not_implemented")) : ''}
               warning={brokers?.kis.rate_limit_warning}
               icon={Server} 
             />
             <MetricCard 
               title="Toss Securities" 
               value={brokers?.toss ? <StatusBadge status={brokers.toss.status} /> : '...'}
-              subtitle={brokers ? (brokers.toss.latency_ms != null ? `${brokers.toss.latency_ms}ms API ping` : '미구현 (ping 미측정)') : ''}
+              subtitle={brokers ? (brokers.toss.latency_ms != null ? `${brokers.toss.latency_ms}ms API ping` : t("system_page.not_implemented")) : ''}
               warning={brokers?.toss.rate_limit_warning}
               icon={Server} 
             />

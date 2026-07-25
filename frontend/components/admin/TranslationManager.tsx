@@ -4,6 +4,7 @@ import { Globe, Plus, Search, Edit2, Trash2, Check, X, Loader2 } from 'lucide-re
 import { translationAPI } from '@/lib/api';
 import { getErrorMessage } from '@/lib/utils';
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 interface TranslationItem {
   id: number;
@@ -12,6 +13,7 @@ interface TranslationItem {
 }
 
 export function TranslationManager() {
+  const t = useTranslations("admin_ui");
   const [translations, setTranslations] = useState<TranslationItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -36,14 +38,14 @@ export function TranslationManager() {
       })
       .catch((error) => {
         if (active) {
-          toast.error(`사전 데이터 로드 실패: ${getErrorMessage(error)}`);
+          toast.error(t("translation.dict_load_failed", { error: getErrorMessage(error) }));
           setLoading(false);
         }
       });
     return () => {
       active = false;
     };
-  }, [refreshTrigger]);
+  }, [refreshTrigger, t]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,19 +53,19 @@ export function TranslationManager() {
     const nameClean = newNameKo.trim();
 
     if (!tickerClean || !nameClean) {
-      toast.warning("티커와 한국어 이름을 모두 입력해 주세요.");
+      toast.warning(t("translation.fill_both"));
       return;
     }
 
     setIsSubmitting(true);
     try {
       await translationAPI.save(tickerClean, nameClean);
-      toast.success(`${tickerClean} (${nameClean}) 등록 완료! (메모리 캐시 자동 핫싱크)`);
+      toast.success(t("translation.register_success", { ticker: tickerClean, name: nameClean }));
       setNewTicker("");
       setNewNameKo("");
       setRefreshTrigger(prev => prev + 1);
     } catch (error) {
-      toast.error(`번역 등록 실패: ${getErrorMessage(error)}`);
+      toast.error(t("translation.register_failed", { error: getErrorMessage(error) }));
     } finally {
       setIsSubmitting(false);
     }
@@ -77,37 +79,37 @@ export function TranslationManager() {
   const handleUpdate = async (id: number) => {
     const nameClean = editingName.trim();
     if (!nameClean) {
-      toast.warning("한국어 이름을 입력해 주세요.");
+      toast.warning(t("translation.fill_name"));
       return;
     }
 
     try {
       await translationAPI.update(id, nameClean);
-      toast.success("번역이 수정되었으며 백엔드 캐시가 즉시 동기화되었습니다!");
+      toast.success(t("translation.update_success"));
       setEditingId(null);
       setRefreshTrigger(prev => prev + 1);
     } catch (error) {
-      toast.error(`수정 실패: ${getErrorMessage(error)}`);
+      toast.error(t("translation.update_failed", { error: getErrorMessage(error) }));
     }
   };
 
   const handleDelete = (id: number, ticker: string) => {
-    toast(`"${ticker}" 번역 매핑을 정말 삭제하시겠습니까?`, {
-      description: "삭제 즉시 메모리 캐시에서도 분리됩니다.",
+    toast(t("translation.delete_confirm", { ticker }), {
+      description: t("translation.delete_confirm_desc"),
       action: {
-        label: "삭제",
+        label: t("translation.delete_label"),
         onClick: async () => {
           try {
             await translationAPI.delete(id);
-            toast.success(`${ticker} 번역 매핑이 제거되었습니다.`);
+            toast.success(t("translation.delete_success", { ticker }));
             setRefreshTrigger(prev => prev + 1);
           } catch (error) {
-            toast.error(`삭제 실패: ${getErrorMessage(error)}`);
+            toast.error(t("translation.delete_failed", { error: getErrorMessage(error) }));
           }
         }
       },
       cancel: {
-        label: "취소",
+        label: t("translation.cancel_label"),
         onClick: () => {}
       }
     });
@@ -125,7 +127,7 @@ export function TranslationManager() {
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <Plus size={18} className="text-blue-400" />
-            신규 주식 한글명 커스텀 등록
+            {t("translation.register_title")}
           </h2>
           <span className="text-[10px] text-zinc-400 font-semibold bg-zinc-800 px-2 py-0.5 rounded">
             AUTO SYNC ACTIVE
@@ -134,10 +136,10 @@ export function TranslationManager() {
         
         <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
           <div>
-            <label className="block text-xs text-zinc-400 font-semibold mb-1.5 uppercase tracking-wider">미국 주식 Ticker (영어)</label>
+            <label className="block text-xs text-zinc-400 font-semibold mb-1.5 uppercase tracking-wider">{t("translation.ticker_label")}</label>
             <input
               type="text"
-              placeholder="예: TSLA"
+              placeholder={t("translation.ticker_placeholder")}
               value={newTicker}
               onChange={(e) => setNewTicker(e.target.value)}
               className="w-full bg-[#0a0f1d] border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 tracking-widest font-mono uppercase"
@@ -145,10 +147,10 @@ export function TranslationManager() {
             />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 font-semibold mb-1.5 uppercase tracking-wider">한국어 치환 이름 (한글)</label>
+            <label className="block text-xs text-zinc-400 font-semibold mb-1.5 uppercase tracking-wider">{t("translation.name_label")}</label>
             <input
               type="text"
-              placeholder="예: 테슬라"
+              placeholder={t("translation.name_placeholder")}
               value={newNameKo}
               onChange={(e) => setNewNameKo(e.target.value)}
               className="w-full bg-[#0a0f1d] border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -160,7 +162,7 @@ export function TranslationManager() {
             disabled={isSubmitting}
             className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm py-2.5 px-4 rounded-xl shadow-lg shadow-indigo-950/20 hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-2"
           >
-            {isSubmitting ? <><Loader2 size={16} className="animate-spin" />등록 중...</> : "번역 사전에 즉시 등록"}
+            {isSubmitting ? <><Loader2 size={16} className="animate-spin" />{t("translation.submitting")}</> : t("translation.submit")}
           </button>
         </form>
       </div>
@@ -170,10 +172,10 @@ export function TranslationManager() {
           <div>
             <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
               <Globe size={18} className="text-emerald-400" />
-              주식 한글화 기준정보 데이터 목록
+              {t("translation.list_title")}
             </h2>
             <p className="text-xs text-zinc-400 mt-1">
-              전체 사전에 저장된 번역 데이터 수: <strong className="text-emerald-400">{translations.length}개</strong>
+              {t("translation.list_count_pre")}<strong className="text-emerald-400">{translations.length}{t("translation.list_count_suffix")}</strong>
             </p>
           </div>
           
@@ -181,7 +183,7 @@ export function TranslationManager() {
             <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
             <input
               type="text"
-              placeholder="티커 또는 한글명 검색..."
+              placeholder={t("translation.search_placeholder")}
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
@@ -196,12 +198,12 @@ export function TranslationManager() {
           {loading ? (
             <div className="py-20 flex flex-col items-center justify-center gap-3">
               <Loader2 size={36} className="animate-spin text-zinc-500" />
-              <span className="text-xs text-zinc-500 font-semibold">데이터베이스 로딩 중...</span>
+              <span className="text-xs text-zinc-500 font-semibold">{t("translation.db_loading")}</span>
             </div>
           ) : filteredTranslations.length === 0 ? (
             <div className="py-16 text-center">
               <Globe size={48} className="mx-auto text-zinc-700 mb-3" />
-              <p className="text-sm font-semibold text-zinc-500">검색 조건에 부합하는 데이터가 없습니다.</p>
+              <p className="text-sm font-semibold text-zinc-500">{t("translation.no_match")}</p>
             </div>
           ) : (() => {
             const totalPages = Math.ceil(filteredTranslations.length / itemsPerPage);
@@ -215,9 +217,9 @@ export function TranslationManager() {
                   <thead>
                     <tr className="text-left text-xs uppercase text-zinc-500 font-bold tracking-wider">
                       <th className="px-6 py-3.5">ID</th>
-                      <th className="px-6 py-3.5">티커 (심볼)</th>
-                      <th className="px-6 py-3.5">한글명</th>
-                      <th className="px-6 py-3.5 text-right">관리</th>
+                      <th className="px-6 py-3.5">{t("translation.th_ticker")}</th>
+                      <th className="px-6 py-3.5">{t("translation.th_name")}</th>
+                      <th className="px-6 py-3.5 text-right">{t("translation.th_manage")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800/40 text-sm">
@@ -246,13 +248,13 @@ export function TranslationManager() {
                           <div className="flex items-center justify-end gap-2">
                             {editingId === item.id ? (
                               <>
-                                <button onClick={() => handleUpdate(item.id)} className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20" title="저장"><Check size={16} /></button>
-                                <button onClick={() => setEditingId(null)} className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:bg-zinc-700" title="취소"><X size={16} /></button>
+                                <button onClick={() => handleUpdate(item.id)} className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20" title={t("translation.action_save")}><Check size={16} /></button>
+                                <button onClick={() => setEditingId(null)} className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:bg-zinc-700" title={t("translation.action_cancel")}><X size={16} /></button>
                               </>
                             ) : (
                               <>
-                                <button onClick={() => startEdit(item)} className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20" title="수정"><Edit2 size={16} /></button>
-                                <button onClick={() => handleDelete(item.id, item.ticker)} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20" title="삭제"><Trash2 size={16} /></button>
+                                <button onClick={() => startEdit(item)} className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20" title={t("translation.action_edit")}><Edit2 size={16} /></button>
+                                <button onClick={() => handleDelete(item.id, item.ticker)} className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20" title={t("translation.action_delete")}><Trash2 size={16} /></button>
                               </>
                             )}
                           </div>
