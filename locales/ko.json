@@ -3,8 +3,66 @@
     "orphan_order_recovered": "🛡️ *[미아 주문 복구 안내]*\n• *방향:* {side}\n• *종목:* {ticker}\n• *주문번호:* {broker_order_no}\n• *상태:* {status}\n주문 내역이 봇과 성공적으로 재연결되었습니다.",
     "order_reconciled": "🔄 *[주문 체결 상태 업데이트]*\n• *방향:* {side}\n• *종목:* {ticker}\n• *상태:* {status}\n• *체결량:* {cumulative}/{requested}{resolution_text}",
     "order_stale": "⚠️ *[주문 체결 확인 지연 안내]*\n• *방향:* {side}\n• *종목:* {ticker}\n• *상태:* {status}\n• *오류:* {error}\n\n주문 체결 여부가 최종 확인될 때까지 신규 매매 사이클이 일시 대기합니다.",
-    "regime_exit": "🔴 *[{strategy_name} 레짐 이탈 자동매도]*\n종목: {asset}\n• *체결 단가:* ${filled_price:,.2f}\n• *체결 수량:* {filled_qty}주\n• *매도 사유:* SMA{sma_period} 하향 이탈 {confirm_days}일 연속 확정 → 현금 대피\n\n{pnl_emoji} *실수익률:* {pnl_sign}{return_rate:.2f}%\n💰 *실현 실수익:* {pnl_sign}\n• *주문 번호:* {order_no}",
-    "order_recovery_ambiguous": "⚠️ *[미아 주문 자동 연결 보류]*\n• *방향:* {side}\n• *종목:* {ticker}\n• *후보 주문 수:* {candidate_count}건\n\n조건에 맞는 증권사 주문이 여러 건이라 어느 것과 연결할지 자동으로 판단할 수 없어 연결을 보류했습니다. 봇 가동 설정은 그대로 유지됩니다."
+    "regime_exit": "🔴 *[{strategy_name} 레짐 이탈 자동매도]*\n종목: {asset}\n• *체결 단가:* ${filled_price:,.2f}\n• *체결 수량:* {filled_qty}주\n• *매도 사유:* SMA{sma_period} 하향 이탈 {confirm_days}일 연속 확정 → 현금 대피\n\n{pnl_emoji} *실수익률:* {pnl_sign}{return_rate:.2f}%\n💰 *실현 실수익:* {pnl_sign}${realized_pnl_abs:,.2f}\n• *주문 번호:* {order_no}",
+    "order_recovery_ambiguous": "⚠️ *[미아 주문 자동 연결 보류]*\n• *방향:* {side}\n• *종목:* {ticker}\n• *후보 주문 수:* {candidate_count}건\n\n조건에 맞는 증권사 주문이 여러 건이라 어느 것과 연결할지 자동으로 판단할 수 없어 연결을 보류했습니다. 봇 가동 설정은 그대로 유지됩니다.",
+    "sell_filled": "🔴 *[{strategy_name} 자동매도 체결]*\n종목: {ticker} ({ticker_name})\n• *체결 단가:* `${filled_price:,.2f}` (약 {filled_price_krw:,.0f}원)\n• *체결 수량:* `{filled_qty}주`\n• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n• *매도 사유:* {sell_reason}\n\n{pnl_emoji} *실수익률:* `{pnl_sign}{return_rate:.2f}%`\n💰 *실현 실수익:* `{pnl_sign}${realized_pnl_abs:,.2f}`\n• *주문 번호:* `{order_no}`",
+    "buy_filled": "🟢 *[{strategy_name} 자동매수 체결]*\n종목: {ticker} ({name})\n\n• *체결 단가:* `${filled_price:,.2f}` (약 {filled_price_krw:,.0f}원)\n• *체결 수량:* `{filled_qty}주` (피라미딩 {next_stage}단계)\n• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n• *시장 국면:* `{sentiment}`\n• *주문 번호:* `{order_no}`",
+    "buy_skipped": "🟡 *[{strategy_name} 자동매수 보류 - {reason_title}]*\n종목: {ticker} ({name})\n\n• *현재가:* `${current_price:,.2f}` (약 {current_price_krw:,.0f}원)\n• *시도 금액:* `${proposed_value_usd:,.2f}`\n• *슬롯 예수금:* `${slot_cash_usd:,.2f}`\n\n{reason_desc}",
+    "order_pending_wait": "⚠️ *[미체결 주문 대기]*\n• *종목:* `{ticker}`\n• *구분:* `{side}`\n• *상태:* `{status_label} ({status})`\n• *주문번호:* `{order_no}`\n\n주문이 접수되었으나 아직 체결되지 않았습니다. 체결 완료 여부를 실시간으로 추적하는 중이며, 봇의 시작/정지 설정은 유지됩니다.",
+    "network_fault": "⚠️ *[시스템 접속 장애 알림]*\n\n증권사(KIS) 또는 외부 네트워크 통신에 일시적인 장애가 감지되었습니다.\n시스템은 자동으로 자가 복구를 시도하며, 연결이 정상화되는 즉시 매매를 재개합니다.",
+    "link_success": "🎉 *연동 성공!*\n\n`{username}`님 계정과 텔레그램 연동이 정상 완료되었습니다.\n이제 시스템 자동매매 매수/매도 알림이 실시간으로 발송됩니다.\n\n🤖 *사용 가능 원격 명령어:*\n• `/status` - 현재 시스템 동작 모드 및 포트폴리오 조회\n• `/run` - 자율 트레이딩 자동매매 루프 가동\n• `/stop` - 자율 트레이딩 자동매매 루프 정지",
+    "link_user_not_found": "⚠️ 존재하지 않는 사용자명입니다. 웹의 연동 시작 링크를 통해 다시 접속해 주세요.",
+    "not_linked_guide": "👋 *안녕하세요! StockAuto 트레이딩 브릿지입니다.*\n\n아직 본 계정의 텔레그램 연동이 완료되지 않았거나 비활성화 상태입니다.\n우리 주식 자동매매 웹 페이지의 **개인 투자 설정 ➔ Telegram Bridge** 탭에서 제공하는 **[🔗 텔레그램 연동 시작]** 버튼을 클릭하여 간편하게 연동을 마무리해 주세요!",
+    "help": "👋 *안녕하세요! StockAuto 트레이딩 브릿지입니다.*\n\n사용 가능한 명령어 목록:\n• `/status` - 현재 시스템 동작 모드, 계좌 잔고 및 보유 종목 조회\n• `/run` - 자율 트레이딩 자동매매 루프 가동\n• `/stop` - 자율 트레이딩 자동매매 루프 정지",
+    "already_running": "⚠️ *이미 자동매매 루프가 가동 중입니다.*",
+    "cannot_start_unresolved": "⚠️ *미해결 증권사 주문이 있어 시작할 수 없습니다.*\n자동 재조정이 완료될 때까지 기다려 주세요.",
+    "loop_started": "🟢 *자율 트레이딩 자동매매 루프를 가동했습니다.*",
+    "already_stopped": "⚠️ *이미 자동매매 루프가 정지되어 있습니다.*",
+    "loop_stopped": "🔴 *자율 트레이딩 자동매매 루프를 정지했습니다.*",
+    "unknown_command": "❓ *알 수 없는 명령어입니다.*\n사용 가능한 명령어: `/status`, `/run`, `/stop`",
+    "command_error": "⚠️ *명령어 실행 중 오류 발생:* {error}",
+    "daily_report": "📊 *[일일 자동매매 마감 리포트]*\n\n지난 24시간 동안의 자동매매 정산 결과를 안내해 드립니다.\n───────────────────\n• *총 매도 횟수:* `{total_trades}회`\n• *승리 횟수:* `{win_trades}회`\n• *일일 승률:* `{win_rate:.1f}%`\n• *일일 실현 수익금:* `${total_pnl:,.2f}`\n───────────────────\n더 상세한 누적 성적표 및 수익금 우상향 곡선은 웹 대시보드의 **[📊 성적표]** 메뉴에서 직접 확인하실 수 있습니다!",
+    "daily_report_manual": "📊 *[일일 매매 리포트 (수동 요청)]*\n\n요청하신 지난 24시간 거래 결과를 안내해 드립니다.\n───────────────────\n• *총 매도 횟수:* `{total_trades}회`\n• *승리 횟수:* `{win_trades}회`\n• *일일 승률:* `{win_rate:.1f}%`\n• *일일 실현 수익금:* `${total_pnl:,.2f}`\n───────────────────\n더 상세한 누적 성적표 및 수익금 우상향 곡선은 웹 대시보드의 **[📊 성적표]** 메뉴에서 직접 확인하실 수 있습니다!",
+    "no_recent_sells": "⚠️ 최근 24시간 동안 매도(수익 실현) 내역이 없어 리포트를 발송할 수 없습니다.",
+    "status": {
+      "header": "🤖 *StockAuto 실시간 시스템 상태*\n───────────────────\n• *트레이딩 루프 상태:* {status_text}\n• *동작 모드:* `{mode}` (Broker: {broker_name})\n• *원/달러 환율:* `1$ = {fx_rate:,.1f}원`\n\n📊 *계좌 자산 정보*\n• *총 자산:* `₩{total_asset:,.0f}` (약 `${total_asset_usd:,.2f}`)\n• *예수금:* `₩{cash_balance:,.0f}`\n• *주식 평가액:* `₩{stock_balance:,.0f}`\n• *실시간 누적 수익률:* `{profit_rate:+.2f}%`\n\n📈 *보유 포트폴리오 (총 {holdings_count}개)*\n",
+      "running": "🟢 *가동 중*",
+      "stopped": "🔴 *정지됨*",
+      "fallback_snapshot": "⚠️ KIS API 장애/지연 발생으로 최종 성공 자산 스냅샷 정보를 제공합니다.",
+      "fallback_no_snapshot": "⚠️ KIS API 장애/지연 발생 및 백업 스냅샷이 존재하지 않습니다.",
+      "no_holdings": "• 보유 중인 해외주식이 없습니다.",
+      "holding_line": "• *{ticker}* ({ticker_name})\n  └ 수량: `{quantity}주` | 평단: `${avg_price:,.2f}`\n",
+      "broker_na_simulated": "N/A (Simulated)",
+      "broker_none": "None"
+    },
+    "side": {
+      "buy": "매수",
+      "sell": "매도"
+    },
+    "order_status": {
+      "submitted": "제출됨(미체결)",
+      "filled": "체결됨",
+      "partial": "부분체결",
+      "rejected": "거부됨"
+    },
+    "sell_reason": {
+      "stop_loss": "동적 손절선 이탈 (손절 기준 -{stop_loss_pct:.2f}% 돌파 | 현재 수익률: {profit_rate:.2f}%)",
+      "trailing_stop": "동적 트레일링 스탑 이탈 (최고가 ${highest_price:.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)",
+      "rolling_box": "롤링 박스 스탑 이탈 (박스 하단 ${rolling_stop:.2f} 붕괴 | 현재 수익률: {profit_rate:.2f}%)",
+      "breach_confirmed_suffix": " [2회 연속 이탈 확정]",
+      "smart_exit": "스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)",
+      "signal_collapse": "강세 시그널 붕괴 ({current_score}점 도달)"
+    },
+    "buy_skip_reason": {
+      "budget_exceeded": {
+        "title": "예산 초과 - 최소 수량 미만",
+        "desc": "1주 가격이 슬롯 배정액을 초과합니다."
+      },
+      "insufficient_cash": {
+        "title": "현금 부족",
+        "desc": "이 주문을 체결하기에 슬롯 예수금이 부족합니다."
+      }
+    }
   },
   "ui": {
     "order_resolved": "주문이 최종 확인되었습니다. 봇 상태 정상 유지."
@@ -69,11 +127,86 @@
       "title": "사용자 관리 & 실시간 아레나",
       "sort_profit": "수익률 랭킹순",
       "loading": "사용자 데이터 로딩 중...",
-      "no_data": "가입된 사용자가 없습니다."
+      "no_data": "가입된 사용자가 없습니다.",
+      "toast_bot_started": "봇이 성공적으로 가동되었습니다.",
+      "toast_bot_paused": "봇이 일시정지 되었습니다.",
+      "toast_bot_toggle_failed": "봇 상태 변경에 실패했습니다: {error}",
+      "confirm_delete_title": "정말로 [{username}] 사용자를 영구 삭제하시겠습니까?",
+      "confirm_delete_desc": "🚨 경고: 이 작업은 되돌릴 수 없으며, 모든 잔고 및 거래 내역이 영구히 삭제됩니다.",
+      "confirm_delete_action": "영구 삭제",
+      "confirm_cancel": "취소",
+      "toast_delete_success": "[{username}] 계정이 안전하게 영구 삭제되었습니다.",
+      "toast_delete_failed": "사용자 삭제에 실패했습니다: {error}",
+      "col_rank": "순위",
+      "col_username": "사용자명",
+      "col_trade_mode": "투자 모드",
+      "col_strategy": "연동 전략",
+      "col_telegram": "텔레그램",
+      "col_bot_status": "봇 상태",
+      "col_return": "실시간 수익률",
+      "col_manage": "관리",
+      "staleness_min": "{n}분",
+      "staleness_sec": "{n}초",
+      "stale_basis": "{label} 전 기준",
+      "title_bot_stop": "봇 정지",
+      "title_bot_start": "봇 가동",
+      "title_delete_account": "계정 영구 삭제",
+      "pagination_summary": "총 {total}명 중 {from}-{to}명 표시",
+      "detail_title": "사용자 상세 프로필",
+      "section_account": "계정 및 가입 정보",
+      "field_signup_at": "가입 일시",
+      "section_strategy": "자동매매 및 전략 설정",
+      "field_current_mode": "현재 투자 모드",
+      "field_live_return": "실시간 봇 수익률",
+      "field_algo_strategy": "구동 알고리즘 전략",
+      "field_broker": "주요 증권사",
+      "broker_none_sim": "없음 (가상 시뮬레이터)",
+      "section_broker_api": "증권사 API 연동 내역",
+      "no_broker_api": "연동된 증권사 API 정보가 없습니다.",
+      "field_masked_account": "마스킹된 계좌번호",
+      "value_unregistered": "미등록",
+      "field_last_verified": "마지막 검증",
+      "section_telegram": "텔레그램 알림 정보",
+      "field_notify_status": "알림 상태",
+      "value_enabled_on": "활성화 (ON)",
+      "value_disabled_off": "비활성화 (OFF)",
+      "field_chat_id": "채팅방 ID",
+      "value_unset": "미설정",
+      "btn_bot_pause": "봇 일시 정지",
+      "btn_bot_start": "봇 거래 기동"
     }
+  },
+  "bot_signals": {
+    "radar_title": "실시간 최정예 돌파 레이더 (BREAKOUT RADAR WATCHLIST)",
+    "radar_empty": "실시간 감지된 돌파 레이더 종목이 없습니다. (RVOL ≥ 2.0 대기 중)"
+  },
+  "watchlist": {
+    "toast_added": "{ticker} ({name})이(가) 관심종목에 추가되었습니다.",
+    "toast_add_failed": "관심종목 추가 실패: {msg}",
+    "toast_removed": "관심종목에서 성공적으로 제거되었습니다.",
+    "toast_delete_failed": "삭제 실패: {msg}"
+  },
+  "error_boundary": {
+    "title": "화면을 표시하는 중 문제가 발생했습니다",
+    "body": "일시적인 오류일 수 있습니다. 다시 시도하거나 대시보드로 이동해 주세요.",
+    "error_code": "오류 코드: {digest}",
+    "retry": "다시 시도",
+    "dashboard": "대시보드"
+  },
+  "freshness": {
+    "min": "{n}분",
+    "sec": "{n}초"
+  },
+  "timezone": {
+    "local": "접속 기기 시간",
+    "local_with_abbr": "접속 기기 시간 ({abbr})",
+    "seoul": "한국 표준시 (KST)",
+    "new_york": "미동부 표준시 (EST)",
+    "utc": "협정 세계시 (UTC)"
   },
   "scanner": {
     "auth_checking": "인증 정보 확인 중...",
+    "manual_add_hint": "* 첫 단어는 티커로, 뒤의 단어는 이름으로 자동 처리됩니다 (예: <example>TSLA Tesla</example>)",
     "title": "마켓 스캐너",
     "subtitle": "봇의 실시간 정밀 스캔 결과와 나의 관심종목을 통합 관리합니다.",
     "tabs": {

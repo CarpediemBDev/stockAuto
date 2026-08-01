@@ -108,7 +108,8 @@ def test_telegram_daemon_uses_thread_pool_executor(monkeypatch):
                 "update_id": 100,
                 "message": {
                     "text": "/status",
-                    "chat": {"id": 12345}
+                    "chat": {"id": 12345},
+                    "from": {"language_code": "en-GB"}
                 }
             }
         ]
@@ -125,8 +126,9 @@ def test_telegram_daemon_uses_thread_pool_executor(monkeypatch):
     # 4. Run the polling loop
     telegram._poll_global_updates_loop()
 
-    # 5. Assert executor.submit was called with the message processing task
-    mock_executor.submit.assert_called_once_with(telegram._process_global_message, "12345", "/status")
+    # 5. Assert executor.submit was called with the message processing task,
+    #    forwarding the Telegram client language_code for pre-link i18n.
+    mock_executor.submit.assert_called_once_with(telegram._process_global_message, "12345", "/status", "en-GB")
 
 
 def test_telegram_global_message_closes_lookup_session_before_command(monkeypatch):

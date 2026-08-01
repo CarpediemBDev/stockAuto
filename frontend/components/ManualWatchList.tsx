@@ -219,7 +219,9 @@ const ManualWatchList = () => {
               )}
             </div>
             <p className="text-[11px] text-zinc-600">
-              * 첫 단어는 티커로, 뒤의 단어는 이름으로 자동 처리됩니다 (예: <span className="text-zinc-500 font-bold">TSLA Tesla</span>)
+              {t.rich("manual_add_hint", {
+                example: (chunks) => <span className="text-zinc-500 font-bold">{chunks}</span>,
+              })}
             </p>
           </div>
         </form>

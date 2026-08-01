@@ -58,10 +58,11 @@ export function krwToUsd(krwAmount: number, fxRate?: number | null): number {
 }
 
 /**
- * 원화 금액을 "1,234,567원" 형식 문자열로 포맷한다(소수점 절사).
+ * 원화 금액을 "₩1,234,567" 형식 문자열로 포맷한다(소수점 절사).
+ * 통화 기호(₩)는 로케일 중립이라 ko/en 어느 UI에서도 그대로 쓴다.
  */
 export function formatKrw(krwAmount: number): string {
-  return `${krwAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}원`;
+  return `₩${krwAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 /**

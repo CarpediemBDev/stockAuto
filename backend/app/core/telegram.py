@@ -8,6 +8,18 @@ from app.core.database import SessionLocal
 from app.core.models import UserSettings, Holding
 from app.bot.fx_cache import FXRateCache
 from app.core.logging import logger
+from app.core.i18n import I18n, resolve_user_language
+
+
+def _lang_from_telegram_code(code: str | None) -> str:
+    """텔레그램 update의 from.language_code를 앱 언어로 매핑한다.
+
+    user 매핑 전(미연동) 메시지 전용. UserSettings.language를 아직 못 읽으므로
+    텔레그램 클라이언트 언어에 의존하며, 영어권만 en으로 보고 그 외는 ko로 폴백한다.
+    """
+    if code and code.lower().startswith("en"):
+        return "en"
+    return "ko"
 
 # 글로벌 텔레그램 봇 단일 스레드 제어 변수
 _global_poll_thread = None
@@ -139,15 +151,16 @@ def _poll_global_updates_loop():
                             text = message.get("text", "").strip()
                             chat = message.get("chat", {})
                             msg_chat_id = str(chat.get("id"))
+                            tg_lang_code = message.get("from", {}).get("language_code")
 
                             if not text:
                                 continue
 
                             # ThreadPoolExecutor에 메시지 처리 위임하여 롱폴링 루프 및 메인 스레드 대기 방지
                             if _telegram_executor:
-                                _telegram_executor.submit(_process_global_message, msg_chat_id, text)
+                                _telegram_executor.submit(_process_global_message, msg_chat_id, text, tg_lang_code)
                             else:
-                                _process_global_message(msg_chat_id, text)
+                                _process_global_message(msg_chat_id, text, tg_lang_code)
                 elif res.status_code == 401 or res.status_code == 404:
                     logger.warning(f"[TelegramBot] Token invalid or unauthorized ({res.status_code}). Polling thread sleeping 30s...")
                     _global_stop_event.wait(30)
@@ -160,7 +173,7 @@ def _poll_global_updates_loop():
 
     logger.info("[TelegramBot] Global polling daemon stopped.")
 
-def _process_global_message(msg_chat_id: str, text: str):
+def _process_global_message(msg_chat_id: str, text: str, tg_lang_code: str | None = None):
     """
     글로벌 봇으로 들어온 메시지를 분석하여 알맞은 유저의 명령으로 분기하거나 자동 연동을 수행합니다.
     """
@@ -197,19 +210,15 @@ def _process_global_message(msg_chat_id: str, text: str):
                 u_settings.telegram_enabled = True
                 db.commit()
 
-                msg = (
-                    f"🎉 *연동 성공!*\n\n"
-                    f"`{user.username}`님 계정과 텔레그램 연동이 정상 완료되었습니다.\n"
-                    f"이제 시스템 자동매매 매수/매도 알림이 실시간으로 발송됩니다.\n\n"
-                    f"🤖 *사용 가능 원격 명령어:*\n"
-                    f"• `/status` - 현재 시스템 동작 모드 및 포트폴리오 조회\n"
-                    f"• `/run` - 자율 트레이딩 자동매매 루프 가동\n"
-                    f"• `/stop` - 자율 트레이딩 자동매매 루프 정지"
+                # 방금 연동된 계정이라 UserSettings.language를 SSOT로 사용한다.
+                direct_message = I18n.get_msg(
+                    resolve_user_language(db, user.id),
+                    "telegram.link_success",
+                    username=user.username,
                 )
-                direct_message = msg
                 logger.info(f"[TelegramBot] Successfully linked Chat ID {msg_chat_id} to User: {user.username}")
             else:
-                direct_message = "⚠️ 존재하지 않는 사용자명입니다. 웹의 연동 시작 링크를 통해 다시 접속해 주세요."
+                direct_message = I18n.get_msg(_lang_from_telegram_code(tg_lang_code), "telegram.link_user_not_found")
             return
 
         # 2. 일반 명령어 수신 시: 텔레그램 연동이 활성화(telegram_enabled=True)된 유저만 조회
@@ -219,14 +228,8 @@ def _process_global_message(msg_chat_id: str, text: str):
         ).first()
 
         if not db_settings:
-            # 미연동 또는 비활성화 유저의 명령어 수신 시 안내
-            msg = (
-                "👋 *안녕하세요! StockAuto 트레이딩 브릿지입니다.*\n\n"
-                "아직 본 계정의 텔레그램 연동이 완료되지 않았거나 비활성화 상태입니다.\n"
-                "우리 주식 자동매매 웹 페이지의 **개인 투자 설정 ➔ Telegram Bridge** 탭에서 제공하는 "
-                "**[🔗 텔레그램 연동 시작]** 버튼을 클릭하여 간편하게 연동을 마무리해 주세요!"
-            )
-            direct_message = msg
+            # 미연동 또는 비활성화 유저의 명령어 수신 시 안내 (user 매핑 전이라 텔레그램 언어 사용)
+            direct_message = I18n.get_msg(_lang_from_telegram_code(tg_lang_code), "telegram.not_linked_guide")
             return
 
         command_user_id = db_settings.user_id
@@ -251,6 +254,7 @@ def _process_command(user_id: int, text: str):
     cmd = parts[0].lower()
 
     db = SessionLocal()
+    lang = "ko"
 
     def close_db():
         nonlocal db
@@ -267,47 +271,43 @@ def _process_command(user_id: int, text: str):
         if not db_settings:
             return
 
+        lang = resolve_user_language(db, user_id)
+
         if cmd == "/start":
-            msg = (
-                f"👋 *안녕하세요! StockAuto 트레이딩 브릿지입니다.*\n\n"
-                f"사용 가능한 명령어 목록:\n"
-                f"• `/status` - 현재 시스템 동작 모드, 계좌 잔고 및 보유 종목 조회\n"
-                f"• `/run` - 자율 트레이딩 자동매매 루프 가동\n"
-                f"• `/stop` - 자율 트레이딩 자동매매 루프 정지"
-            )
-            send_reply(msg)
+            send_reply(I18n.get_msg(lang, "telegram.help"))
 
         elif cmd == "/run":
             if db_settings.is_running:
-                send_reply("⚠️ *이미 자동매매 루프가 가동 중입니다.*")
+                send_reply(I18n.get_msg(lang, "telegram.already_running"))
             else:
                 from app.bot.order_reconciler import has_unresolved_orders
 
                 if has_unresolved_orders(db, user_id):
-                    send_reply("⚠️ *미해결 증권사 주문이 있어 시작할 수 없습니다.*\n"
-                        "자동 재조정이 완료될 때까지 기다려 주세요.",
-                    )
+                    send_reply(I18n.get_msg(lang, "telegram.cannot_start_unresolved"))
                 else:
                     db_settings.is_running = True
                     db.commit()
-                    send_reply("🟢 *자율 트레이딩 자동매매 루프를 가동했습니다.*")
+                    send_reply(I18n.get_msg(lang, "telegram.loop_started"))
 
         elif cmd == "/stop":
             if not db_settings.is_running:
                 db.commit()
-                send_reply("⚠️ *이미 자동매매 루프가 정지되어 있습니다.*")
+                send_reply(I18n.get_msg(lang, "telegram.already_stopped"))
             else:
                 db_settings.is_running = False
                 db.commit()
-                send_reply("🔴 *자율 트레이딩 자동매매 루프를 정지했습니다.*")
+                send_reply(I18n.get_msg(lang, "telegram.loop_stopped"))
 
         elif cmd == "/status":
             mode = db_settings.trade_mode
-            broker_name = db_settings.broker_provider or ("N/A (Simulated)" if mode == "SIMULATED" else "None")
+            broker_name = db_settings.broker_provider or (
+                I18n.get_msg(lang, "telegram.status.broker_na_simulated") if mode == "SIMULATED"
+                else I18n.get_msg(lang, "telegram.status.broker_none")
+            )
 
             # 사용자 맞춤형 브로커 인스턴스 획득
             broker = get_broker_client(db_settings)
-            status_text = "🟢 *가동 중*" if db_settings.is_running else "🔴 *정지됨*"
+            status_text = I18n.get_msg(lang, "telegram.status.running" if db_settings.is_running else "telegram.status.stopped")
             close_db()
             fallback_warning = ""
             try:
@@ -331,10 +331,10 @@ def _process_command(user_id: int, text: str):
                     cash_balance = snapshot.cash_balance or 0.0
                     stock_balance = snapshot.stock_balance or 0.0
                     profit_rate = snapshot.profit_rate or 0.0
-                    fallback_warning = "⚠️ KIS API 장애/지연 발생으로 최종 성공 자산 스냅샷 정보를 제공합니다."
+                    fallback_warning = I18n.get_msg(lang, "telegram.status.fallback_snapshot")
                 else:
                     total_asset, cash_balance, stock_balance, profit_rate = 0.0, 0.0, 0.0, 0.0
-                    fallback_warning = "⚠️ KIS API 장애/지연 발생 및 백업 스냅샷이 존재하지 않습니다."
+                    fallback_warning = I18n.get_msg(lang, "telegram.status.fallback_no_snapshot")
 
             fx_rate = FXRateCache.get_rate()
             holdings_db = SessionLocal()
@@ -343,34 +343,39 @@ def _process_command(user_id: int, text: str):
             finally:
                 holdings_db.close()
 
-            msg = (
-                f"🤖 *StockAuto 실시간 시스템 상태*\n"
-                f"───────────────────\n"
-                f"• *트레이딩 루프 상태:* {status_text}\n"
-                f"• *동작 모드:* `{mode}` (Broker: {broker_name})\n"
-                f"• *원/달러 환율:* `1$ = {fx_rate:,.1f}원`\n\n"
-                f"📊 *계좌 자산 정보*\n"
-                f"• *총 자산:* `₩{total_asset:,.0f}` (약 `${total_asset/fx_rate:,.2f}`)\n"
-                f"• *예수금:* `₩{cash_balance:,.0f}`\n"
-                f"• *주식 평가액:* `₩{stock_balance:,.0f}`\n"
-                f"• *실시간 누적 수익률:* `{profit_rate:+.2f}%`\n\n"
-                f"📈 *보유 포트폴리오 (총 {len(holdings)}개)*\n"
+            msg = I18n.get_msg(
+                lang,
+                "telegram.status.header",
+                status_text=status_text,
+                mode=mode,
+                broker_name=broker_name,
+                fx_rate=fx_rate,
+                total_asset=total_asset,
+                total_asset_usd=total_asset / fx_rate,
+                cash_balance=cash_balance,
+                stock_balance=stock_balance,
+                profit_rate=profit_rate,
+                holdings_count=len(holdings),
             )
             if fallback_warning:
                 msg = f"{fallback_warning}\n\n" + msg
 
             if not holdings:
-                msg += "• 보유 중인 해외주식이 없습니다."
+                msg += I18n.get_msg(lang, "telegram.status.no_holdings")
             else:
                 for h in holdings:
-                    msg += (
-                        f"• *{h.ticker}* ({h.ticker_name})\n"
-                        f"  └ 수량: `{h.quantity}주` | 평단: `${h.avg_price:,.2f}`\n"
+                    msg += I18n.get_msg(
+                        lang,
+                        "telegram.status.holding_line",
+                        ticker=h.ticker,
+                        ticker_name=h.ticker_name,
+                        quantity=h.quantity,
+                        avg_price=h.avg_price,
                     )
             send_reply(msg)
 
         else:
-            send_reply("❓ *알 수 없는 명령어입니다.*\n사용 가능한 명령어: `/status`, `/run`, `/stop`")
+            send_reply(I18n.get_msg(lang, "telegram.unknown_command"))
 
     except Exception as e:
         logger.exception(f"[TelegramBot User {user_id}] Command execution error")
@@ -379,7 +384,7 @@ def _process_command(user_id: int, text: str):
                 db.rollback()  # 💡 예외 발생 시 트랜잭션 롤백 및 커넥션 오염 방지
             except Exception:
                 pass
-        send_reply(f"⚠️ *명령어 실행 중 오류 발생:* {str(e)}")
+        send_reply(I18n.get_msg(lang, "telegram.command_error", error=str(e)))
     finally:
         close_db()
 
@@ -416,16 +421,13 @@ def send_daily_report_to_all_users_sync() -> dict:
             total_pnl = sum(float(s.realized_pnl) for s in sells)
             win_rate = (win_trades / total_trades) * 100
 
-            msg = (
-                f"📊 *[일일 자동매매 마감 리포트]*\n\n"
-                f"지난 24시간 동안의 자동매매 정산 결과를 안내해 드립니다.\n"
-                f"───────────────────\n"
-                f"• *총 매도 횟수:* `{total_trades}회`\n"
-                f"• *승리 횟수:* `{win_trades}회`\n"
-                f"• *일일 승률:* `{win_rate:.1f}%`\n"
-                f"• *일일 실현 수익금:* `${total_pnl:,.2f}`\n"
-                f"───────────────────\n"
-                f"더 상세한 누적 성적표 및 수익금 우상향 곡선은 웹 대시보드의 **[📊 성적표]** 메뉴에서 직접 확인하실 수 있습니다!"
+            msg = I18n.get_msg(
+                resolve_user_language(db, u.user_id),
+                "telegram.daily_report",
+                total_trades=total_trades,
+                win_trades=win_trades,
+                win_rate=win_rate,
+                total_pnl=total_pnl,
             )
 
             send_message_sync(u.user_id, msg)
@@ -456,8 +458,10 @@ def send_daily_report_to_user_sync(user_id: int):
             TradeLog.realized_pnl.isnot(None)
         ).all()
 
+        lang = resolve_user_language(db, user_id)
+
         if not sells:
-            send_message_sync(user_id, "⚠️ 최근 24시간 동안 매도(수익 실현) 내역이 없어 리포트를 발송할 수 없습니다.")
+            send_message_sync(user_id, I18n.get_msg(lang, "telegram.no_recent_sells"))
             return
 
         total_trades = len(sells)
@@ -465,16 +469,13 @@ def send_daily_report_to_user_sync(user_id: int):
         total_pnl = sum(float(s.realized_pnl) for s in sells)
         win_rate = (win_trades / total_trades) * 100
 
-        msg = (
-            f"📊 *[일일 매매 리포트 (수동 요청)]*\n\n"
-            f"요청하신 지난 24시간 거래 결과를 안내해 드립니다.\n"
-            f"───────────────────\n"
-            f"• *총 매도 횟수:* `{total_trades}회`\n"
-            f"• *승리 횟수:* `{win_trades}회`\n"
-            f"• *일일 승률:* `{win_rate:.1f}%`\n"
-            f"• *일일 실현 수익금:* `${total_pnl:,.2f}`\n"
-            f"───────────────────\n"
-            f"더 상세한 누적 성적표 및 수익금 우상향 곡선은 웹 대시보드의 **[📊 성적표]** 메뉴에서 직접 확인하실 수 있습니다!"
+        msg = I18n.get_msg(
+            lang,
+            "telegram.daily_report_manual",
+            total_trades=total_trades,
+            win_trades=win_trades,
+            win_rate=win_rate,
+            total_pnl=total_pnl,
         )
 
         send_message_sync(user_id, msg)

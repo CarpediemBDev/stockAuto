@@ -222,3 +222,68 @@ class TestDiscoveryNotificationLocalized:
         assert marker in result
         assert "TSLA" in result
         assert "3" in result
+
+
+class TestNoHardcodedKoreanInFrontend:
+    """프론트 .ts/.tsx의 주석 밖 한글 리터럴을 스캔해 하드코딩 재발을 차단한다.
+
+    TestFrontendConsumedKeysExist는 useTranslations로 '소비된 키'만 검증하므로,
+    t()를 아예 쓰지 않고 한글을 그대로 박은 컴포넌트(UserManagement가 스테이지 8을
+    빠져나간 사각지대)는 잡지 못한다. 이 테스트는 그 구멍을 메운다.
+
+    의도적으로 한글을 남긴 곳은 ALLOWLIST로 명시 관리한다. 값이 None이면 파일 전체
+    허용, set이면 그 부분문자열을 포함한 줄만 허용한다. 향후 해당 문구를 실제로
+    다국어화하면 ALLOWLIST에서 제거해야 새 하드코딩을 가리지 않는다.
+    """
+
+    FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
+    HANGUL = re.compile(r"[가-힣]")
+    BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+    LINE_COMMENT = re.compile(r"(?<!:)//.*$")  # ':' 뒤 //는 URL이라 보존
+
+    # 의도적 잔존분(감사·설계 결정). None=파일 전체 허용, set=부분문자열 허용.
+    ALLOWLIST: dict[str, set[str] | None] = {
+        # 루트 레이아웃을 대체해 NextIntlClientProvider 밖에서 렌더 → 인라인 ko/en 딕셔너리(설계상 불가피)
+        "app/global-error.tsx": None,
+        # SEO 메타데이터(정적) — 낮은 우선순위로 보류
+        "app/layout.tsx": None,
+        # 순수 모듈 함수라 useTranslations 불가 → 호출부 리팩터 필요(보류)
+        "lib/utils.ts": {"알 수 없는 오류가 발생했습니다."},
+        "lib/api.ts": {"인증 갱신 응답 형식이 올바르지 않습니다."},
+        # 언어 전환 확인(대상 언어로 표기하는 이중언어) + 언어 셀렉터 자기명명
+        "components/NavBar.tsx": {"한국어로 변경되었습니다.", "한국어 (KR)"},
+    }
+
+    SKIP_DIRS = {"node_modules", ".next", "e2e", "coverage", "test-results", "playwright-report"}
+    SKIP_FILES = {"playwright.config.ts", "next.config.ts", "i18n.ts"}
+
+    def _violations(self) -> list[str]:
+        hits: list[str] = []
+        for path in self.FRONTEND.rglob("*.ts*"):
+            if path.suffix not in (".ts", ".tsx"):
+                continue
+            if set(path.parts) & self.SKIP_DIRS:
+                continue
+            if path.name in self.SKIP_FILES or path.name.endswith((".spec.ts", ".test.ts", ".test.tsx")):
+                continue
+            rel = path.relative_to(self.FRONTEND).as_posix()
+            allowed = self.ALLOWLIST.get(rel, "__MISSING__")
+            if allowed is None:
+                continue  # 파일 전체 허용
+            source = self.BLOCK_COMMENT.sub("", path.read_text(encoding="utf-8", errors="ignore"))
+            for i, raw in enumerate(source.splitlines(), 1):
+                line = self.LINE_COMMENT.sub("", raw)
+                if not self.HANGUL.search(line):
+                    continue
+                if allowed != "__MISSING__" and any(sub in line for sub in allowed):
+                    continue
+                hits.append(f"{rel}:{i}: {line.strip()[:100]}")
+        return hits
+
+    def test_no_unallowlisted_hardcoded_korean(self):
+        violations = self._violations()
+        assert not violations, (
+            "t() 없이 하드코딩된 한글 문구를 발견했습니다. 다국어화하거나, 의도적이라면 "
+            "TestNoHardcodedKoreanInFrontend.ALLOWLIST에 사유와 함께 등록하세요:\n"
+            + "\n".join(violations)
+        )

@@ -61,6 +61,7 @@ export function UserManagement() {
   const { data: swrData, isLoading, mutate } = useSWR('/admin/users', fetcher, { refreshInterval: pollInterval(15000) });
   const usersList: ManagedUser[] = Array.isArray(swrData) ? swrData : (swrData?.data || []);
   const loading = isLoading;
+  const t = useTranslations('admin.users');
 
   const [actionUserId, setActionUserId] = useState<number | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
@@ -80,7 +81,9 @@ export function UserManagement() {
     if (Number.isNaN(latestTs)) return null;
     const ageSec = Math.floor((now + serverOffsetMs - latestTs) / 1000);
     if (ageSec < 90) return { isStale: false, label: "" };
-    const label = ageSec >= 60 ? `${Math.floor(ageSec / 60)}분` : `${ageSec}초`;
+    const label = ageSec >= 60
+      ? t('staleness_min', { n: Math.floor(ageSec / 60) })
+      : t('staleness_sec', { n: ageSec });
     return { isStale: true, label };
   };
 
@@ -99,36 +102,36 @@ export function UserManagement() {
     setActionUserId(userId);
     try {
       const res = await adminAPI.toggleUserBot(userId);
-      toast.success(res.data.is_running ? "봇이 성공적으로 가동되었습니다." : "봇이 일시정지 되었습니다.");
+      toast.success(res.data.is_running ? t('toast_bot_started') : t('toast_bot_paused'));
       mutate();
     } catch (error) {
-      toast.error(`봇 상태 변경에 실패했습니다: ${getErrorMessage(error)}`);
+      toast.error(t('toast_bot_toggle_failed', { error: getErrorMessage(error) }));
     } finally {
       setActionUserId(null);
     }
   };
 
   const handleDeleteUser = (userId: number, username: string) => {
-    toast(`정말로 [${username}] 사용자를 영구 삭제하시겠습니까?`, {
-      description: "🚨 경고: 이 작업은 되돌릴 수 없으며, 모든 잔고 및 거래 내역이 영구히 삭제됩니다.",
+    toast(t('confirm_delete_title', { username }), {
+      description: t('confirm_delete_desc'),
       action: {
-        label: "영구 삭제",
+        label: t('confirm_delete_action'),
         onClick: async () => {
           setActionUserId(userId);
           try {
             await adminAPI.deleteUser(userId);
-            toast.success(`[${username}] 계정이 안전하게 영구 삭제되었습니다.`);
+            toast.success(t('toast_delete_success', { username }));
             setSelectedUserId(null); // Close drawer on success
             mutate();
           } catch (error) {
-            toast.error(`사용자 삭제에 실패했습니다: ${getErrorMessage(error)}`);
+            toast.error(t('toast_delete_failed', { error: getErrorMessage(error) }));
           } finally {
             setActionUserId(null);
           }
         }
       },
       cancel: {
-        label: "취소",
+        label: t('confirm_cancel'),
         onClick: () => {}
       }
     });
@@ -205,8 +208,6 @@ export function UserManagement() {
 
 
 
-  const t = useTranslations('admin.users');
-
   return (
     <div className="space-y-6">
 
@@ -255,14 +256,14 @@ export function UserManagement() {
             <table className="w-full divide-y divide-zinc-800/60">
               <thead>
                 <tr className="text-left text-xs uppercase text-zinc-500 font-bold tracking-wider whitespace-nowrap">
-                  <th className="px-2 md:px-3 py-3 text-center w-10">순위</th>
-                  <th className="px-2 md:px-3 py-3">사용자명</th>
-                  <th className="px-2 md:px-3 py-3">투자 모드</th>
-                  <th className="px-2 md:px-3 py-3">연동 전략</th>
-                  <th className="px-2 md:px-3 py-3">텔레그램</th>
-                  <th className="px-2 md:px-3 py-3">봇 상태</th>
-                  <th className="px-2 md:px-3 py-3">실시간 수익률</th>
-                  <th className="px-2 md:px-3 py-3 text-right">관리</th>
+                  <th className="px-2 md:px-3 py-3 text-center w-10">{t('col_rank')}</th>
+                  <th className="px-2 md:px-3 py-3">{t('col_username')}</th>
+                  <th className="px-2 md:px-3 py-3">{t('col_trade_mode')}</th>
+                  <th className="px-2 md:px-3 py-3">{t('col_strategy')}</th>
+                  <th className="px-2 md:px-3 py-3">{t('col_telegram')}</th>
+                  <th className="px-2 md:px-3 py-3">{t('col_bot_status')}</th>
+                  <th className="px-2 md:px-3 py-3">{t('col_return')}</th>
+                  <th className="px-2 md:px-3 py-3 text-right">{t('col_manage')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/40 text-[15px] whitespace-nowrap">
@@ -330,7 +331,7 @@ export function UserManagement() {
                             const stale = snapshotStaleness(user);
                             return stale?.isStale ? (
                               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border tracking-wide bg-zinc-500/15 text-zinc-400 border-zinc-500/30 whitespace-nowrap">
-                                ⚠️ {stale.label} 전 기준
+                                ⚠️ {t('stale_basis', { label: stale.label })}
                               </span>
                             ) : null;
                           })()}
@@ -346,7 +347,7 @@ export function UserManagement() {
                                 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
                                 : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
                             }`}
-                            title={user.is_running ? "봇 정지" : "봇 가동"}
+                            title={user.is_running ? t('title_bot_stop') : t('title_bot_start')}
                           >
                             {actionUserId === user.id ? <Loader2 size={16} className="animate-spin" /> : user.is_running ? <Square size={16} /> : <Play size={16} />}
                           </button>
@@ -354,7 +355,7 @@ export function UserManagement() {
                             onClick={(e) => { e.stopPropagation(); handleDeleteUser(user.id, user.username); }}
                             disabled={actionUserId === user.id || user.username === 'admin'}
                             className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                            title="계정 영구 삭제"
+                            title={t('title_delete_account')}
                           >
                             <Trash2 size={16} />
                           </button>
@@ -372,8 +373,11 @@ export function UserManagement() {
         {!loading && sortedUsers.length > 0 && totalPages > 1 && (
           <div className="flex items-center justify-between border-t border-zinc-800/60 pt-4 px-2">
             <span className="text-xs text-zinc-500 font-semibold">
-              총 {sortedUsers.length}명 중 {(currentPage - 1) * itemsPerPage + 1}-
-              {Math.min(currentPage * itemsPerPage, sortedUsers.length)}명 표시
+              {t('pagination_summary', {
+                total: sortedUsers.length,
+                from: (currentPage - 1) * itemsPerPage + 1,
+                to: Math.min(currentPage * itemsPerPage, sortedUsers.length),
+              })}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -437,7 +441,7 @@ export function UserManagement() {
                     <Users size={20} className="text-blue-400" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-slate-100 font-sans">사용자 상세 프로필</h3>
+                    <h3 className="text-base font-bold text-slate-100 font-sans">{t('detail_title')}</h3>
                     <p className="text-[10px] text-zinc-500 font-mono">ID: {selectedUser?.id}</p>
                   </div>
                 </div>
@@ -454,7 +458,7 @@ export function UserManagement() {
                 {/* User Header Info Card */}
                 <div className="bg-[#0b0e1a]/40 border border-zinc-800/40 rounded-2xl p-4 flex items-center justify-between">
                   <div className="space-y-1">
-                    <div className="text-xs text-zinc-500 font-semibold">사용자명</div>
+                    <div className="text-xs text-zinc-500 font-semibold">{t('col_username')}</div>
                     <div className="text-lg font-bold text-slate-200">{selectedUser.username}</div>
                   </div>
                   <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold flex items-center gap-1 ${
@@ -471,11 +475,11 @@ export function UserManagement() {
                 <div className="space-y-3">
                   <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
                     <Calendar size={14} className="text-zinc-500" />
-                    계정 및 가입 정보
+                    {t('section_account')}
                   </h4>
                   <div className="bg-[#0b0e1a]/20 border border-zinc-800/50 rounded-2xl p-4 space-y-3.5 text-sm">
                     <div className="flex justify-between items-center">
-                      <span className="text-zinc-500 text-xs font-semibold">가입 일시</span>
+                      <span className="text-zinc-500 text-xs font-semibold">{t('field_signup_at')}</span>
                       <span className="text-slate-300 font-mono text-xs font-semibold">
                         {selectedUser.created_at ? new Date(selectedUser.created_at).toLocaleString('ko-KR', {
                           year: 'numeric',
@@ -493,11 +497,11 @@ export function UserManagement() {
                 <div className="space-y-3">
                   <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
                     <Bot size={14} className="text-zinc-500" />
-                    자동매매 및 전략 설정
+                    {t('section_strategy')}
                   </h4>
                   <div className="bg-[#0b0e1a]/20 border border-zinc-800/50 rounded-2xl p-4 space-y-3.5 text-sm">
                     <div className="flex justify-between items-center">
-                      <span className="text-zinc-500 text-xs font-semibold">현재 투자 모드</span>
+                      <span className="text-zinc-500 text-xs font-semibold">{t('field_current_mode')}</span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                         selectedUser.trade_mode === 'REAL' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
                         selectedUser.trade_mode === 'MOCK' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
@@ -507,23 +511,23 @@ export function UserManagement() {
                       </span>
                     </div>
                     <div className="flex justify-between items-center font-sans">
-                      <span className="text-zinc-500 text-xs font-semibold">실시간 봇 수익률</span>
+                      <span className="text-zinc-500 text-xs font-semibold">{t('field_live_return')}</span>
                       {getReturnBadge(selectedUser.profit_rate)}
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-zinc-500 text-xs font-semibold">구동 알고리즘 전략</span>
+                      <span className="text-zinc-500 text-xs font-semibold">{t('field_algo_strategy')}</span>
                       <span className="text-slate-300 font-bold bg-zinc-800/50 px-2 py-0.5 rounded text-[10px] border border-zinc-700/50">
                         {selectedUser.strategy_name || selectedUser.strategy_type?.replace(/_/g, ' ')}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-zinc-500 text-xs font-semibold">주요 증권사</span>
+                      <span className="text-zinc-500 text-xs font-semibold">{t('field_broker')}</span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                         selectedUser.trade_mode === 'SIMULATED'
                           ? 'bg-zinc-800 text-zinc-500 border border-zinc-700/30'
                           : 'text-slate-300 bg-zinc-800/50 border border-zinc-700/50'
                       }`}>
-                        {selectedUser.trade_mode === 'SIMULATED' ? '없음 (가상 시뮬레이터)' : selectedUser.broker_provider}
+                        {selectedUser.trade_mode === 'SIMULATED' ? t('broker_none_sim') : selectedUser.broker_provider}
                       </span>
                     </div>
                   </div>
@@ -533,12 +537,12 @@ export function UserManagement() {
                 <div className="space-y-3">
                   <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
                     <Key size={14} className="text-zinc-500" />
-                    증권사 API 연동 내역
+                    {t('section_broker_api')}
                   </h4>
                   <div className="space-y-2">
                     {!selectedUser.credentials || selectedUser.credentials.length === 0 ? (
                       <div className="bg-[#0b0e1a]/10 border border-zinc-800/30 rounded-2xl p-4 text-center text-xs text-zinc-500 font-semibold">
-                        연동된 증권사 API 정보가 없습니다.
+                        {t('no_broker_api')}
                       </div>
                     ) : (
                       selectedUser.credentials.map((cred, idx) => (
@@ -555,12 +559,12 @@ export function UserManagement() {
                             </span>
                           </div>
                           <div className="flex justify-between items-center text-xs">
-                            <span className="text-zinc-500 font-semibold">마스킹된 계좌번호</span>
-                            <span className="font-mono text-slate-300 font-bold">{cred.account_no_masked || '미등록'}</span>
+                            <span className="text-zinc-500 font-semibold">{t('field_masked_account')}</span>
+                            <span className="font-mono text-slate-300 font-bold">{cred.account_no_masked || t('value_unregistered')}</span>
                           </div>
                           {cred.verified_at && (
                             <div className="flex justify-between items-center text-[10px] text-zinc-500">
-                              <span>마지막 검증</span>
+                              <span>{t('field_last_verified')}</span>
                               <span className="font-mono">
                                 {new Date(cred.verified_at).toLocaleDateString('ko-KR')}
                               </span>
@@ -581,21 +585,21 @@ export function UserManagement() {
                 <div className="space-y-3">
                   <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
                     <Send size={14} className="text-zinc-500" />
-                    텔레그램 알림 정보
+                    {t('section_telegram')}
                   </h4>
                   <div className="bg-[#0b0e1a]/20 border border-zinc-800/50 rounded-2xl p-4 space-y-3.5 text-sm">
                     <div className="flex justify-between items-center">
-                      <span className="text-zinc-500 text-xs font-semibold">알림 상태</span>
+                      <span className="text-zinc-500 text-xs font-semibold">{t('field_notify_status')}</span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                         selectedUser.telegram_enabled ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-zinc-800 text-zinc-500'
                       }`}>
-                        {selectedUser.telegram_enabled ? '활성화 (ON)' : '비활성화 (OFF)'}
+                        {selectedUser.telegram_enabled ? t('value_enabled_on') : t('value_disabled_off')}
                       </span>
                     </div>
                     {selectedUser.telegram_enabled && (
                       <div className="flex justify-between items-center text-xs">
-                        <span className="text-zinc-500 font-semibold">채팅방 ID</span>
-                        <span className="font-mono text-slate-300 font-bold">{selectedUser.telegram_chat_id || '미설정'}</span>
+                        <span className="text-zinc-500 font-semibold">{t('field_chat_id')}</span>
+                        <span className="font-mono text-slate-300 font-bold">{selectedUser.telegram_chat_id || t('value_unset')}</span>
                       </div>
                     )}
                   </div>
@@ -617,11 +621,11 @@ export function UserManagement() {
                     <Loader2 size={16} className="animate-spin" />
                   ) : selectedUser.is_running ? (
                     <>
-                      <Square size={16} /> 봇 일시 정지
+                      <Square size={16} /> {t('btn_bot_pause')}
                     </>
                   ) : (
                     <>
-                      <Play size={16} /> 봇 거래 기동
+                      <Play size={16} /> {t('btn_bot_start')}
                     </>
                   )}
                 </button>
@@ -630,7 +634,7 @@ export function UserManagement() {
                   onClick={() => handleDeleteUser(selectedUser.id, selectedUser.username)}
                   disabled={actionUserId === selectedUser.id || selectedUser.username === 'admin'}
                   className="px-4 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 disabled:opacity-30 disabled:cursor-not-allowed text-xs font-bold transition-all duration-200 cursor-pointer"
-                  title="계정 영구 삭제"
+                  title={t('title_delete_account')}
                 >
                   <Trash2 size={16} />
                 </button>
