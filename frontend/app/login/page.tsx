@@ -71,7 +71,8 @@ export default function LoginPage() {
             <label className="text-xs font-semibold text-zinc-300 block">{t("login.username")}</label>
             <input
               type="text"
-              placeholder="Username"
+              name="username"
+              placeholder={t("login.username")}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               disabled={isLoading}
@@ -83,7 +84,8 @@ export default function LoginPage() {
             <label className="text-xs font-semibold text-zinc-300 block">{t("login.password")}</label>
             <input
               type="password"
-              placeholder="Password"
+              name="password"
+              placeholder={t("login.password")}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={isLoading}

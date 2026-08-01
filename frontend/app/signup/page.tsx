@@ -86,7 +86,8 @@ export default function SignupPage() {
             <label className="text-xs font-semibold text-zinc-300 block">{t("signup.username")}</label>
             <input
               type="text"
-              placeholder="Username"
+              name="username"
+              placeholder={t("signup.username")}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               disabled={isLoading}
@@ -98,7 +99,8 @@ export default function SignupPage() {
             <label className="text-xs font-semibold text-zinc-300 block">{t("signup.password")}</label>
             <input
               type="password"
-              placeholder="Password"
+              name="password"
+              placeholder={t("signup.password")}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={isLoading}
@@ -110,7 +112,8 @@ export default function SignupPage() {
             <label className="text-xs font-semibold text-zinc-300 block">{t("signup.password_confirm")}</label>
             <input
               type="password"
-              placeholder="Confirm Password"
+              name="passwordConfirm"
+              placeholder={t("signup.password_confirm")}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               disabled={isLoading}

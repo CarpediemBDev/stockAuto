@@ -20,8 +20,8 @@ test("anonymous root visits are redirected to the login screen", async ({ page }
 
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByRole("heading", { name: "StockAuto 로그인" })).toBeVisible();
-  await expect(page.getByPlaceholder("Username")).toBeVisible();
-  await expect(page.getByPlaceholder("Password")).toBeVisible();
+  await expect(page.locator('input[name="username"]')).toBeVisible();
+  await expect(page.locator('input[name="password"]')).toBeVisible();
 });
 
 test("login and signup pages navigate without backend calls", async ({ page }) => {
@@ -30,7 +30,7 @@ test("login and signup pages navigate without backend calls", async ({ page }) =
   await page.getByRole("link", { name: "무료 회원가입" }).click();
   await expect(page).toHaveURL(/\/signup$/);
   await expect(page.getByRole("heading", { name: "StockAuto 회원가입" })).toBeVisible();
-  await expect(page.getByPlaceholder("Confirm Password")).toBeVisible();
+  await expect(page.locator('input[name="passwordConfirm"]')).toBeVisible();
 
   await page.getByRole("link", { name: "로그인하기" }).click();
   await expect(page).toHaveURL(/\/login$/);
@@ -74,8 +74,8 @@ test("failed login does not trigger silent refresh", async ({ page }) => {
     });
   });
 
-  await page.getByPlaceholder("Username").fill("existing-user");
-  await page.getByPlaceholder("Password").fill("wrong-password");
+  await page.locator('input[name="username"]').fill("existing-user");
+  await page.locator('input[name="password"]').fill("wrong-password");
   await page.getByRole("button", { name: "로그인" }).click();
 
   await expect(page).toHaveURL(/\/login$/);
@@ -178,8 +178,8 @@ test("HttpOnly refresh cookie survives different local ports and reload", async 
   await expect.poll(() => refreshRequestCount).toBe(1);
   refreshRequestCount = 0;
   refreshSawCookie = false;
-  await page.getByPlaceholder("Username").fill("cookie-user");
-  await page.getByPlaceholder("Password").fill("long-enough-password");
+  await page.locator('input[name="username"]').fill("cookie-user");
+  await page.locator('input[name="password"]').fill("long-enough-password");
   await page.getByRole("button", { name: "로그인" }).click();
   await expect(page).toHaveURL("/");
   await expect.poll(() => refreshRequestCount).toBe(1);

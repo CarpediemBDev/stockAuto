@@ -707,7 +707,7 @@ export default function PersonalSettingsPage() {
                               setForms((prev) => ({ ...prev, [credentialBroker]: { ...(prev[credentialBroker] || EMPTY_FORM), app_key: e.target.value } }));
                               setLocalVerified((prev) => ({ ...prev, [credentialBroker]: false }));
                             }}
-                            placeholder={activeCred?.has_credentials ? t("placeholder_overwrite") : "Enter APP KEY"}
+                            placeholder={activeCred?.has_credentials ? t("placeholder_overwrite") : t("placeholder_app_key")}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="off"
                           />
@@ -722,7 +722,7 @@ export default function PersonalSettingsPage() {
                               setForms((prev) => ({ ...prev, [credentialBroker]: { ...(prev[credentialBroker] || EMPTY_FORM), app_secret: e.target.value } }));
                               setLocalVerified((prev) => ({ ...prev, [credentialBroker]: false }));
                             }}
-                            placeholder={activeCred?.has_credentials ? t("placeholder_overwrite") : "Enter APP SECRET"}
+                            placeholder={activeCred?.has_credentials ? t("placeholder_overwrite") : t("placeholder_app_secret")}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="new-password"
                           />
@@ -739,7 +739,7 @@ export default function PersonalSettingsPage() {
                               setForms((prev) => ({ ...prev, [credentialBroker]: { ...(prev[credentialBroker] || EMPTY_FORM), account_no: e.target.value } }));
                               setLocalVerified((prev) => ({ ...prev, [credentialBroker]: false }));
                             }}
-                            placeholder={activeCred?.has_credentials ? `${activeCred.account_no_masked || "••••••••"} ${t("placeholder_overwrite")}` : (credentialBroker === "TOSS" ? t("account_no_toss_hint") : "Enter Account No")}
+                            placeholder={activeCred?.has_credentials ? `${activeCred.account_no_masked || "••••••••"} ${t("placeholder_overwrite")}` : (credentialBroker === "TOSS" ? t("account_no_toss_hint") : t("placeholder_account_no"))}
                             className="w-full bg-zinc-950 border border-zinc-900 rounded-lg p-3 text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono text-xs transition-all"
                             autoComplete="off"
                           />

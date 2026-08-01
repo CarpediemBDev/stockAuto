@@ -207,6 +207,7 @@
   "scanner": {
     "auth_checking": "인증 정보 확인 중...",
     "manual_add_hint": "* 첫 단어는 티커로, 뒤의 단어는 이름으로 자동 처리됩니다 (예: <example>TSLA Tesla</example>)",
+    "ticker_input_placeholder": "예: AAPL 또는 AAPL Apple",
     "title": "마켓 스캐너",
     "subtitle": "봇의 실시간 정밀 스캔 결과와 나의 관심종목을 통합 관리합니다.",
     "tabs": {
@@ -381,6 +382,9 @@
     "cred_note_store_only": "인증키는 암호화 저장되며 거래 실행 전 별도 통신 검증이 필요합니다.",
     "cred_note_verified": "인증키는 서버를 통해 실시간 검증을 거친 후 암호화되어 분리 저장됩니다.",
     "placeholder_overwrite": "•••••••••••••••• (새로 입력 시 덮어쓰기)",
+    "placeholder_app_key": "APP KEY 입력",
+    "placeholder_app_secret": "APP SECRET 입력",
+    "placeholder_account_no": "계좌번호 입력",
     "account_seq_optional": "계좌 시퀀스 (Optional)",
     "account_no_toss_hint": "비워두면 자동 연동됩니다",
     "delete_cred": "인증정보 삭제",
