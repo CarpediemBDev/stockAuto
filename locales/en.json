@@ -207,6 +207,7 @@
   "scanner": {
     "auth_checking": "Verifying your session...",
     "manual_add_hint": "* First word becomes the ticker, the rest becomes the name automatically (e.g. <example>TSLA Tesla</example>)",
+    "ticker_input_placeholder": "e.g. AAPL or AAPL Apple",
     "title": "Market Scanner",
     "subtitle": "Review the bot's live precision scan results and manage your watchlist in one place.",
     "tabs": {
@@ -381,6 +382,9 @@
     "cred_note_store_only": "Credentials are stored encrypted; separate communication verification is required before trading.",
     "cred_note_verified": "Credentials are verified in real time through the server, then encrypted and stored separately.",
     "placeholder_overwrite": "•••••••••••••••• (entering a new value overwrites it)",
+    "placeholder_app_key": "Enter APP KEY",
+    "placeholder_app_secret": "Enter APP SECRET",
+    "placeholder_account_no": "Enter Account No",
     "account_seq_optional": "Account sequence (Optional)",
     "account_no_toss_hint": "Leave blank to link automatically",
     "delete_cred": "Delete credentials",

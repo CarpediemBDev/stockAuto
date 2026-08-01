@@ -172,7 +172,7 @@ const ManualWatchList = () => {
               <input
                 type="text"
                 required
-                placeholder="e.g. AAPL or AAPL Apple"
+                placeholder={t("ticker_input_placeholder")}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs font-medium text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500 transition-colors"

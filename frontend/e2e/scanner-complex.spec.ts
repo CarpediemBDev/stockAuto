@@ -134,8 +134,8 @@ test("Mocked Overseas Scanner & Swing Predictor Magic Show", async ({ page }) =>
   await page.waitForTimeout(500); // 💡 마술 쇼 관람을 위한 의도적 지연 (실무 테스트엔 넣지 않음)
 
   // 2-2. 폼 채우고 로그인
-  await page.getByPlaceholder("Username").fill("MagicUser");
-  await page.getByPlaceholder("Password").fill("supersecret");
+  await page.locator('input[name="username"]').fill("MagicUser");
+  await page.locator('input[name="password"]').fill("supersecret");
   await page.waitForTimeout(500);
 
   // 로그인 버튼 클릭! (여기서 1-1 가짜 토큰을 받음)

@@ -287,3 +287,26 @@ class TestNoHardcodedKoreanInFrontend:
             "TestNoHardcodedKoreanInFrontend.ALLOWLIST에 사유와 함께 등록하세요:\n"
             + "\n".join(violations)
         )
+
+    # placeholder="문자열" 리터럴을 검출한다. placeholder={t(...)}·placeholder={expr}는 통과.
+    # 알파벳이 없는 값(숫자 예시 "987654321" 등)은 언어 중립이라 자동 허용한다.
+    PLACEHOLDER_LITERAL = re.compile(r"placeholder\s*=\s*[\"']([^\"']*)[\"']")
+    HAS_ALPHA = re.compile(r"[A-Za-z]")
+
+    def test_no_hardcoded_placeholder_attributes(self):
+        """placeholder를 문자열 리터럴로 박으면 로케일 전환이 안 된다(label은 t()인데
+        placeholder만 영어로 남던 실제 결함의 재발 방지)."""
+        hits: list[str] = []
+        for path in self.FRONTEND.rglob("*.tsx"):
+            if set(path.parts) & self.SKIP_DIRS or path.name in self.SKIP_FILES:
+                continue
+            rel = path.relative_to(self.FRONTEND).as_posix()
+            source = self.BLOCK_COMMENT.sub("", path.read_text(encoding="utf-8", errors="ignore"))
+            for i, line in enumerate(source.splitlines(), 1):
+                for value in self.PLACEHOLDER_LITERAL.findall(self.LINE_COMMENT.sub("", line)):
+                    if self.HAS_ALPHA.search(value):  # 숫자/기호만이면 언어 중립 → 허용
+                        hits.append(f"{rel}:{i}: placeholder=\"{value}\"")
+        assert not hits, (
+            "하드코딩된 placeholder를 발견했습니다. placeholder={t('...')}로 바꾸세요:\n"
+            + "\n".join(hits)
+        )
