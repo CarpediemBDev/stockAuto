@@ -22,6 +22,7 @@ from app.core.logging import logger
 from app.core.config import settings
 from app.scanner.data_provider import fetch_ohlcv
 from app.core.telegram import send_message_async, send_daily_report_to_all_users_sync
+from app.core.i18n import I18n, resolve_user_language
 from app.bot.fx_cache import FXRateCache
 from app.bot.market_session import (
     ET,
@@ -68,6 +69,72 @@ from app.core.models import utc_now_aware
 from contextlib import contextmanager
 # 💡 네트워크 일시 장애에 따른 텔레그램 경고 도배 방지용 시간 기록 저장소
 _user_network_alert_sent = {}
+
+
+def _resolve_lang(user_id: int) -> str:
+    """알림 발송 직전 사용자 언어를 독립 세션에서 해석한다(실패 시 ko 폴백)."""
+    db = SessionLocal()
+    try:
+        return resolve_user_language(db, user_id)
+    finally:
+        db.close()
+
+
+@dataclass
+class SellReason:
+    """매도 사유를 구조화한다. DB/로그에는 ko canonical, 텔레그램에는 사용자 언어로 렌더한다."""
+    key: str
+    args: dict
+    confirmed: bool = False
+
+
+def render_sell_reason(reason: "SellReason", lang: str) -> str:
+    """SellReason을 주어진 언어의 텔레그램 사유 문구로 렌더한다."""
+    text = I18n.get_msg(lang, f"telegram.sell_reason.{reason.key}", **reason.args)
+    if reason.confirmed:
+        text += I18n.get_msg(lang, "telegram.sell_reason.breach_confirmed_suffix")
+    return text
+
+
+def _send_sell_fill_message(
+    user_id: int,
+    strategy_name: str,
+    ticker: str,
+    ticker_name: str,
+    filled_price: float,
+    exchange_rate: float,
+    filled_qty: int,
+    sell_reason_obj: "SellReason",
+    pnl_sign: str,
+    pnl_emoji: str,
+    return_rate: float,
+    realized_pnl_abs: float,
+    order_no: str,
+) -> None:
+    """자동매도 체결 알림을 사용자 언어로 발송한다(두 매도 실행 경로 공용)."""
+    lang = _resolve_lang(user_id)
+    total_amount_usd = filled_price * filled_qty
+    send_message_async(
+        user_id,
+        I18n.get_msg(
+            lang,
+            "telegram.sell_filled",
+            strategy_name=strategy_name,
+            ticker=ticker,
+            ticker_name=ticker_name,
+            filled_price=filled_price,
+            filled_price_krw=filled_price * exchange_rate,
+            filled_qty=filled_qty,
+            total_amount_usd=total_amount_usd,
+            total_amount_krw=total_amount_usd * exchange_rate,
+            sell_reason=render_sell_reason(sell_reason_obj, lang),
+            pnl_emoji=pnl_emoji,
+            pnl_sign=pnl_sign,
+            return_rate=return_rate,
+            realized_pnl_abs=realized_pnl_abs,
+            order_no=order_no,
+        ),
+    )
 
 # 매수 실패(단가 초과, 예수금 부족) 알림 도배 방지용 쿨타임 캐시 (1시간)
 WARNING_COOLDOWN_CACHE = {}
@@ -338,17 +405,22 @@ def halt_trading_for_order_review(
     with micro_session(ctx) as db:
         log_action(db, ctx.user_id, message, "ERROR")
 
-    side_kr = "매도" if side == "SELL" else "매수"
-    status_kr = {"SUBMITTED": "제출됨(미체결)", "FILLED": "체결됨", "PARTIAL": "부분체결", "REJECTED": "거부됨"}.get(status, status)
+    lang = _resolve_lang(ctx.user_id)
+    side_label = I18n.get_msg(lang, "telegram.side.sell" if side == "SELL" else "telegram.side.buy")
+    status_key = {"SUBMITTED": "submitted", "FILLED": "filled", "PARTIAL": "partial", "REJECTED": "rejected"}.get(status)
+    status_label = I18n.get_msg(lang, f"telegram.order_status.{status_key}", default=status) if status_key else status
 
     send_message_async(
         ctx.user_id,
-        f"⚠️ *[미체결 주문 대기]*\n"
-        f"• *종목:* `{ticker}`\n"
-        f"• *구분:* `{side_kr}`\n"
-        f"• *상태:* `{status_kr} ({status})`\n"
-        f"• *주문번호:* `{order_no or 'UNKNOWN'}`\n\n"
-        "주문이 접수되었으나 아직 체결되지 않았습니다. 체결 완료 여부를 실시간으로 추적하는 중이며, 봇의 시작/정지 설정은 유지됩니다."
+        I18n.get_msg(
+            lang,
+            "telegram.order_pending_wait",
+            ticker=ticker,
+            side=side_label,
+            status_label=status_label,
+            status=status,
+            order_no=order_no or "UNKNOWN",
+        ),
     )
 
 
@@ -846,14 +918,21 @@ async def process_autonomous_slots(ctx: TradingFlowContext, slot_allocations: di
                     pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
                     send_message_async(
                         user_id,
-                        f"🔴 *[{strategy.name} 레짐 이탈 자동매도]*\n"
-                        f"종목: {asset}\n"
-                        f"• *체결 단가:* `${filled_price:,.2f}`\n"
-                        f"• *체결 수량:* `{filled_qty}주`\n"
-                        f"• *매도 사유:* SMA{strategy.sma_period} 하향 이탈 {strategy.confirm_days}일 연속 확정 → 현금 대피\n\n"
-                        f"{pnl_emoji} *실수익률:* `{pnl_sign}{abs(float(pnl.return_rate)):.2f}%`\n"
-                        f"💰 *실현 실수익:* `{pnl_sign}${abs(realized_pnl):,.2f}`\n"
-                        f"• *주문 번호:* `{res['order_no']}`",
+                        I18n.get_msg(
+                            _resolve_lang(user_id),
+                            "telegram.regime_exit",
+                            strategy_name=strategy.name,
+                            asset=asset,
+                            filled_price=filled_price,
+                            filled_qty=filled_qty,
+                            sma_period=strategy.sma_period,
+                            confirm_days=strategy.confirm_days,
+                            pnl_emoji=pnl_emoji,
+                            pnl_sign=pnl_sign,
+                            return_rate=abs(float(pnl.return_rate)),
+                            realized_pnl_abs=abs(realized_pnl),
+                            order_no=res["order_no"],
+                        ),
                     )
                 elif res.get("success"):
                     _log(f"[{strategy.name}] SELL order submitted (pending fill): {asset} x{sell_qty} | {res.get('order_no', '')}", "INFO")
@@ -983,19 +1062,19 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                                 )
                                 db.commit()
 
-            sell_reason = None
+            sell_reason_obj = None
             is_breached = False
-            breach_reason = ""
+            breach_obj = None
 
             if check_stop_loss_breach(profit_rate, stop_loss_pct):
                 is_breached = True
-                breach_reason = f"동적 손절선 이탈 (손절 기준 -{stop_loss_pct:.2f}% 돌파 | 현재 수익률: {profit_rate:.2f}%)"
+                breach_obj = SellReason("stop_loss", {"stop_loss_pct": stop_loss_pct, "profit_rate": profit_rate})
             elif check_trailing_stop_breach(current_price_dec, dec_highest_price, trailing_stop_pct, h.avg_price):
                 is_breached = True
-                breach_reason = f"동적 트레일링 스탑 이탈 (최고가 ${float(dec_highest_price):.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 현재 수익률: {profit_rate:.2f}%)"
+                breach_obj = SellReason("trailing_stop", {"highest_price": float(dec_highest_price), "trailing_stop_pct": trailing_stop_pct, "profit_rate": profit_rate})
             elif use_rolling_box and check_rolling_box_breach(current_price_dec, dec_rolling_stop, dec_highest_price, h.avg_price):
                 is_breached = True
-                breach_reason = f"롤링 박스 스탑 이탈 (박스 하단 ${float(dec_rolling_stop):.2f} 붕괴 | 현재 수익률: {profit_rate:.2f}%)"
+                breach_obj = SellReason("rolling_box", {"rolling_stop": float(dec_rolling_stop), "profit_rate": profit_rate})
 
             if is_breached:
                 cache_key = (user_id, h.ticker, h.strategy_type)
@@ -1004,20 +1083,23 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     count = BREACH_COUNT_CACHE[cache_key]
 
                 if count >= 2:
-                    sell_reason = breach_reason + " [2회 연속 이탈 확정]"
+                    breach_obj.confirmed = True
+                    sell_reason_obj = breach_obj
                 else:
-                    _log(f"[Noise Buffer] {h.ticker} ({h.strategy_type}) first breach detected ({breach_reason}). Delaying sell for noise protection (Count: {count}/2).", "INFO")
+                    _log(f"[Noise Buffer] {h.ticker} ({h.strategy_type}) first breach detected ({render_sell_reason(breach_obj, 'ko')}). Delaying sell for noise protection (Count: {count}/2).", "INFO")
             else:
                 with _breach_count_lock:
                     BREACH_COUNT_CACHE.pop((user_id, h.ticker, h.strategy_type), None)
 
-            if not sell_reason and profit_rate >= strategy_instance.min_smart_exit_profit and is_smart_exit:
-                sell_reason = f"스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)"
+            if not sell_reason_obj and profit_rate >= strategy_instance.min_smart_exit_profit and is_smart_exit:
+                sell_reason_obj = SellReason("smart_exit", {"profit_rate": profit_rate})
 
-            elif not sell_reason and strategy_instance.is_signal_collapsed(current_score, sentiment):
-                sell_reason = f"강세 시그널 붕괴 ({current_score}점 도달)"
+            elif not sell_reason_obj and strategy_instance.is_signal_collapsed(current_score, sentiment):
+                sell_reason_obj = SellReason("signal_collapse", {"current_score": current_score})
 
-            if sell_reason:
+            if sell_reason_obj:
+                # DB(order_intent)·로그에는 기존과 동일한 한국어 canonical을 유지하고, 텔레그램만 사용자 언어로 렌더한다.
+                sell_reason = render_sell_reason(sell_reason_obj, "ko")
                 _log(f"[{strategy_instance.name}] EXIT SIGNAL: {h.ticker} | Reason: {sell_reason}", "SIGNAL")
 
                 is_kis_order = (ctx.trade_mode or "").upper() in {"MOCK", "REAL"}
@@ -1029,6 +1111,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     h,
                     current_price,
                     sell_reason,
+                    sell_reason_obj,
                     clean_ticker,
                     strategy_instance,
                     current_score,
@@ -1047,6 +1130,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
         h,
         current_price,
         sell_reason,
+        sell_reason_obj,
         clean_ticker,
         strategy_instance,
         current_score,
@@ -1128,22 +1212,22 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     fill_label = "sold" if remaining_qty == 0 else f"partially sold ({filled_qty} filled, {remaining_qty} remaining)"
                     _log(f"SUCCESS: {h.ticker} {fill_label} via {sell_reason} | Order: {res['order_no']}", "INFO")
 
-                    filled_price_krw = filled_price * exchange_rate
-                    total_amount_usd = filled_price * filled_qty
-                    total_amount_krw = total_amount_usd * exchange_rate
                     pnl_sign = "+" if realized_pnl >= 0 else "-"
                     pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
-                    send_message_async(
+                    _send_sell_fill_message(
                         user_id,
-                        f"🔴 *[{strategy_instance.name} 자동매도 체결]*\n"
-                        f"종목: {clean_ticker} ({h.ticker_name})\n"
-                        f"• *체결 단가:* `${filled_price:,.2f}` (약 {filled_price_krw:,.0f}원)\n"
-                        f"• *체결 수량:* `{filled_qty}주`\n"
-                        f"• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n"
-                        f"• *매도 사유:* {sell_reason}\n\n"
-                        f"{pnl_emoji} *실수익률:* `{pnl_sign}{calc_return_rate:.2f}%`\n"
-                        f"💰 *실현 실수익:* `{pnl_sign}${abs(realized_pnl):,.2f}`\n"
-                        f"• *주문 번호:* `{res['order_no']}`",
+                        strategy_instance.name,
+                        clean_ticker,
+                        h.ticker_name,
+                        filled_price,
+                        exchange_rate,
+                        filled_qty,
+                        sell_reason_obj,
+                        pnl_sign,
+                        pnl_emoji,
+                        calc_return_rate,
+                        abs(realized_pnl),
+                        res["order_no"],
                     )
                     # 체결 직후 잔고 스냅샷 즉시 갱신 (60초 dedup 우회) — 대시보드 낡은 잔고 방지
                     _schedule_background_task(
@@ -1208,25 +1292,23 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
 
                 BREACH_COUNT_CACHE.pop((user_id, h.ticker, h.strategy_type), None)
 
-                filled_price_krw = filled_price * exchange_rate
-                total_amount_usd = filled_price * filled_qty
-                total_amount_krw = total_amount_usd * exchange_rate
-
                 pnl_sign = "+" if realized_pnl >= 0 else "-"
                 pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
-                realized_pnl_abs = abs(realized_pnl)
 
-                send_message_async(
+                _send_sell_fill_message(
                     user_id,
-                    f"🔴 *[{strategy_instance.name} 자동매도 체결]*\n"
-                    f"종목: {clean_ticker} ({h.ticker_name})\n"
-                    f"• *체결 단가:* `${filled_price:,.2f}` (약 {filled_price_krw:,.0f}원)\n"
-                    f"• *체결 수량:* `{filled_qty}주`\n"
-                    f"• *체결 금액:* `${total_amount_usd:,.2f}` (약 {total_amount_krw:,.0f}원)\n"
-                    f"• *매도 사유:* {sell_reason}\n\n"
-                    f"{pnl_emoji} *실수익률:* `{pnl_sign}{calc_return_rate:.2f}%`\n"
-                    f"💰 *실현 실수익:* `{pnl_sign}${realized_pnl_abs:,.2f}`\n"
-                    f"• *주문 번호:* `{res['order_no']}`"
+                    strategy_instance.name,
+                    clean_ticker,
+                    h.ticker_name,
+                    filled_price,
+                    exchange_rate,
+                    filled_qty,
+                    sell_reason_obj,
+                    pnl_sign,
+                    pnl_emoji,
+                    calc_return_rate,
+                    abs(realized_pnl),
+                    res["order_no"],
                 )
                 # 체결 직후 잔고 스냅샷 즉시 갱신 (60초 dedup 우회) — 대시보드 낡은 잔고 방지
                 _schedule_background_task(
@@ -1345,31 +1427,37 @@ def send_entry_budget_warning(
     clean_ticker: str,
     signal: dict,
     strategy_type: str,
-    reason_title: str,
-    reason_desc: str,
+    reason_key: str,
     current_price: float,
     proposed_value_usd: float,
     slot_cash_usd: float,
 ) -> None:
     with micro_session(ctx) as db:
-        log_action(db, ctx.user_id, f"[{strategy_instance.name}] SKIP PURCHASE ({reason_title}): {clean_ticker}.", "WARNING")
+        log_action(db, ctx.user_id, f"[{strategy_instance.name}] SKIP PURCHASE ({reason_key}): {clean_ticker}.", "WARNING")
 
-    cache_key = (ctx.user_id, clean_ticker, strategy_type, reason_title)
+    cache_key = (ctx.user_id, clean_ticker, strategy_type, reason_key)
     now = time.time()
     last_sent = WARNING_COOLDOWN_CACHE.get(cache_key, 0.0)
 
     if now - last_sent < 3600.0:
         return
 
-    current_price_krw = current_price * ctx.exchange_rate
+    lang = _resolve_lang(ctx.user_id)
     send_message_async(
         ctx.user_id,
-        f"*[{strategy_instance.name} Auto Buy Skipped - {reason_title}]*\n"
-        f"Ticker: {clean_ticker} ({signal['name']})\n\n"
-        f"*Current Price:* `${current_price:,.2f}` (KRW {current_price_krw:,.0f})\n"
-        f"*Attempted Amount:* `${proposed_value_usd:,.2f}`\n"
-        f"*Slot Cash:* `${slot_cash_usd:,.2f}`\n\n"
-        f"{reason_desc}"
+        I18n.get_msg(
+            lang,
+            "telegram.buy_skipped",
+            strategy_name=strategy_instance.name,
+            reason_title=I18n.get_msg(lang, f"telegram.buy_skip_reason.{reason_key}.title"),
+            ticker=clean_ticker,
+            name=signal["name"],
+            current_price=current_price,
+            current_price_krw=current_price * ctx.exchange_rate,
+            proposed_value_usd=proposed_value_usd,
+            slot_cash_usd=slot_cash_usd,
+            reason_desc=I18n.get_msg(lang, f"telegram.buy_skip_reason.{reason_key}.desc"),
+        ),
     )
     WARNING_COOLDOWN_CACHE[cache_key] = now
 
@@ -1463,19 +1551,25 @@ def send_successful_buy_message(
     next_stage: int,
     order_no: str,
 ) -> None:
-    current_price_krw = filled_price * ctx.exchange_rate
     total_amount_usd = filled_price * filled_qty
-    total_amount_krw = total_amount_usd * ctx.exchange_rate
 
     send_message_async(
         ctx.user_id,
-        f"*[{strategy_instance.name} Auto Buy Filled]*\n"
-        f"Ticker: {clean_ticker} ({signal['name']})\n\n"
-        f"*Filled Price:* `${filled_price:,.2f}` (KRW {current_price_krw:,.0f})\n"
-        f"*Filled Qty:* `{filled_qty}` (Pyramiding Stage {next_stage})\n"
-        f"*Filled Amount:* `${total_amount_usd:,.2f}` (KRW {total_amount_krw:,.0f})\n"
-        f"*Market Regime:* `{ctx.sentiment}`\n"
-        f"*Order No:* `{order_no}`"
+        I18n.get_msg(
+            _resolve_lang(ctx.user_id),
+            "telegram.buy_filled",
+            strategy_name=strategy_instance.name,
+            ticker=clean_ticker,
+            name=signal["name"],
+            filled_price=filled_price,
+            filled_price_krw=filled_price * ctx.exchange_rate,
+            filled_qty=filled_qty,
+            next_stage=next_stage,
+            total_amount_usd=total_amount_usd,
+            total_amount_krw=total_amount_usd * ctx.exchange_rate,
+            sentiment=ctx.sentiment,
+            order_no=order_no,
+        ),
     )
 
 
@@ -1587,12 +1681,11 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
 
             if final_qty < 1:
                 is_budget_exceeded = proposed_qty < 1.0
-                reason_title = "Budget exceeded - below minimum quantity" if is_budget_exceeded else "Insufficient cash"
-                reason_desc = "Slot cash is not enough for this order." if not is_budget_exceeded else "One share costs more than the slot allocation allows."
+                reason_key = "budget_exceeded" if is_budget_exceeded else "insufficient_cash"
                 send_entry_budget_warning(
                     ctx=ctx, strategy_instance=strategy_instance, clean_ticker=clean_ticker,
-                    signal=signal, strategy_type=slot_key, reason_title=reason_title,
-                    reason_desc=reason_desc, current_price=current_price, proposed_value_usd=proposed_value_usd,
+                    signal=signal, strategy_type=slot_key, reason_key=reason_key,
+                    current_price=current_price, proposed_value_usd=proposed_value_usd,
                     slot_cash_usd=slot_cash_usd,
                 )
                 continue
@@ -1841,9 +1934,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                 _user_network_alert_sent[user_id] = now
                 send_message_async(
                     user_id,
-                    "⚠️ *[시스템 접속 장애 알림]*\n\n"
-                    "증권사(KIS) 또는 외부 네트워크 통신에 일시적인 장애가 감지되었습니다.\n"
-                    "시스템은 자동으로 자가 복구를 시도하며, 연결이 정상화되는 즉시 매매를 재개합니다."
+                    I18n.get_msg(_resolve_lang(user_id), "telegram.network_fault"),
                 )
         except Exception as e:
             logger.exception(f"[run_user_trading_flow] Error for user {user_id}")

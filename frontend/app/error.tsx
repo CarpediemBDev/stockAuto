@@ -2,6 +2,7 @@
 
 import React, { useEffect } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { AlertTriangle, RotateCcw, Home } from "lucide-react";
 
 /**
@@ -21,6 +22,7 @@ export default function Error({
   error: Error & { digest?: string };
   unstable_retry: () => void;
 }) {
+  const t = useTranslations("error_boundary");
   useEffect(() => {
     // 콘솔에 남겨 개발·운영 로그 수집 경로를 확보한다(외부 리포팅 도구 미도입).
     console.error("[GlobalError]", error);
@@ -34,9 +36,9 @@ export default function Error({
             <AlertTriangle size={20} />
           </div>
           <div>
-            <h2 className="font-bold text-base">화면을 표시하는 중 문제가 발생했습니다</h2>
+            <h2 className="font-bold text-base">{t("title")}</h2>
             <p className="text-xs text-zinc-400 mt-0.5">
-              일시적인 오류일 수 있습니다. 다시 시도하거나 대시보드로 이동해 주세요.
+              {t("body")}
             </p>
           </div>
         </div>
@@ -44,7 +46,7 @@ export default function Error({
         {/* digest는 서버 로그와 대조할 수 있는 식별자라 노출한다(에러 원문은 감춘다) */}
         {error.digest && (
           <p className="text-[11px] font-mono text-zinc-500 break-all">
-            오류 코드: {error.digest}
+            {t("error_code", { digest: error.digest })}
           </p>
         )}
 
@@ -54,14 +56,14 @@ export default function Error({
             className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 transition-colors rounded-xl py-2.5 text-sm font-bold"
           >
             <RotateCcw size={15} />
-            다시 시도
+            {t("retry")}
           </button>
           <Link
             href="/"
             className="flex-1 flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 transition-colors rounded-xl py-2.5 text-sm font-bold"
           >
             <Home size={15} />
-            대시보드
+            {t("dashboard")}
           </Link>
         </div>
       </div>

@@ -4,6 +4,7 @@ import React from 'react';
 import { Zap } from 'lucide-react';
 
 import useSWR from 'swr';
+import { useTranslations } from 'next-intl';
 import { pollInterval } from '@/lib/sse';
 import { fetcher } from '@/lib/api';
 
@@ -23,6 +24,7 @@ interface BotSignalsProps {
 }
 
 const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
+  const t = useTranslations('bot_signals');
   const { data: signalsData, isLoading: isLoadingSignals } = useSWR('/scanner/latest', fetcher, { refreshInterval: pollInterval(15000) });
   const { data: balanceData, isLoading: isLoadingBalance } = useSWR('/account/balance', fetcher, { refreshInterval: pollInterval(15000) });
 
@@ -53,28 +55,28 @@ const BotSignals: React.FC<BotSignalsProps> = ({ hideHeader = false }) => {
       <div className="p-5 bg-gradient-to-br from-amber-950/20 to-orange-950/20 border-b border-zinc-800">
         <h4 className="text-xs font-black text-amber-400 tracking-wider uppercase mb-3 flex items-center gap-1.5 animate-pulse">
           <Zap size={14} className="fill-amber-400 text-amber-400" />
-          실시간 최정예 돌파 레이더 (BREAKOUT RADAR WATCHLIST)
+          {t('radar_title')}
         </h4>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           {radarTickers.length === 0 ? (
             <div className="col-span-full py-4 text-center border border-dashed border-zinc-850 rounded-xl bg-zinc-950/30">
               <span className="text-xs text-zinc-500 font-bold tracking-tight block animate-pulse">
-                실시간 감지된 돌파 레이더 종목이 없습니다. (RVOL ≥ 2.0 대기 중)
+                {t('radar_empty')}
               </span>
             </div>
           ) : (
-            radarTickers.map((t) => {
-              const matchingSig = signals.find(s => s.ticker === t);
+            radarTickers.map((ticker) => {
+              const matchingSig = signals.find(s => s.ticker === ticker);
               return (
-                <div 
-                  key={t}
+                <div
+                  key={ticker}
                   className="bg-zinc-950/90 border border-amber-500/30 hover:border-amber-400/80 hover:shadow-[0_0_15px_rgba(245,158,11,0.15)] rounded-xl p-3 text-center transition-all duration-300 relative group overflow-hidden"
                 >
                   <span className="absolute inset-0 border border-amber-500/20 rounded-xl group-hover:animate-pulse" />
                   <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse" />
                   
                   <span className="text-xs font-black text-zinc-200 group-hover:text-amber-400 transition-colors tracking-tight block">
-                    {t}
+                    {ticker}
                   </span>
                   
                   <span className="text-[11px] text-amber-500/80 font-black block mt-0.5 uppercase tracking-tighter">

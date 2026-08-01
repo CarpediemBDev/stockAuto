@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import useSWR from "swr";
+import { useTranslations } from "next-intl";
 import { pollInterval } from "@/lib/sse";
 import { toast } from "sonner";
 
@@ -25,6 +26,7 @@ const normalizeWatchlist = (payload?: WatchlistPayload): WatchItem[] => {
 };
 
 export function useWatchlistActions(enabled = true) {
+  const t = useTranslations("watchlist");
   const [addingTicker, setAddingTicker] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const {
@@ -56,7 +58,7 @@ export function useWatchlistActions(enabled = true) {
         if (options.showSuccessToast !== false) {
           toast.success(
             options.successMessage
-              ?? `${tickerClean} (${nameClean})이(가) 관심종목에 추가되었습니다.`,
+              ?? t("toast_added", { ticker: tickerClean, name: nameClean }),
           );
         }
       } catch (error) {
@@ -64,13 +66,13 @@ export function useWatchlistActions(enabled = true) {
           `Failed to add ${tickerClean} to watchlist`,
           error,
         );
-        toast.error(`관심종목 추가 실패: ${msg}`);
+        toast.error(t("toast_add_failed", { msg }));
         throw error;
       } finally {
         setAddingTicker(null);
       }
     },
-    [mutateWatchlist],
+    [mutateWatchlist, t],
   );
 
   const deleteFromWatchlist = useCallback(
@@ -79,16 +81,16 @@ export function useWatchlistActions(enabled = true) {
       try {
         await watchlistAPI.delete(id);
         await mutateWatchlist();
-        toast.success("관심종목에서 성공적으로 제거되었습니다.");
+        toast.success(t("toast_removed"));
       } catch (error) {
         const msg = reportHandledError("Failed to delete ticker", error);
-        toast.error(`삭제 실패: ${msg}`);
+        toast.error(t("toast_delete_failed", { msg }));
         throw error;
       } finally {
         setDeletingId(null);
       }
     },
-    [mutateWatchlist],
+    [mutateWatchlist, t],
   );
 
   return {

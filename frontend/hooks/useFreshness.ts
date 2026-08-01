@@ -13,6 +13,7 @@
  * 신선도는 데이터 속성이므로 항상 서버 captured_at 기준으로 계산한다(도착 시각 아님).
  */
 import { useSyncExternalStore } from "react";
+import { useTranslations } from "next-intl";
 
 // ── 단일 공유 클럭 ──────────────────────────────────────────────
 const listeners = new Set<() => void>();
@@ -67,10 +68,6 @@ export interface FreshnessOptions {
   disconnected?: boolean;
 }
 
-function ageLabel(ageSec: number): string {
-  return ageSec >= 60 ? `${Math.floor(ageSec / 60)}분` : `${ageSec}초`;
-}
-
 /**
  * captured_at(서버 측정 시각)로부터 나이·낡음·상태를 계산한다.
  * 마운트 전(now=0)이나 capturedAt이 없으면 배지를 숨긴다(ageSec=null, label="").
@@ -80,8 +77,12 @@ export function useFreshness(
   options: FreshnessOptions = {},
 ): FreshnessResult {
   const now = useNow();
+  const t = useTranslations("freshness");
   const staleAfterSec = options.staleAfterSec ?? 90;
   const offset = options.serverOffsetMs ?? 0;
+
+  const ageLabel = (ageSec: number): string =>
+    ageSec >= 60 ? t("min", { n: Math.floor(ageSec / 60) }) : t("sec", { n: ageSec });
 
   const empty = (status: FreshnessStatus): FreshnessResult => ({
     ageSec: null,

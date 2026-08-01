@@ -3,8 +3,66 @@
     "orphan_order_recovered": "*Orphan Order Recovered*\nSide: {side}\nTicker: {ticker}\nOrder No: {broker_order_no}\nStatus: {status}\nBot preference unchanged.",
     "order_reconciled": "*Order Reconciliation Updated*\nSide: {side}\nTicker: {ticker}\nStatus: {status}\nApplied: {cumulative}/{requested}{resolution_text}",
     "order_stale": "*Order Reconciliation Still Pending*\nSide: {side}\nTicker: {ticker}\nStatus: {status}\nError: {error}\n\nNew trading cycles remain blocked by the order ledger while reconciliation continues.",
-    "regime_exit": "🔴 *[{strategy_name} Regime Exit Sell]*\nTicker: {asset}\n• *Filled Price:* ${filled_price:,.2f}\n• *Filled Qty:* {filled_qty} shares\n• *Reason:* SMA{sma_period} downward crossover {confirm_days} days confirmed\n\n{pnl_emoji} *Return Rate:* {pnl_sign}{return_rate:.2f}%\n💰 *Realized PnL:* {pnl_sign}\n• *Order No:* {order_no}",
-    "order_recovery_ambiguous": "⚠️ *[Orphan Order Linking Deferred]*\n• *Side:* {side}\n• *Ticker:* {ticker}\n• *Matching Orders:* {candidate_count}\n\nSeveral broker orders match this intent, so automatic linking was refused to avoid mislinking. Your bot preference is unchanged."
+    "regime_exit": "🔴 *[{strategy_name} Regime Exit Sell]*\nTicker: {asset}\n• *Filled Price:* ${filled_price:,.2f}\n• *Filled Qty:* {filled_qty} shares\n• *Reason:* SMA{sma_period} downward crossover {confirm_days} days confirmed\n\n{pnl_emoji} *Return Rate:* {pnl_sign}{return_rate:.2f}%\n💰 *Realized PnL:* {pnl_sign}${realized_pnl_abs:,.2f}\n• *Order No:* {order_no}",
+    "order_recovery_ambiguous": "⚠️ *[Orphan Order Linking Deferred]*\n• *Side:* {side}\n• *Ticker:* {ticker}\n• *Matching Orders:* {candidate_count}\n\nSeveral broker orders match this intent, so automatic linking was refused to avoid mislinking. Your bot preference is unchanged.",
+    "sell_filled": "🔴 *[{strategy_name} Auto Sell Filled]*\nTicker: {ticker} ({ticker_name})\n• *Filled Price:* `${filled_price:,.2f}` (approx. KRW {filled_price_krw:,.0f})\n• *Filled Qty:* `{filled_qty} shares`\n• *Filled Amount:* `${total_amount_usd:,.2f}` (approx. KRW {total_amount_krw:,.0f})\n• *Sell Reason:* {sell_reason}\n\n{pnl_emoji} *Return Rate:* `{pnl_sign}{return_rate:.2f}%`\n💰 *Realized PnL:* `{pnl_sign}${realized_pnl_abs:,.2f}`\n• *Order No:* `{order_no}`",
+    "buy_filled": "🟢 *[{strategy_name} Auto Buy Filled]*\nTicker: {ticker} ({name})\n\n• *Filled Price:* `${filled_price:,.2f}` (approx. KRW {filled_price_krw:,.0f})\n• *Filled Qty:* `{filled_qty} shares` (Pyramiding Stage {next_stage})\n• *Filled Amount:* `${total_amount_usd:,.2f}` (approx. KRW {total_amount_krw:,.0f})\n• *Market Regime:* `{sentiment}`\n• *Order No:* `{order_no}`",
+    "buy_skipped": "🟡 *[{strategy_name} Auto Buy Skipped - {reason_title}]*\nTicker: {ticker} ({name})\n\n• *Current Price:* `${current_price:,.2f}` (approx. KRW {current_price_krw:,.0f})\n• *Attempted Amount:* `${proposed_value_usd:,.2f}`\n• *Slot Cash:* `${slot_cash_usd:,.2f}`\n\n{reason_desc}",
+    "order_pending_wait": "⚠️ *[Unfilled Order Pending]*\n• *Ticker:* `{ticker}`\n• *Side:* `{side}`\n• *Status:* `{status_label} ({status})`\n• *Order No:* `{order_no}`\n\nThe order was accepted but has not been filled yet. Fill status is being tracked in real time, and your bot start/stop preference is unchanged.",
+    "network_fault": "⚠️ *[System Connectivity Alert]*\n\nA temporary disruption was detected in broker (KIS) or external network communication.\nThe system will automatically attempt self-recovery and resume trading as soon as the connection is restored.",
+    "link_success": "🎉 *Linked Successfully!*\n\nYour account `{username}` is now linked with Telegram.\nAutomated buy/sell alerts will be delivered in real time.\n\n🤖 *Available Remote Commands:*\n• `/status` - Check current system mode and portfolio\n• `/run` - Start the autonomous trading loop\n• `/stop` - Stop the autonomous trading loop",
+    "link_user_not_found": "⚠️ That username does not exist. Please reconnect via the linking link on the web.",
+    "not_linked_guide": "👋 *Hello! This is the StockAuto Trading Bridge.*\n\nThis account is not linked with Telegram yet, or linking is disabled.\nPlease click the **[🔗 Start Telegram Linking]** button under **Personal Investment Settings ➔ Telegram Bridge** on the StockAuto web page to finish linking.",
+    "help": "👋 *Hello! This is the StockAuto Trading Bridge.*\n\nAvailable commands:\n• `/status` - Check current system mode, account balance, and holdings\n• `/run` - Start the autonomous trading loop\n• `/stop` - Stop the autonomous trading loop",
+    "already_running": "⚠️ *The trading loop is already running.*",
+    "cannot_start_unresolved": "⚠️ *Cannot start: there are unresolved broker orders.*\nPlease wait until automatic reconciliation completes.",
+    "loop_started": "🟢 *The autonomous trading loop has started.*",
+    "already_stopped": "⚠️ *The trading loop is already stopped.*",
+    "loop_stopped": "🔴 *The autonomous trading loop has stopped.*",
+    "unknown_command": "❓ *Unknown command.*\nAvailable commands: `/status`, `/run`, `/stop`",
+    "command_error": "⚠️ *Error while executing command:* {error}",
+    "daily_report": "📊 *[Daily Auto-Trading Closing Report]*\n\nHere is the settlement result of automated trading over the last 24 hours.\n───────────────────\n• *Total Sells:* `{total_trades}`\n• *Wins:* `{win_trades}`\n• *Daily Win Rate:* `{win_rate:.1f}%`\n• *Daily Realized PnL:* `${total_pnl:,.2f}`\n───────────────────\nYou can review the full cumulative scorecard and equity curve in the **[📊 Scorecard]** menu of the web dashboard!",
+    "daily_report_manual": "📊 *[Daily Trading Report (Manual Request)]*\n\nHere is the trading result for the last 24 hours you requested.\n───────────────────\n• *Total Sells:* `{total_trades}`\n• *Wins:* `{win_trades}`\n• *Daily Win Rate:* `{win_rate:.1f}%`\n• *Daily Realized PnL:* `${total_pnl:,.2f}`\n───────────────────\nYou can review the full cumulative scorecard and equity curve in the **[📊 Scorecard]** menu of the web dashboard!",
+    "no_recent_sells": "⚠️ No sell (profit-realizing) records in the last 24 hours, so the report cannot be sent.",
+    "status": {
+      "header": "🤖 *StockAuto Live System Status*\n───────────────────\n• *Trading Loop:* {status_text}\n• *Mode:* `{mode}` (Broker: {broker_name})\n• *USD/KRW Rate:* `$1 = KRW {fx_rate:,.1f}`\n\n📊 *Account Assets*\n• *Total Assets:* `KRW {total_asset:,.0f}` (approx. `${total_asset_usd:,.2f}`)\n• *Cash:* `KRW {cash_balance:,.0f}`\n• *Stock Value:* `KRW {stock_balance:,.0f}`\n• *Live Cumulative Return:* `{profit_rate:+.2f}%`\n\n📈 *Portfolio ({holdings_count} total)*\n",
+      "running": "🟢 *Running*",
+      "stopped": "🔴 *Stopped*",
+      "fallback_snapshot": "⚠️ Due to a KIS API outage/delay, the latest successful asset snapshot is shown.",
+      "fallback_no_snapshot": "⚠️ A KIS API outage/delay occurred and no backup snapshot exists.",
+      "no_holdings": "• No overseas stock holdings.",
+      "holding_line": "• *{ticker}* ({ticker_name})\n  └ Qty: `{quantity} shares` | Avg: `${avg_price:,.2f}`\n",
+      "broker_na_simulated": "N/A (Simulated)",
+      "broker_none": "None"
+    },
+    "side": {
+      "buy": "Buy",
+      "sell": "Sell"
+    },
+    "order_status": {
+      "submitted": "Submitted (Unfilled)",
+      "filled": "Filled",
+      "partial": "Partially Filled",
+      "rejected": "Rejected"
+    },
+    "sell_reason": {
+      "stop_loss": "Dynamic stop-loss breach (threshold -{stop_loss_pct:.2f}% crossed | current return: {profit_rate:.2f}%)",
+      "trailing_stop": "Dynamic trailing-stop breach (down {trailing_stop_pct:.2f}% from peak ${highest_price:.2f} | current return: {profit_rate:.2f}%)",
+      "rolling_box": "Rolling-box stop breach (box floor ${rolling_stop:.2f} broken | current return: {profit_rate:.2f}%)",
+      "breach_confirmed_suffix": " [2nd consecutive breach confirmed]",
+      "smart_exit": "Smart early take-profit (RSI-MACD condition met | return: {profit_rate:.2f}%)",
+      "signal_collapse": "Bullish signal collapse (reached {current_score} pts)"
+    },
+    "buy_skip_reason": {
+      "budget_exceeded": {
+        "title": "Budget exceeded - below minimum quantity",
+        "desc": "One share costs more than the slot allocation allows."
+      },
+      "insufficient_cash": {
+        "title": "Insufficient cash",
+        "desc": "Slot cash is not enough for this order."
+      }
+    }
   },
   "ui": {
     "order_resolved": "The order has been fully confirmed. Bot status remains normal."
@@ -69,11 +127,86 @@
       "title": "User Management & Live Arena",
       "sort_profit": "Rank by Return",
       "loading": "Loading user data...",
-      "no_data": "No users have signed up yet."
+      "no_data": "No users have signed up yet.",
+      "toast_bot_started": "The bot has started successfully.",
+      "toast_bot_paused": "The bot has been paused.",
+      "toast_bot_toggle_failed": "Failed to change bot status: {error}",
+      "confirm_delete_title": "Permanently delete user [{username}]?",
+      "confirm_delete_desc": "🚨 Warning: This action cannot be undone; all balances and trade history will be permanently deleted.",
+      "confirm_delete_action": "Delete permanently",
+      "confirm_cancel": "Cancel",
+      "toast_delete_success": "Account [{username}] has been permanently deleted.",
+      "toast_delete_failed": "Failed to delete user: {error}",
+      "col_rank": "Rank",
+      "col_username": "Username",
+      "col_trade_mode": "Trade Mode",
+      "col_strategy": "Strategy",
+      "col_telegram": "Telegram",
+      "col_bot_status": "Bot Status",
+      "col_return": "Live Return",
+      "col_manage": "Manage",
+      "staleness_min": "{n}m",
+      "staleness_sec": "{n}s",
+      "stale_basis": "as of {label} ago",
+      "title_bot_stop": "Stop bot",
+      "title_bot_start": "Start bot",
+      "title_delete_account": "Delete account permanently",
+      "pagination_summary": "Showing {from}-{to} of {total}",
+      "detail_title": "User Detail Profile",
+      "section_account": "Account & Sign-up Info",
+      "field_signup_at": "Sign-up Date",
+      "section_strategy": "Auto-Trading & Strategy Settings",
+      "field_current_mode": "Current Trade Mode",
+      "field_live_return": "Live Bot Return",
+      "field_algo_strategy": "Active Algorithm Strategy",
+      "field_broker": "Primary Broker",
+      "broker_none_sim": "None (Virtual Simulator)",
+      "section_broker_api": "Broker API Linkage",
+      "no_broker_api": "No linked broker API information.",
+      "field_masked_account": "Masked Account No.",
+      "value_unregistered": "Not registered",
+      "field_last_verified": "Last Verified",
+      "section_telegram": "Telegram Notification Info",
+      "field_notify_status": "Notification Status",
+      "value_enabled_on": "Enabled (ON)",
+      "value_disabled_off": "Disabled (OFF)",
+      "field_chat_id": "Chat ID",
+      "value_unset": "Not set",
+      "btn_bot_pause": "Pause Bot",
+      "btn_bot_start": "Start Bot Trading"
     }
+  },
+  "bot_signals": {
+    "radar_title": "Live Elite Breakout Radar (BREAKOUT RADAR WATCHLIST)",
+    "radar_empty": "No breakout radar tickers detected in real time. (Waiting for RVOL ≥ 2.0)"
+  },
+  "watchlist": {
+    "toast_added": "{ticker} ({name}) has been added to your watchlist.",
+    "toast_add_failed": "Failed to add to watchlist: {msg}",
+    "toast_removed": "Successfully removed from your watchlist.",
+    "toast_delete_failed": "Failed to delete: {msg}"
+  },
+  "error_boundary": {
+    "title": "Something went wrong while displaying this page",
+    "body": "This may be a temporary error. Please try again or go to the dashboard.",
+    "error_code": "Error code: {digest}",
+    "retry": "Try again",
+    "dashboard": "Dashboard"
+  },
+  "freshness": {
+    "min": "{n}m",
+    "sec": "{n}s"
+  },
+  "timezone": {
+    "local": "Local Device Time",
+    "local_with_abbr": "Local Device Time ({abbr})",
+    "seoul": "Korea Standard Time (KST)",
+    "new_york": "US Eastern Time (EST)",
+    "utc": "Coordinated Universal Time (UTC)"
   },
   "scanner": {
     "auth_checking": "Verifying your session...",
+    "manual_add_hint": "* First word becomes the ticker, the rest becomes the name automatically (e.g. <example>TSLA Tesla</example>)",
     "title": "Market Scanner",
     "subtitle": "Review the bot's live precision scan results and manage your watchlist in one place.",
     "tabs": {
