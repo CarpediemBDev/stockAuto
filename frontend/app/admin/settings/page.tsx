@@ -20,6 +20,7 @@ import {
 import { accountAPI, adminAPI, authAPI, reportAPI } from "@/lib/api";
 import useSWR from "swr";
 import { useTranslations } from "next-intl";
+import { StrategyCatalog } from "@/components/StrategyCatalog";
 
 type SubTab = "environment" | "telegram" | "danger";
 type TradeMode = string;
@@ -556,24 +557,12 @@ export default function PersonalSettingsPage() {
                   </div>
                   
                   <div className="relative">
-                    <label className="block text-xs font-semibold text-zinc-400 mb-1.5">{t("selected_strategy")}</label>
-                    {dbSettings.available_strategies && dbSettings.available_strategies.length > 0 ? (
-                      <select
-                        value={dbSettings.strategy_type || "regime_switching"}
-                        onChange={(e) => setDbSettings((prev) => ({ ...prev, strategy_type: e.target.value }))}
-                        className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-xs text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all cursor-pointer font-bold"
-                      >
-                        {dbSettings.available_strategies.map((strat) => (
-                          <option key={strat.id} value={strat.id} className="bg-zinc-950 text-white py-2">
-                            {strat.name} ({strat.id})
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div className="w-full py-3 rounded-lg border border-red-500/20 bg-red-500/5 text-red-400/80 text-xs text-center">
-                        {t("strategy_load_failed")}
-                      </div>
-                    )}
+                    <label className="block text-xs font-semibold text-zinc-400 mb-2">{t("selected_strategy")}</label>
+                    <StrategyCatalog
+                      value={dbSettings.strategy_type || "regime_switching"}
+                      onSelect={(id) => setDbSettings((prev) => ({ ...prev, strategy_type: id }))}
+                    />
+                    <p className="mt-2 text-[10px] text-zinc-500">{t("strategy_save_hint")}</p>
                   </div>
                 </div>
 

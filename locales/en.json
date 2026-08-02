@@ -100,6 +100,11 @@
     "portfolio_title": "Live Portfolio",
     "strategy_catalog_title": "Strategy Catalog",
     "strategy_catalog_desc": "Browse StockAuto's trading strategies and apply one instantly. Each strategy is either tuned for a specific market regime or built to adapt across all of them.",
+    "current_strategy_title": "Active Strategy",
+    "current_strategy_running": "Running",
+    "current_strategy_change": "Change in settings",
+    "current_strategy_unset": "No description for the selected strategy.",
+    "current_strategy_regime_hint": "Live market regime (bull/bear/neutral) is shown in the header above.",
     "close": "Close"
   },
   "report": {
@@ -367,6 +372,7 @@
     "active_strategy": "Active Strategy",
     "active_strategy_hint": "Choose the quant trading strategy this account's bot will run.",
     "selected_strategy": "Selected strategy",
+    "strategy_save_hint": "Pick a card, then press Save below to actually apply it.",
     "strategy_load_failed": "Failed to load available strategy information.",
     "broker_load_failed": "Failed to load available broker information.",
     "key_only_badge": "Key only",
