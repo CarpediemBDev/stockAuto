@@ -7,7 +7,7 @@ import { AccountBalance } from "./AccountBalance";
 import PortfolioView from "./PortfolioView";
 import { AssetTrendChart } from "./AssetTrendChart";
 import { LiveTradeTicker } from "./LiveTradeTicker";
-import { StrategyCatalog } from "./StrategyCatalog";
+import { CurrentStrategyBadge } from "./CurrentStrategyBadge";
 
 import useSWR from "swr";
 import { pollInterval } from "@/lib/sse";
@@ -78,12 +78,9 @@ export function Dashboard() {
         <div className="mb-12">
           <h2 className="text-xl font-bold text-slate-100 mb-4 flex items-center">
             <div className="w-1.5 h-6 bg-indigo-500 rounded-full mr-3"></div>
-            {t("strategy_catalog_title")}
+            {t("current_strategy_title")}
           </h2>
-          <p className="text-zinc-400 text-sm mb-6 max-w-3xl leading-relaxed">
-            {t("strategy_catalog_desc")}
-          </p>
-          <StrategyCatalog />
+          <CurrentStrategyBadge />
         </div>
       </div>
 
