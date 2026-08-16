@@ -16,7 +16,7 @@
 
 ## 2. 절대 어기면 안 되는 불문율 (Non-Negotiables)
 
-- **Git 동결:** `git add/commit/push/checkout`을 **자율 실행 금지**. 사용자가 "커밋하자/올리자"라고 명시할 때만. 조회용 `git status`는 허용.
+- **Git 동결 & 트리거별 정지선:** `git add/commit/push/checkout` 등 상태 변경 명령 **자율 실행 금지**. 트리거마다 도달 지점이 다르다 — "로컬 커밋만"(커밋까지) / "커밋하자·올리자"(**PR 상정까지, 병합 안 함**) / "머지까지 진행해"(병합·정리까지). 단독 "진행해"로 병합·브랜치 삭제 금지. 푸시·병합 직전 보고 의무. 조회용 `git status`, `git log`만 허용.
 - **분석 전용 = 코드 수정 금지:** 사용자가 질문·검토만 요청하면 코드를 고치지 않고 분석·계획만 제시한다.
 - **작업 선등록:** 코딩 시작 전 당일 `docs/tasks/YYYY-MM-DD.md`에 `[ ]`→`[/]`로 등록한다. 선등록 없는 코딩 금지.
 - **완료 보고 전 검증:** 보고 전 **`python scripts/verify_harness.py`**를 통과시킨다(계약/컴파일/pytest/lint/tsc/카오스/롤백). 통과 못 하면 "미검증"으로 사유와 함께 보고.
@@ -39,6 +39,9 @@ Antigravity/Codex 도구 이름으로 쓰여 있다. **Claude 세션은 아래�
 | `define_subagent` + `invoke_subagent` | `Task` 도구 (`subagent_type` 지정) |
 | `enable_write_tools: false` | 읽기 전용 서브에이전트(예: `Explore`) 선택 |
 | 3대 협업 역할(Researcher/Critical Auditor/QA) | `Task`로 역할별 프롬프트 위임, 또는 메인 세션이 순차 수행 |
+| 커밋 서명 `Co-authored-by: Antigravity <noreply@google.com>` | `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>` |
+
+> 커밋 서명은 **그 커밋을 실제로 만든 세션**을 기록하는 값이다(`AGENTS.md §2`). Claude 세션이 안티그래비티 서명을 대신 붙이거나 그 반대로 하지 않는다. 다른 세션이 워킹트리에 남긴 변경을 함께 커밋하면 서명이 사실과 달라지므로, 커밋 전 `git status`로 내 슬라이스만 스테이징한다.
 
 > 즉 멀티 에이전트 파이프라인의 **의도(분석→비판감사→하네스 검증)는 그대로 따르되**, 호출은 Claude의 `Task` 도구로 한다. `.codex/skills` 개인 설치본은 참조하지 않고 이 저장소의 `skills/`를 기준으로 한다.
 
