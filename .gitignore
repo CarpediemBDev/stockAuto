@@ -51,6 +51,8 @@ frontend/.env*
 
 # Claude Code (local settings, hooks, nested worktrees)
 .claude/
+# 개인 MCP 서버 등록(브라우저 자동화 등) — 팀 공유 설정이 아니라 로컬 도구 취향이라 제외
+.mcp.json
 
 
 
