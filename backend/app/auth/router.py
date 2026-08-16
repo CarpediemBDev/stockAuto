@@ -311,6 +311,14 @@ def login(
             if user.failed_login_attempts >= 5:
                 user.locked_until = utc_now_aware() + timedelta(minutes=15)
                 logger.error(f"[Security] Account {user.username} locked due to 5 consecutive failures.")
+                try:
+                    from app.core.telegram import send_message_sync
+                    send_message_sync(
+                        user.id,
+                        f"🚨 [보안 경고] 계정({user.username})에 5회 연속 로그인 실패가 발생하여 15분간 로그인이 잠겼습니다. 본인의 시도가 아니라면 즉시 비밀번호를 변경해 주십시오."
+                    )
+                except Exception as alert_err:
+                    logger.warning(f"[Security] Failed to send account lock telegram alert: {alert_err}")
             db.commit()
             logger.warning(f"[Auth] Failed login attempt for user: {payload.username} (Failed attempts: {user.failed_login_attempts})")
         else:

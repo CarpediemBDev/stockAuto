@@ -46,7 +46,8 @@ HTTP 상태 코드: `4xx` 또는 `5xx`
 
 ## 3. 프런트엔드 처리 가이드
 - **Axios Interceptor**: `frontend/lib/api.ts`에 정의된 인터셉터가 성공 시 자동으로 `data`를 추출하므로, 컴포넌트에서는 `res.data`를 통해 실제 데이터에 즉시 접근할 수 있습니다.
-- **에러 핸들링**: 에러 발생 시 인터셉터가 `error.message`에 백엔드의 `message` 값을 주입하므로, `error.message`를 그대로 UI에 출력하면 됩니다.
+- **에러 핸들링**: 에러 발생 시 인터셉터가 `error.message`에 백엔드의 `message` 값을 주입하며, UI 컴포넌트에서는 `getApiErrorMessage(err, fallback)` 공통 헬퍼를 사용하여 `429 Too Many Requests`(Rate Limit), `403 Forbidden`(계정 잠금), 유효성 검사 실패(`422`) 메시지를 일관되게 토스트/모달에 출력합니다.
+
 
 ---
 
@@ -69,6 +70,8 @@ HTTP 상태 코드: `4xx` 또는 `5xx`
 ## 5. 인증 및 보안 계약 (Auth & Security Contract)
 
 - **회원가입 Rate Limit (`POST /api/v1/auth/signup`)**: Bcrypt CPU 자원 고갈(DoS) 및 무한 계정 생성 방어를 위해 동일 IP당 60초 내 최대 30회, 동일 username당 60초 내 최대 10회로 호출이 제한되며 초과 시 `429 Too Many Requests`를 반환합니다.
-- **로그인 Brute-force 방어 (`POST /api/v1/auth/login`)**: 동일 계정 기준 60초 내 5회 호출 제한(RateLimiter) 및 연속 5회 비밀번호 불일치 시 15분간 계정이 자동 잠금(`403 Forbidden`)됩니다.
+- **로그인 Brute-force 방어 및 실시간 보안 알림 (`POST /api/v1/auth/login`)**: 동일 계정 기준 60초 내 5회 호출 제한(RateLimiter) 및 연속 5회 비밀번호 불일치 시 15분간 계정이 자동 잠금(`403 Forbidden`)되며, 텔레그램 연동 사용자에게 실시간 보안 경고 알림을 발송합니다(알림 실패 시에도 인증 트랜잭션이 영향받지 않도록 Fail-Safe 격리).
 - **쿠키 기반 인증 요청 출처 검증 (`POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`)**: 크로스 사이트 CSRF 방어를 위해 `Sec-Fetch-Site: cross-site` 요청을 즉시 `403 Forbidden`으로 차단하며, `Origin`/`Referer` 헤더가 제공될 경우 `get_allowed_origins()` 화이트리스트와 일치 여부를 검증합니다.
+- **텔레그램 연동 소유권 증명 (`POST /api/v1/admin/telegram/link-token`)**: 전역 단일 봇은 아무 텔레그램 사용자의 메시지나 수신하므로, 딥링크 페이로드는 반드시 서버가 발급한 1회용·만료형 토큰이어야 합니다. 사용자명은 비밀이 아니므로 연동 인증 수단으로 사용하지 않습니다(과거 `/start <사용자명>` 방식은 사용자명만 아는 제3자가 피해자 계정에 자기 chat_id를 묶어 포트폴리오 조회와 자동매매 기동·정지를 탈취할 수 있었습니다). 계약 — 인증된 본인 계정에만 발급, IP당 60초 내 최대 10회(`429 Too Many Requests`), 유효기간 10분, 1회 사용 시 즉시 폐기, 재발급 시 직전 토큰 무효화. 응답은 `deep_link`·`expires_at`·`expires_in_minutes`이며 원본 토큰은 이 응답에서 한 번만 노출되고 DB에는 SHA-256 지문만 저장됩니다. 봇 측에서 토큰이 불일치·만료·재사용이면 모두 동일한 안내(`telegram.link_invalid_token`)로 응답해 계정 존재 여부를 노출하지 않습니다.
+- **텔레그램 chat_id 배타적 소유 (`POST /api/v1/admin`)**: 수동 `telegram_chat_id` 입력이 이미 다른 계정에 연동된 chat_id를 가로채지 못하도록 중복 바인딩을 `409 Conflict`로 차단합니다. 딥링크 연동은 토큰으로 소유권을 증명하지만 이 입력란은 임의 문자열을 받기 때문입니다.
 

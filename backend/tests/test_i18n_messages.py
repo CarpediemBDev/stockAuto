@@ -168,6 +168,29 @@ class TestFrontendConsumedKeysExist:
         missing = sorted(consumed - defined)
         assert not missing, f"프론트가 쓰는데 ko.json에 없는 키: {missing}"
 
+    # ICU MessageFormat에서 '{name}' 은 "리터럴 {name}"을 뜻한다 — 감싼 따옴표는 사라지고
+    # 치환이 통째로 죽어 화면에 {name}이 그대로 찍힌다. 리터럴 따옴표는 ''로 이스케이프해야 한다.
+    # test_placeholders_match_across_languages는 \{(\w+) 로만 세므로 이 결함을 절대 못 잡고,
+    # 백엔드 str.format은 따옴표를 리터럴로 다뤄 같은 문자열이 멀쩡히 보인다. 그래서 프론트가
+    # 소비하는 키에 한해 따로 막는다(확인 토스트 제목에서 전략 이름이 사라졌던 결함의 재발 방지).
+    ICU_UNESCAPED_QUOTE = re.compile(r"(?<!')'(?!')\s*\{|\}\s*(?<!')'(?!')")
+
+    def test_frontend_keys_have_no_icu_quoted_placeholders(self):
+        consumed = self._consumed_keys()
+        assert consumed, "useTranslations 소비 키를 하나도 찾지 못했다 — 추출 정규식 점검 필요"
+        hits: list[str] = []
+        for lang in ("ko", "en"):
+            flat = _flatten(_load(lang))
+            for key in sorted(consumed):
+                text = flat.get(key)
+                if isinstance(text, str) and self.ICU_UNESCAPED_QUOTE.search(text):
+                    hits.append(f"{lang}.json / {key}: {text}")
+        assert not hits, (
+            "중괄호에 붙은 이스케이프되지 않은 작은따옴표를 발견했습니다. ICU가 이를 인용 기호로 "
+            "해석해 플레이스홀더 치환이 죽습니다. 리터럴 따옴표는 ''로 두 번 쓰세요:\n"
+            + "\n".join(hits)
+        )
+
     def _namespace_of(self, source: str) -> str | None:
         match = re.search(r"useTranslations\(\s*['\"]([^'\"]+)['\"]\s*\)", source)
         return match.group(1) if match else None
@@ -249,7 +272,7 @@ class TestNoHardcodedKoreanInFrontend:
         "app/layout.tsx": None,
         # 순수 모듈 함수라 useTranslations 불가 → 호출부 리팩터 필요(보류)
         "lib/utils.ts": {"알 수 없는 오류가 발생했습니다."},
-        "lib/api.ts": {"인증 갱신 응답 형식이 올바르지 않습니다."},
+        "lib/api.ts": {"인증 갱신 응답 형식이 올바르지 않습니다.", "알 수 없는 오류가 발생했습니다."},
         # 언어 전환 확인(대상 언어로 표기하는 이중언어) + 언어 셀렉터 자기명명
         "components/NavBar.tsx": {"한국어로 변경되었습니다.", "한국어 (KR)"},
     }
