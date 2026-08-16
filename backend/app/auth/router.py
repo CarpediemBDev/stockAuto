@@ -18,6 +18,7 @@ from app.core.security import (
     verify_password,
 )
 from app.core.dependencies import get_current_user
+from app.core.rate_limiter import RateLimiter
 from datetime import timedelta
 from urllib.parse import urlsplit
 
@@ -64,6 +65,13 @@ def _delete_refresh_cookie(response: Response) -> None:
 
 
 def _validate_cookie_request_origin(request: Request) -> None:
+    # 1. Sec-Fetch-Site 메타데이터 기반 크로스 사이트 CSRF 차단
+    sec_fetch_site = request.headers.get("sec-fetch-site", "").strip().lower()
+    if sec_fetch_site == "cross-site":
+        logger.warning("[Security] Blocked cross-site auth cookie request: Sec-Fetch-Site=%s", sec_fetch_site)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="허용되지 않은 크로스 사이트 요청입니다.")
+
+    # 2. Origin 및 Referer 헤더 기반 화이트리스트 검증
     origin = request.headers.get("origin")
     referer = request.headers.get("referer")
     check_url = origin or referer
@@ -211,7 +219,12 @@ class ChangePasswordSchema(BaseModel):
 # --- Routes ---
 
 @router.post("/signup", response_model=TokenResponseSchema, status_code=status.HTTP_201_CREATED)
-def signup(payload: SignupSchema, response: Response, db: Session = Depends(get_db)) -> dict:
+def signup(
+    payload: SignupSchema,
+    response: Response,
+    db: Session = Depends(get_db),
+    _rate_limit: None = Depends(RateLimiter(max_requests=10, window_seconds=60, key_field="username", peer_max_requests=30))
+) -> dict:
     """
     신규 사용자 회원가입 및 초기 설정 레코드 동시 생성 API (트랜잭션 원자성 강화)
     """
@@ -257,7 +270,6 @@ def signup(payload: SignupSchema, response: Response, db: Session = Depends(get_
 
     return _token_response(new_user, access_token)
 
-from app.core.rate_limiter import RateLimiter
 
 @router.post("/login", response_model=TokenResponseSchema)
 def login(

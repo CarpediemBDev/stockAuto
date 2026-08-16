@@ -63,3 +63,12 @@ HTTP 상태 코드: `4xx` 또는 `5xx`
 - 에프터장 후보 응답은 `scope=global`, `sync_status`, `updated_at`, `universe_size`, `candidates[]`를 반환하며 각 후보는 `score`, `signal_type`, `reasons`, `risk_flags`, `catalyst_keywords`, `details`를 포함합니다.
 - 에프터장 후보는 정규장 흐름과 에프터장 체결 확인을 표시하는 관찰용 랭킹이며 자동매매 진입 신호 캐시인 `/scanner/latest`와 섞지 않습니다.
 - 상세 생산자·캐시·소비자 관계는 `docs/SCANNER_DATA_FLOW.md`를 따릅니다.
+
+---
+
+## 5. 인증 및 보안 계약 (Auth & Security Contract)
+
+- **회원가입 Rate Limit (`POST /api/v1/auth/signup`)**: Bcrypt CPU 자원 고갈(DoS) 및 무한 계정 생성 방어를 위해 동일 IP당 60초 내 최대 30회, 동일 username당 60초 내 최대 10회로 호출이 제한되며 초과 시 `429 Too Many Requests`를 반환합니다.
+- **로그인 Brute-force 방어 (`POST /api/v1/auth/login`)**: 동일 계정 기준 60초 내 5회 호출 제한(RateLimiter) 및 연속 5회 비밀번호 불일치 시 15분간 계정이 자동 잠금(`403 Forbidden`)됩니다.
+- **쿠키 기반 인증 요청 출처 검증 (`POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`)**: 크로스 사이트 CSRF 방어를 위해 `Sec-Fetch-Site: cross-site` 요청을 즉시 `403 Forbidden`으로 차단하며, `Origin`/`Referer` 헤더가 제공될 경우 `get_allowed_origins()` 화이트리스트와 일치 여부를 검증합니다.
+
