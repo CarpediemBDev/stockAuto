@@ -43,6 +43,11 @@ _STRATEGY_PROFILES = {
         selection_eligible=False,
         reason="실제 다크풀 체결 대신 최대 거래량 봉의 가격을 사용합니다.",
     ),
+    "institutional_follow": StrategyDataProfile(
+        basis=StrategyDataBasis.OHLCV_PROXY,
+        selection_eligible=False,
+        reason="실제 기관/외인 수급 데이터의 생산자가 없어 거래량 폭증·20일선 눌림목 대리 지표만 사용하며, 3년 실측에서 QQQ 대비 약 -81%p 언더퍼폼했습니다(2026-08-02 현황판).",
+    ),
     "gamma_flip": StrategyDataProfile(
         basis=StrategyDataBasis.OHLCV_PROXY,
         selection_eligible=False,

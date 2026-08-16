@@ -131,6 +131,8 @@
     "users": {
       "title": "User Management & Live Arena",
       "sort_profit": "Rank by Return",
+      "search_placeholder": "Search user / strategy / broker...",
+      "search_clear": "Clear search",
       "loading": "Loading user data...",
       "no_data": "No users have signed up yet.",
       "toast_bot_started": "The bot has started successfully.",
@@ -459,7 +461,32 @@
       "regime_neutral": "Range-bound squeeze play",
       "no_description": "No strategy description available.",
       "selected": "Selected",
-      "select": "Select"
+      "select": "Select",
+      "catalog_and_compare": "Strategy catalog & comparison",
+      "modal_title": "Quant Trading Strategy Catalog & Comparison",
+      "modal_subtitle": "Compare quant algorithms tuned for the current market regime and your risk appetite, then pick one.",
+      "applying": "In use",
+      "select_action": "Select strategy"
+    },
+    "market_regime": {
+      "badge_title": "Quant regime diagnosis & strategy control",
+      "regime_bullish": "Bull market (BULLISH)",
+      "regime_bearish": "Bear market (BEARISH)",
+      "regime_neutral": "Range-bound (NEUTRAL)",
+      "current_label": "Active strategy:",
+      "tier_suffix": "{tier} TIER",
+      "optimal_running": "Running the regime-optimal strategy",
+      "recommend": "Quant pick: {name}",
+      "default_summary": "Automated trading is active under the current quant algorithm.",
+      "apply_recommended": "Apply quant pick in 1 click",
+      "change_and_compare": "Change & compare strategies",
+      "loading": "Loading settings...",
+      "confirm_title": "Switch to '{name}' right now?",
+      "confirm_desc": "🚨 This immediately replaces the live auto-trading strategy for your current mode ({mode}). Undoing it requires another switch.",
+      "confirm_action": "Switch now",
+      "confirm_cancel": "Cancel",
+      "change_success": "Switched to '{name}'.",
+      "change_failed": "Something went wrong while changing the strategy."
     },
     "asset_chart": {
       "loading": "Tracking 100% real asset data...",

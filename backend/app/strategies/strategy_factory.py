@@ -259,6 +259,10 @@ def _create_strategy(strategy_type: str) -> BaseStrategy:
     elif strategy_type == "dark_pool":
         from app.strategies.dark_pool import DarkPool
         return DarkPool()
+
+    elif strategy_type in ["institutional_follow", "smart_money_flow"]:
+        from app.strategies.institutional_follow import InstitutionalFollow
+        return InstitutionalFollow()
         
     elif strategy_type == "gamma_flip":
         from app.strategies.gamma_flip import GammaFlip
