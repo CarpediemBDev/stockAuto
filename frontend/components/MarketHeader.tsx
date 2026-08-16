@@ -2,33 +2,18 @@
 
 import React from 'react';
 import { TrendingUp, TrendingDown, DollarSign, Activity } from 'lucide-react';
-import useSWR from 'swr';
-import { pollInterval } from '@/lib/sse';
-import { fetcher } from '@/lib/api';
-
-interface MarketData {
-  symbol: string;
-  current: number;
-  change: number;
-  change_pct: number;
-}
-
-interface MarketOverview {
-  market_condition?: string;
-  sentiment: string;
-  nasdaq: MarketData | null;
-  exchange_rate: MarketData | null;
-}
+import { useMarketOverview, type MarketQuote } from '@/hooks/useMarketOverview';
 
 const MarketHeader = () => {
-  const { data: marketData, isLoading } = useSWR('/market/overview', fetcher, { refreshInterval: pollInterval(15000) });
-  const data: MarketOverview | null = marketData || null;
+  // 국면·시세 조회는 useMarketOverview 훅이 SSOT다(중복 useSWR/타입 선언 금지).
+  const { data: marketData, isLoading } = useMarketOverview();
+  const data = marketData || null;
 
   if (isLoading && !data) return <div className="h-14 bg-[#0f172a] border-b border-slate-800 animate-pulse"></div>;
   if (!data) return <div className="h-14 bg-[#0f172a] border-b border-slate-800"></div>;
   const marketCondition = data.market_condition ?? data.sentiment;
 
-  const renderValue = (item: MarketData | null, label: string, icon: React.ReactNode) => {
+  const renderValue = (item: MarketQuote | null, label: string, icon: React.ReactNode) => {
     if (!item) return null;
     const isUp = item.change >= 0;
     
