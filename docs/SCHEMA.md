@@ -45,6 +45,8 @@ erDiagram
         string kis_account_no
         string telegram_chat_id
         boolean telegram_enabled
+        string telegram_link_token_hash INDEX
+        datetime telegram_link_token_expires_at
         boolean is_running
         datetime updated_at
     }
@@ -135,8 +137,10 @@ erDiagram
 * `kis_app_key` (VARCHAR, Nullable): 한국투자증권 APP Key (암호화 권장)
 * `kis_app_secret` (VARCHAR, Nullable): 한국투자증권 APP Secret (암호화 권장)
 * `kis_account_no` (VARCHAR, Nullable): 한국투자증권 계좌번호
-* `telegram_chat_id` (VARCHAR, Nullable): 텔레그램 CHAT ID
+* `telegram_chat_id` (VARCHAR, Nullable): 텔레그램 CHAT ID. 한 chat_id는 한 계정에만 묶인다(중복 바인딩은 API에서 409로 차단)
 * `telegram_enabled` (BOOLEAN, Default: False): 텔레그램 알림 활성화 여부
+* `telegram_link_token_hash` (VARCHAR, Nullable, Index): 텔레그램 딥링크 연동 토큰의 SHA-256 지문. 원본은 발급 응답에서 1회만 노출되고 DB에는 저장하지 않는다. 소비·만료 시 NULL로 비운다
+* `telegram_link_token_expires_at` (DATETIME(tz), Nullable): 위 토큰의 만료 시각(발급 후 10분). 사용자명은 비밀이 아니므로 연동 인증 수단이 될 수 없어 도입된 소유권 증명 수단이다
 * `is_running` (BOOLEAN, Default: False): 사용자가 선택한 자동매매 실행 의도. 주문 처리·재조정·강제 청산은 이 값을 자동으로 변경하지 않습니다.
 * `updated_at` (DATETIME): 마지막 갱신 시간
 

@@ -11,7 +11,7 @@
     "order_pending_wait": "⚠️ *[미체결 주문 대기]*\n• *종목:* `{ticker}`\n• *구분:* `{side}`\n• *상태:* `{status_label} ({status})`\n• *주문번호:* `{order_no}`\n\n주문이 접수되었으나 아직 체결되지 않았습니다. 체결 완료 여부를 실시간으로 추적하는 중이며, 봇의 시작/정지 설정은 유지됩니다.",
     "network_fault": "⚠️ *[시스템 접속 장애 알림]*\n\n증권사(KIS) 또는 외부 네트워크 통신에 일시적인 장애가 감지되었습니다.\n시스템은 자동으로 자가 복구를 시도하며, 연결이 정상화되는 즉시 매매를 재개합니다.",
     "link_success": "🎉 *연동 성공!*\n\n`{username}`님 계정과 텔레그램 연동이 정상 완료되었습니다.\n이제 시스템 자동매매 매수/매도 알림이 실시간으로 발송됩니다.\n\n🤖 *사용 가능 원격 명령어:*\n• `/status` - 현재 시스템 동작 모드 및 포트폴리오 조회\n• `/run` - 자율 트레이딩 자동매매 루프 가동\n• `/stop` - 자율 트레이딩 자동매매 루프 정지",
-    "link_user_not_found": "⚠️ 존재하지 않는 사용자명입니다. 웹의 연동 시작 링크를 통해 다시 접속해 주세요.",
+    "link_invalid_token": "⚠️ 유효하지 않거나 이미 사용된 연동 링크입니다. 연동 링크는 발급 후 10분간, 1회만 사용할 수 있습니다.\n웹의 *개인 투자 설정 ➔ Telegram Bridge* 탭에서 연동 링크를 새로 발급받아 다시 시도해 주세요.",
     "not_linked_guide": "👋 *안녕하세요! StockAuto 트레이딩 브릿지입니다.*\n\n아직 본 계정의 텔레그램 연동이 완료되지 않았거나 비활성화 상태입니다.\n우리 주식 자동매매 웹 페이지의 **개인 투자 설정 ➔ Telegram Bridge** 탭에서 제공하는 **[🔗 텔레그램 연동 시작]** 버튼을 클릭하여 간편하게 연동을 마무리해 주세요!",
     "help": "👋 *안녕하세요! StockAuto 트레이딩 브릿지입니다.*\n\n사용 가능한 명령어 목록:\n• `/status` - 현재 시스템 동작 모드, 계좌 잔고 및 보유 종목 조회\n• `/run` - 자율 트레이딩 자동매매 루프 가동\n• `/stop` - 자율 트레이딩 자동매매 루프 정지",
     "already_running": "⚠️ *이미 자동매매 루프가 가동 중입니다.*",
@@ -352,7 +352,10 @@
       "password_mismatch": "새 비밀번호 확인이 일치하지 않습니다.",
       "password_changed": "비밀번호가 변경되었습니다. 다시 로그인해주세요.",
       "password_change_failed": "비밀번호 변경에 실패했습니다.",
-      "telegram_switch_first": "텔레그램 연동 스위치를 먼저 켜세요."
+      "telegram_switch_first": "텔레그램 연동 스위치를 먼저 켜세요.",
+      "telegram_link_issued": "연동 링크를 발급했습니다. 텔레그램에서 시작 버튼을 눌러 연동을 마쳐 주세요. (유효시간 {minutes}분, 1회용)",
+      "telegram_link_failed": "연동 링크 발급에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+      "telegram_link_popup_blocked": "브라우저가 새 탭을 차단했습니다. 팝업 차단을 해제하고 다시 시도해 주세요."
     },
     "cred_button": {
       "saved": "저장됨",
@@ -392,6 +395,7 @@
     "save_all": "전체 설정 저장",
     "telegram_link": "텔레그램 알림 연동",
     "one_click_connect": "1-Click 연결",
+    "one_click_connect_hint": "버튼을 누르면 본인 계정 전용 1회용 연동 링크가 발급됩니다. 링크는 10분간 유효하며 다른 사람과 공유하면 안 됩니다.",
     "official_telegram_connect": "공식 텔레그램 연결",
     "manual_chat_id": "수동 CHAT ID",
     "manual_report_send": "내 성적표 수동 발송",
@@ -466,6 +470,7 @@
       "regime_bullish": "상승장 (BULLISH)",
       "regime_bearish": "하락장 (BEARISH)",
       "regime_neutral": "횡보장 (NEUTRAL)",
+      "regime_unknown": "국면 확인 중",
       "current_label": "현재 실행 전략:",
       "tier_suffix": "{tier} TIER",
       "optimal_running": "국면 최적 전략 운용 중",
@@ -474,11 +479,11 @@
       "apply_recommended": "1-Click 퀀트 추천 적용",
       "change_and_compare": "전략 변경 & 비교",
       "loading": "설정을 불러오는 중...",
-      "confirm_title": "'{name}' 전략으로 지금 즉시 전환할까요?",
+      "confirm_title": "''{name}'' 전략으로 지금 즉시 전환할까요?",
       "confirm_desc": "🚨 현재 투자 모드({mode})의 라이브 자동매매 전략이 즉시 교체됩니다. 되돌리려면 다시 전환해야 합니다.",
       "confirm_action": "즉시 전환",
       "confirm_cancel": "취소",
-      "change_success": "'{name}' 전략으로 변경되었습니다.",
+      "change_success": "''{name}'' 전략으로 변경되었습니다.",
       "change_failed": "전략 변경 중 오류가 발생했습니다."
     },
     "asset_chart": {
@@ -599,7 +604,7 @@
       "notice_master_only_strong": "마스터 어드민 전용",
       "notice_master_only_post": "이며, 일반 유저에게는 노출되지 않습니다. 모든 변경 사항은 실시간으로 트레이딩 엔진에 동기화됩니다.",
       "coming_soon_title": "메뉴 오픈 예정",
-      "coming_soon_body": "선택하신 '{label}' 메뉴는 추후 시스템 고도화 시 연동될 예정입니다."
+      "coming_soon_body": "선택하신 ''{label}'' 메뉴는 추후 시스템 고도화 시 연동될 예정입니다."
     },
     "system_page": {
       "not_implemented": "미구현 (ping 미측정)"

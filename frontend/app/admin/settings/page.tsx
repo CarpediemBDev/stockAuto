@@ -1,6 +1,6 @@
 "use client";
 
-import React, { startTransition, useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "sonner";
@@ -55,7 +55,6 @@ interface UserSettings {
   broker_provider: string | null;
   telegram_chat_id: string;
   telegram_enabled: boolean;
-  global_bot_username?: string;
   credentials: CredentialMeta[];
   available_trade_modes: TradeModeOption[];
   available_brokers: BrokerOption[];
@@ -81,7 +80,6 @@ const DEFAULT_SETTINGS: UserSettings = {
   broker_provider: null,
   telegram_chat_id: "",
   telegram_enabled: false,
-  global_bot_username: "",
   credentials: [],
   available_trade_modes: [],
   available_brokers: [],
@@ -115,7 +113,7 @@ function unsupportedTradeModeMessage(
 export default function PersonalSettingsPage() {
   const t = useTranslations("settings");
   const router = useRouter();
-  const { clearAuth, isAuthenticated, isInitialized, username: storedUsername } = useAuthStore();
+  const { clearAuth, isAuthenticated, isInitialized } = useAuthStore();
   const [dbSettings, setDbSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   
   // Per-broker form state
@@ -123,7 +121,6 @@ export default function PersonalSettingsPage() {
   const [localVerified, setLocalVerified] = useState<Record<string, boolean>>({});
   const [credentialBroker, setCredentialBroker] = useState<string>("");
 
-  const [username, setUsername] = useState<string>("");
   const [subTab, setSubTab] = useState<SubTab>("environment");
   const [isSaving, setIsSaving] = useState(false);
   const [isCredentialSaving, setIsCredentialSaving] = useState(false);
@@ -133,23 +130,17 @@ export default function PersonalSettingsPage() {
   const [showLiquidateModal, setShowLiquidateModal] = useState(false);
   const [isDangerActionLoading, setIsDangerActionLoading] = useState(false);
   const [isPersonalReportSending, setIsPersonalReportSending] = useState(false);
+  const [isLinkTokenIssuing, setIsLinkTokenIssuing] = useState(false);
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [isPasswordChanging, setIsPasswordChanging] = useState(false);
 
   useEffect(() => {
-    if (isInitialized) {
-      if (!isAuthenticated) {
-        router.push("/login");
-        return;
-      }
-
-      startTransition(() => {
-        setUsername(storedUsername || "");
-      });
+    if (isInitialized && !isAuthenticated) {
+      router.push("/login");
     }
-  }, [isInitialized, isAuthenticated, storedUsername, router]);
+  }, [isInitialized, isAuthenticated, router]);
 
   const applySettings = useCallback((data: Partial<UserSettings>) => {
     const availableTradeModes = data.available_trade_modes || [];
@@ -160,7 +151,6 @@ export default function PersonalSettingsPage() {
       broker_provider: brokerProvider,
       telegram_chat_id: data.telegram_chat_id || "",
       telegram_enabled: Boolean(data.telegram_enabled),
-      global_bot_username: data.global_bot_username || "stockauto_official_bot",
       credentials: data.credentials || [],
       available_trade_modes: availableTradeModes,
       available_brokers: availableBrokers,
@@ -379,6 +369,35 @@ export default function PersonalSettingsPage() {
       toast.error((err as Error).message || t("toast.liquidate_failed"));
     } finally {
       setIsDangerActionLoading(false);
+    }
+  };
+
+  // 연동 딥링크는 서버가 발급하는 1회용 토큰으로만 만든다. 예전처럼 사용자명을 링크에
+  // 박으면 사용자명만 아는 제3자가 남의 계정에 자기 텔레그램을 묶을 수 있었다.
+  const handleStartTelegramLink = async () => {
+    if (!dbSettings.telegram_enabled) {
+      toast.warning(t("toast.telegram_switch_first"));
+      return;
+    }
+
+    setIsLinkTokenIssuing(true);
+    try {
+      const res = await adminAPI.createTelegramLinkToken();
+      const deepLink = res.data?.deep_link as string | undefined;
+      if (!deepLink) {
+        throw new Error(t("toast.telegram_link_failed"));
+      }
+      // 새 탭 차단(팝업 블로커) 시 사용자가 링크를 잃지 않도록 실패를 알린다.
+      const opened = window.open(deepLink, "_blank", "noopener,noreferrer");
+      if (opened) {
+        toast.success(t("toast.telegram_link_issued", { minutes: res.data?.expires_in_minutes ?? 10 }));
+      } else {
+        toast.warning(t("toast.telegram_link_popup_blocked"));
+      }
+    } catch (err) {
+      toast.error((err as Error).message || t("toast.telegram_link_failed"));
+    } finally {
+      setIsLinkTokenIssuing(false);
     }
   };
 
@@ -808,30 +827,22 @@ export default function PersonalSettingsPage() {
                   </div>
 
                   <div className="p-4 rounded-lg border border-indigo-500/20 bg-indigo-500/5 space-y-3">
-                    <span className="text-xs font-bold text-indigo-400">{t("one_click_connect")}</span>
-                    <a
-                      href={
-                        dbSettings.telegram_enabled && dbSettings.global_bot_username
-                          ? `https://t.me/${dbSettings.global_bot_username}?start=${username}`
-                          : "#"
-                      }
-                      onClick={(e) => {
-                        if (!dbSettings.telegram_enabled) {
-                          e.preventDefault();
-                          toast.warning(t("toast.telegram_switch_first"));
-                        }
-                      }}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs font-bold text-indigo-400">{t("one_click_connect")}</span>
+                      <p className="text-[10px] text-zinc-400">{t("one_click_connect_hint")}</p>
+                    </div>
+                    <button
+                      onClick={handleStartTelegramLink}
+                      disabled={!dbSettings.telegram_enabled || isLinkTokenIssuing}
                       className={`inline-flex w-full items-center justify-center gap-2 px-4 py-3 rounded-lg text-xs font-black transition-all active:scale-[0.98] shadow-md ${
-                        dbSettings.telegram_enabled
+                        dbSettings.telegram_enabled && !isLinkTokenIssuing
                           ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/20"
                           : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
                       }`}
                     >
-                      <Send className="w-3.5 h-3.5" />
+                      {isLinkTokenIssuing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                       {t("official_telegram_connect")}
-                    </a>
+                    </button>
                   </div>
 
                   <div className="p-4 rounded-lg border border-zinc-900 bg-zinc-900/10 space-y-3">

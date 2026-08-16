@@ -118,6 +118,16 @@ def decode_refresh_token(token: str) -> Union[str, None]:
         return None
 
 
+def _sha256_fingerprint(value: str) -> str:
+    """DB에 원본 대신 저장할 SHA-256 지문. 무작위 고엔트로피 토큰 전용(비밀번호 금지)."""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def hash_refresh_token(token: str) -> str:
     """DB 유출 시 원본 Refresh Token 재사용을 막기 위한 SHA-256 지문을 반환합니다."""
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return _sha256_fingerprint(token)
+
+
+def hash_telegram_link_token(token: str) -> str:
+    """DB 유출만으로 텔레그램 연동 토큰을 재사용하지 못하도록 SHA-256 지문을 반환합니다."""
+    return _sha256_fingerprint(token)
