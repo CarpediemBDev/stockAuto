@@ -98,8 +98,6 @@
     "currency_usd": "$ USD",
     "currency_krw": "₩ KRW",
     "portfolio_title": "Live Portfolio",
-    "strategy_catalog_title": "Strategy Catalog",
-    "strategy_catalog_desc": "Browse StockAuto's trading strategies and apply one instantly. Each strategy is either tuned for a specific market regime or built to adapt across all of them.",
     "close": "Close"
   },
   "report": {

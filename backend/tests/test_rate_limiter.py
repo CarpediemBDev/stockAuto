@@ -158,10 +158,15 @@ def test_auth_cookie_request_blocked_on_cross_site():
     """
     Sec-Fetch-Site가 cross-site인 경우 403 Forbidden으로 차단되는지 확인
     """
-    response = client.post(
-        "/api/v1/auth/refresh",
-        headers={"sec-fetch-site": "cross-site"},
-        cookies={"refresh_token": "some_dummy_token"},
-    )
+    # per-request cookies=는 starlette TestClient에서 폐기 예정(쿠키 지속 동작이 모호).
+    # 클라이언트 인스턴스에 직접 설정하고, 다른 테스트로 새지 않도록 반드시 되돌린다.
+    client.cookies.set("refresh_token", "some_dummy_token")
+    try:
+        response = client.post(
+            "/api/v1/auth/refresh",
+            headers={"sec-fetch-site": "cross-site"},
+        )
+    finally:
+        client.cookies.clear()
     assert response.status_code == 403
 
