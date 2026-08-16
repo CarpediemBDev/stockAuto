@@ -562,6 +562,9 @@ export default function PersonalSettingsPage() {
                       value={dbSettings.strategy_type || "regime_switching"}
                       onSelect={(id) => setDbSettings((prev) => ({ ...prev, strategy_type: id }))}
                     />
+                    {/* 이 화면의 선택은 폼 상태만 바꾸고 저장 버튼이 실제 적용을 담당한다.
+                        대시보드 위젯은 확인 후 즉시 전환이라 두 경로의 차이를 명시해야 한다. */}
+                    <p className="mt-2 text-[10px] text-zinc-500">{t("strategy_save_hint")}</p>
                   </div>
                 </div>
 
