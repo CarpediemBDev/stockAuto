@@ -21,6 +21,11 @@ from app.core.credentials import CredentialCryptoError, decrypt_credential, encr
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, get_current_admin_user
 from app.core.logging import logger
+from app.core.rate_limiter import RateLimiter
+from app.core.telegram import (
+    TELEGRAM_LINK_TOKEN_TTL_MINUTES,
+    issue_telegram_link_token,
+)
 from app.core.models import (
     AccountEquitySnapshot,
     ActionLog,
@@ -439,14 +444,53 @@ def update_user_settings(
             
             db_settings.strategy_type = new_strategy_type
 
+    # 수동 chat_id 입력이 이미 다른 계정에 묶인 chat_id를 가로채지 못하도록 차단한다.
+    # (딥링크 연동은 토큰으로 소유권을 증명하지만, 이 입력란은 임의 문자열을 받는다)
+    requested_chat_id = (payload.telegram_chat_id or "").strip()
+    if requested_chat_id:
+        taken_by_other = db.query(UserSettings).filter(
+            UserSettings.telegram_chat_id == requested_chat_id,
+            UserSettings.user_id != current_user.id,
+        ).first()
+        if taken_by_other:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="이미 다른 계정에 연동된 텔레그램 Chat ID입니다.",
+            )
+
     db_settings.trade_mode = trade_mode
     db_settings.broker_provider = provider
-    db_settings.telegram_chat_id = payload.telegram_chat_id
+    db_settings.telegram_chat_id = requested_chat_id or None
     db_settings.telegram_enabled = payload.telegram_enabled
 
     db.commit()
     db.refresh(db_settings)
     return _settings_response(db_settings, db)
+
+
+@router.post("/telegram/link-token")
+def create_telegram_link_token(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _rate_limit: None = Depends(RateLimiter(max_requests=10, window_seconds=60)),
+):
+    """텔레그램 딥링크용 1회용·만료형 연동 토큰을 발급합니다.
+
+    토큰은 인증된 '본인' 계정에만 발급되며, 이것이 연동 시 소유권 증명 수단입니다.
+    원본은 이 응답에서 한 번만 노출되고 DB에는 SHA-256 지문만 남습니다.
+    """
+    import os
+
+    token, expires_at = issue_telegram_link_token(db, current_user.id)
+    db.commit()
+
+    bot_username = os.getenv("TELEGRAM_BOT_USERNAME", "stockauto_official_bot")
+    logger.info("[Admin] Issued telegram link token for user_id=%s", current_user.id)
+    return {
+        "deep_link": f"https://t.me/{bot_username}?start={token}",
+        "expires_at": expires_at,
+        "expires_in_minutes": TELEGRAM_LINK_TOKEN_TTL_MINUTES,
+    }
 
 @router.get("/system-settings")
 def list_system_settings(

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authAPI } from "@/lib/api";
+import { authAPI, getApiErrorMessage } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -43,12 +43,11 @@ export default function LoginPage() {
       toast.success(t("login.toast.success"));
       router.push("/");
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : t("login.toast.failed");
+      const errorMessage = getApiErrorMessage(err, t("login.toast.failed"));
       toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
-
   };
 
   return (

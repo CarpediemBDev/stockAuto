@@ -11,7 +11,7 @@
     "order_pending_wait": "⚠️ *[Unfilled Order Pending]*\n• *Ticker:* `{ticker}`\n• *Side:* `{side}`\n• *Status:* `{status_label} ({status})`\n• *Order No:* `{order_no}`\n\nThe order was accepted but has not been filled yet. Fill status is being tracked in real time, and your bot start/stop preference is unchanged.",
     "network_fault": "⚠️ *[System Connectivity Alert]*\n\nA temporary disruption was detected in broker (KIS) or external network communication.\nThe system will automatically attempt self-recovery and resume trading as soon as the connection is restored.",
     "link_success": "🎉 *Linked Successfully!*\n\nYour account `{username}` is now linked with Telegram.\nAutomated buy/sell alerts will be delivered in real time.\n\n🤖 *Available Remote Commands:*\n• `/status` - Check current system mode and portfolio\n• `/run` - Start the autonomous trading loop\n• `/stop` - Stop the autonomous trading loop",
-    "link_user_not_found": "⚠️ That username does not exist. Please reconnect via the linking link on the web.",
+    "link_invalid_token": "⚠️ This linking link is invalid or has already been used. A linking link is valid for 10 minutes and can be used only once.\nPlease issue a new one under *Personal Investment Settings ➔ Telegram Bridge* on the web and try again.",
     "not_linked_guide": "👋 *Hello! This is the StockAuto Trading Bridge.*\n\nThis account is not linked with Telegram yet, or linking is disabled.\nPlease click the **[🔗 Start Telegram Linking]** button under **Personal Investment Settings ➔ Telegram Bridge** on the StockAuto web page to finish linking.",
     "help": "👋 *Hello! This is the StockAuto Trading Bridge.*\n\nAvailable commands:\n• `/status` - Check current system mode, account balance, and holdings\n• `/run` - Start the autonomous trading loop\n• `/stop` - Stop the autonomous trading loop",
     "already_running": "⚠️ *The trading loop is already running.*",
@@ -352,7 +352,10 @@
       "password_mismatch": "The new password confirmation does not match.",
       "password_changed": "Your password has been changed. Please log in again.",
       "password_change_failed": "Failed to change the password.",
-      "telegram_switch_first": "Turn on the Telegram integration switch first."
+      "telegram_switch_first": "Turn on the Telegram integration switch first.",
+      "telegram_link_issued": "Linking link issued. Press start in Telegram to finish linking. (valid for {minutes} minutes, single use)",
+      "telegram_link_failed": "Could not issue a linking link. Please try again in a moment.",
+      "telegram_link_popup_blocked": "Your browser blocked the new tab. Allow pop-ups and try again."
     },
     "cred_button": {
       "saved": "Saved",
@@ -392,6 +395,7 @@
     "save_all": "Save all settings",
     "telegram_link": "Telegram notifications",
     "one_click_connect": "1-Click connect",
+    "one_click_connect_hint": "This button issues a single-use linking link for your own account. It is valid for 10 minutes and must not be shared.",
     "official_telegram_connect": "Connect official Telegram",
     "manual_chat_id": "Manual CHAT ID",
     "manual_report_send": "Send my report manually",
@@ -466,6 +470,7 @@
       "regime_bullish": "Bull market (BULLISH)",
       "regime_bearish": "Bear market (BEARISH)",
       "regime_neutral": "Range-bound (NEUTRAL)",
+      "regime_unknown": "Checking regime",
       "current_label": "Active strategy:",
       "tier_suffix": "{tier} TIER",
       "optimal_running": "Running the regime-optimal strategy",
@@ -474,11 +479,11 @@
       "apply_recommended": "Apply quant pick in 1 click",
       "change_and_compare": "Change & compare strategies",
       "loading": "Loading settings...",
-      "confirm_title": "Switch to '{name}' right now?",
+      "confirm_title": "Switch to ''{name}'' right now?",
       "confirm_desc": "🚨 This immediately replaces the live auto-trading strategy for your current mode ({mode}). Undoing it requires another switch.",
       "confirm_action": "Switch now",
       "confirm_cancel": "Cancel",
-      "change_success": "Switched to '{name}'.",
+      "change_success": "Switched to ''{name}''.",
       "change_failed": "Something went wrong while changing the strategy."
     },
     "asset_chart": {
@@ -599,7 +604,7 @@
       "notice_master_only_strong": "master-admin only",
       "notice_master_only_post": " and is not exposed to regular users. All changes sync to the trading engine in real time.",
       "coming_soon_title": "Menu coming soon",
-      "coming_soon_body": "The '{label}' menu will be integrated in a future system upgrade."
+      "coming_soon_body": "The ''{label}'' menu will be integrated in a future system upgrade."
     },
     "system_page": {
       "not_implemented": "Not implemented (ping not measured)"

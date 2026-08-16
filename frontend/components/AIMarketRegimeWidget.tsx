@@ -8,21 +8,27 @@ import { Sparkles, TrendingUp, Zap, Shield, Target, CheckCircle2, Loader2, Award
 import { toast } from "sonner";
 import { StrategySelectModal } from "./StrategySelectModal";
 import { useStrategyCatalog, DEFAULT_STRATEGY_ID } from "@/hooks/useStrategyCatalog";
+import { useMarketOverview } from "@/hooks/useMarketOverview";
 
 export function AIMarketRegimeWidget() {
   const t = useTranslations("components");
   const { data: adminSettings, mutate: mutateSettings } = useSWR("/admin", fetcher);
   // 카탈로그 조회·타입 SSOT는 useStrategyCatalog 훅이다(중복 useSWR/타입 선언 금지).
   const { strategies } = useStrategyCatalog();
+  // 시장 국면 SSOT는 /market/overview 다. 예전엔 adminSettings.market_regime을 읽었는데
+  // 그 필드는 응답에 존재조차 하지 않아 폴백 "BULLISH"가 상시 표시됐고, 같은 화면의
+  // 헤더·관제탑이 NEUTRAL을 가리키는 동안 위젯만 상승장이라고 주장하고 있었다.
+  const { regime: currentRegime } = useMarketOverview();
   const [isApplying, setIsApplying] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // 현재 백엔드/스캐너 국면 계산 (BULLISH / BEARISH / NEUTRAL)
-  const currentRegime: "BULLISH" | "BEARISH" | "NEUTRAL" =
-    (adminSettings?.market_regime as "BULLISH" | "BEARISH" | "NEUTRAL") || "BULLISH";
+  // 국면을 모르는 동안에는 추천을 계산하지 않는다. 임의의 기본 국면으로 계산한 추천은
+  // 근거 없는 매매 유도가 된다.
+  const isRegimeReady = Boolean(currentRegime);
 
   // DB 카탈로그 데이터를 기반으로 하드코딩 없이 동적(Dynamic) 추천 전략 추출
   const recommendedStrategy = (() => {
+    if (!currentRegime) return null;
     if (!strategies || strategies.length === 0) return null;
 
     // 1단계: 현재 시장 국면과 일치하거나 전천후(ALL)인 전략 필터링
@@ -59,6 +65,8 @@ export function AIMarketRegimeWidget() {
 
   const targetRecommended = recommendedStrategy || currentStrategy;
   const isAlreadyApplied = !targetRecommended || currentActiveStrategyId === targetRecommended.id;
+  // 추천·최적 여부는 국면이 확정된 뒤에만 주장할 수 있다.
+  const canJudgeOptimality = isRegimeReady && Boolean(targetRecommended);
 
   // 실제 저장. 확인 단계를 거친 뒤에만 호출된다.
   const applyStrategy = async (strategyId: string) => {
@@ -139,7 +147,7 @@ export function AIMarketRegimeWidget() {
     }
   };
 
-  const regimeInfo = getRegimeBadge(currentRegime);
+  const regimeInfo = currentRegime ? getRegimeBadge(currentRegime) : null;
 
   return (
     <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-950/40 via-zinc-900/80 to-purple-950/40 border border-indigo-500/25 p-4 md:p-5 shadow-xl transition-all duration-300">
@@ -154,11 +162,18 @@ export function AIMarketRegimeWidget() {
               {t("market_regime.badge_title")}
             </span>
 
-            <span className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border ${regimeInfo.color}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${regimeInfo.dot} animate-ping`} />
-              {regimeInfo.icon}
-              {regimeInfo.label}
-            </span>
+            {regimeInfo ? (
+              <span className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border ${regimeInfo.color}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${regimeInfo.dot} animate-ping`} />
+                {regimeInfo.icon}
+                {regimeInfo.label}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border bg-zinc-500/10 text-zinc-400 border-zinc-500/30">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                {t("market_regime.regime_unknown")}
+              </span>
+            )}
           </div>
 
           <div className="pt-1 flex flex-col sm:flex-row sm:items-center gap-2">
@@ -170,7 +185,7 @@ export function AIMarketRegimeWidget() {
               </span>
             </span>
 
-            {isAlreadyApplied || !targetRecommended ? (
+            {!canJudgeOptimality ? null : isAlreadyApplied ? (
               <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
                 <CheckCircle2 className="w-3.5 h-3.5" /> {t("market_regime.optimal_running")}
               </span>
@@ -195,7 +210,7 @@ export function AIMarketRegimeWidget() {
             </span>
           )}
 
-          {isSettingsReady && !isAlreadyApplied && targetRecommended && (
+          {isSettingsReady && canJudgeOptimality && !isAlreadyApplied && targetRecommended && (
             <button
               type="button"
               disabled={isApplying}

@@ -6,7 +6,7 @@ set "BACKEND_DIR=%PROJECT_ROOT%backend"
 set "FRONTEND_DIR=%PROJECT_ROOT%frontend"
 set "BACKEND_PYTHON=%BACKEND_DIR%\venv\Scripts\python.exe"
 set "CHECK_ONLY=0"
-set "KILL_EXISTING=0"
+set "KILL_ONLY=0"
 
 :parse_args
 if "%~1"=="" goto :args_done
@@ -16,17 +16,25 @@ if /I "%~1"=="--check" (
     goto :parse_args
 )
 if /I "%~1"=="--kill" (
-    set "KILL_EXISTING=1"
     shift
     goto :parse_args
 )
 if /I "%~1"=="--restart" (
-    set "KILL_EXISTING=1"
+    shift
+    goto :parse_args
+)
+if /I "%~1"=="--stop" (
+    set "KILL_ONLY=1"
+    shift
+    goto :parse_args
+)
+if /I "%~1"=="--kill-only" (
+    set "KILL_ONLY=1"
     shift
     goto :parse_args
 )
 echo [FAIL] Unsupported argument: %1
-echo Usage: start_dev.bat [--check] [--kill] [--restart]
+echo Usage: start_dev.bat [--check] [--kill] [--restart] [--stop]
 exit /b 2
 
 :args_done
@@ -151,58 +159,28 @@ goto :wait_redis
 :redis_ready
 echo [OK] Redis at 127.0.0.1:6379
 
-if "%KILL_EXISTING%"=="1" (
-    echo =============================================================
-    echo [INFO] Killing existing StockAuto frontend and backend...
-    echo =============================================================
-    
-    :: 1. Close cmd windows with titles starting with StockAuto Backend or StockAuto Frontend
-    taskkill /F /FI "WINDOWTITLE eq StockAuto Backend*" >nul 2>&1
-    taskkill /F /FI "WINDOWTITLE eq StockAuto Frontend*" >nul 2>&1
-    
-    :: 2. Find and kill processes listening on ports 8000 and 3000
-    for /f "tokens=5" %%A in ('netstat -ano ^| findstr /R /C:"[.:]8000 " ^| findstr LISTENING') do (
-        echo Killing backend process ^(PID %%A^) on port 8000...
-        taskkill /F /PID %%A >nul 2>&1
-    )
-    for /f "tokens=5" %%A in ('netstat -ano ^| findstr /R /C:"[.:]3000 " ^| findstr LISTENING') do (
-        echo Killing frontend process ^(PID %%A^) on port 3000...
-        taskkill /F /PID %%A >nul 2>&1
-    )
-    
-    :: Give OS a moment to release ports
-    powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 1" >nul 2>&1
-)
-
-set "START_BACKEND=1"
-set "START_FRONTEND=1"
-
-
-call :port_open 8000
-if errorlevel 1 goto :check_frontend_port
-call :url_contains "http://127.0.0.1:8000/" "StockAuto" 5
-if errorlevel 1 (
-    set "ERROR_MESSAGE=Port 8000 is used by a service other than StockAuto. Stop that process and retry."
-    goto :fail
-)
-set "START_BACKEND=0"
-echo [OK] StockAuto backend is already running on port 8000
-
-:check_frontend_port
-call :port_open 3000
-if errorlevel 1 goto :ports_ready
-call :url_contains "http://127.0.0.1:3000/" "StockAuto" 15
-if errorlevel 1 (
-    set "ERROR_MESSAGE=Port 3000 is used by a service other than StockAuto. Stop that process and retry."
-    goto :fail
-)
-set "START_FRONTEND=0"
-echo [OK] StockAuto frontend is already running on port 3000
-
-:ports_ready
-echo [OK] Development port ownership
-
 if "%CHECK_ONLY%"=="1" (
+    call :port_open 8000
+    if not errorlevel 1 (
+        call :url_contains "http://127.0.0.1:8000/" "StockAuto" 5
+        if errorlevel 1 (
+            set "ERROR_MESSAGE=Port 8000 is used by a service other than StockAuto. Stop that process and retry."
+            goto :fail
+        )
+        echo [OK] StockAuto backend is already running on port 8000
+    )
+
+    call :port_open 3000
+    if not errorlevel 1 (
+        call :url_contains "http://127.0.0.1:3000/" "StockAuto" 15
+        if errorlevel 1 (
+            set "ERROR_MESSAGE=Port 3000 is used by a service other than StockAuto. Stop that process and retry."
+            goto :fail
+        )
+        echo [OK] StockAuto frontend is already running on port 3000
+    )
+
+    echo [OK] Development port ownership
     echo =============================================================
     echo [PASS] All checks passed. No server was started.
     echo =============================================================
@@ -210,20 +188,78 @@ if "%CHECK_ONLY%"=="1" (
     exit /b 0
 )
 
-echo.
-if "%START_BACKEND%"=="1" (
-    echo [1/2] Starting backend: http://localhost:8000
-    start "StockAuto Backend" /D "%BACKEND_DIR%" cmd.exe /k "venv\Scripts\python.exe run.py local"
-) else (
-    echo [1/2] Backend is already running: http://localhost:8000
+echo =============================================================
+echo [INFO] Terminating existing StockAuto processes and freeing ports...
+echo =============================================================
+
+:: 1. Close cmd windows with titles starting with StockAuto Backend or StockAuto Frontend
+taskkill /F /FI "WINDOWTITLE eq StockAuto Backend*" >nul 2>&1
+taskkill /F /FI "WINDOWTITLE eq StockAuto Frontend*" >nul 2>&1
+
+:: 2. Find and kill process tree listening on port 8000 (Backend)
+for /f "tokens=5" %%A in ('netstat -ano ^| findstr /R /C:"[.:]8000 " ^| findstr LISTENING') do (
+    if not "%%A"=="0" (
+        echo Terminating backend process tree ^(PID %%A^) on port 8000...
+        taskkill /F /T /PID %%A >nul 2>&1
+    )
 )
 
-if "%START_FRONTEND%"=="1" (
-    echo [2/2] Starting frontend: http://localhost:3000
-    start "StockAuto Frontend" /D "%FRONTEND_DIR%" cmd.exe /k "call npm.cmd run local"
-) else (
-    echo [2/2] Frontend is already running: http://localhost:3000
+:: 3. Find and kill process tree listening on port 3000 (Frontend)
+for /f "tokens=5" %%A in ('netstat -ano ^| findstr /R /C:"[.:]3000 " ^| findstr LISTENING') do (
+    if not "%%A"=="0" (
+        echo Terminating frontend process tree ^(PID %%A^) on port 3000...
+        taskkill /F /T /PID %%A >nul 2>&1
+    )
 )
+
+:: 4. Wait for OS socket release (up to 5 seconds)
+set /a PORT_RELEASE_WAIT=0
+:wait_ports_release
+set "PORTS_RELEASED=1"
+call :port_open 8000
+if not errorlevel 1 set "PORTS_RELEASED=0"
+call :port_open 3000
+if not errorlevel 1 set "PORTS_RELEASED=0"
+if "%PORTS_RELEASED%"=="1" goto :ports_clean
+set /a PORT_RELEASE_WAIT+=1
+if %PORT_RELEASE_WAIT% GEQ 5 goto :ports_clean
+powershell.exe -NoProfile -NonInteractive -Command "Start-Sleep -Milliseconds 500" >nul 2>&1
+goto :wait_ports_release
+
+:ports_clean
+
+if "%KILL_ONLY%"=="1" (
+    echo =============================================================
+    echo [PASS] Existing StockAuto processes terminated successfully.
+    echo =============================================================
+    popd
+    exit /b 0
+)
+
+call :port_open 8000
+if not errorlevel 1 (
+    call :url_contains "http://127.0.0.1:8000/" "StockAuto" 5
+    if errorlevel 1 (
+        set "ERROR_MESSAGE=Port 8000 is occupied by another service. Stop that process and retry."
+        goto :fail
+    )
+)
+call :port_open 3000
+if not errorlevel 1 (
+    call :url_contains "http://127.0.0.1:3000/" "StockAuto" 15
+    if errorlevel 1 (
+        set "ERROR_MESSAGE=Port 3000 is occupied by another service. Stop that process and retry."
+        goto :fail
+    )
+)
+echo [OK] Development port ownership
+
+echo.
+echo [1/2] Starting backend: http://localhost:8000
+start "StockAuto Backend" /D "%BACKEND_DIR%" cmd.exe /k "venv\Scripts\python.exe run.py local"
+
+echo [2/2] Starting frontend: http://localhost:3000
+start "StockAuto Frontend" /D "%FRONTEND_DIR%" cmd.exe /k "call npm.cmd run local"
 
 echo [INFO] Waiting for both servers to become ready...
 set /a SERVER_WAIT_COUNT=0

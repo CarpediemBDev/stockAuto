@@ -19,9 +19,15 @@ interface RetryableRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
 }
 
+interface ApiErrorDetailItem {
+  msg?: string;
+  loc?: (string | number)[];
+  type?: string;
+}
+
 interface ApiErrorPayload {
   error?: { message?: string };
-  detail?: string;
+  detail?: string | ApiErrorDetailItem[];
 }
 
 export interface AuthSession {
@@ -62,6 +68,45 @@ const parseAuthSession = (payload: {
     role: data.role,
   };
 };
+
+/**
+ * API 요청 중 발생한 에러(AxiosError, Error, ValidationError 등)에서
+ * 백엔드 표준 규격 메시지를 안전하고 일관되게 추출하는 클린 헬퍼 함수
+ */
+export function getApiErrorMessage(error: unknown, fallbackMessage: string = "알 수 없는 오류가 발생했습니다."): string {
+  if (!error) return fallbackMessage;
+
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as ApiErrorPayload | undefined;
+    if (data?.error?.message) {
+      return data.error.message;
+    }
+    if (data?.detail) {
+      if (typeof data.detail === "string") {
+        return data.detail;
+      }
+      if (Array.isArray(data.detail) && data.detail.length > 0) {
+        const firstItem = data.detail[0];
+        if (firstItem && typeof firstItem === "object" && firstItem.msg) {
+          return String(firstItem.msg);
+        }
+      }
+    }
+    if (error.message) {
+      return error.message;
+    }
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return fallbackMessage;
+}
 
 export const refreshAuthSession = (): Promise<AuthSession> => {
   if (!refreshSessionPromise) {
@@ -159,11 +204,7 @@ api.interceptors.response.use(
       }
     }
 
-    if (axiosError.response?.data?.error?.message) {
-      axiosError.message = axiosError.response.data.error.message;
-    } else if (axiosError.response?.data?.detail) {
-      axiosError.message = axiosError.response.data.detail;
-    }
+    axiosError.message = getApiErrorMessage(axiosError, axiosError.message);
     return Promise.reject(axiosError);
   }
 );
@@ -239,6 +280,7 @@ export const adminAPI = {
   getSystemSettings: (config?: AxiosRequestConfig) => api.get('/admin/system-settings', config),
   updateSystemSetting: (key: string, payload: Record<string, unknown>) => api.patch(`/admin/system-settings/${key}`, payload),
   verifyAndSaveCredentials: (payload: Record<string, unknown>) => api.post('/admin/credentials/verify-and-save', payload),
+  createTelegramLinkToken: () => api.post('/admin/telegram/link-token'),
   deleteCredential: (provider: string) => api.delete(`/admin/credentials/${provider}`),
   getUsers: (config?: AxiosRequestConfig) => api.get('/admin/users', config),
   toggleUserBot: (userId: number) => api.post(`/admin/users/${userId}/toggle-bot`),
@@ -259,3 +301,5 @@ export const systemAPI = {
 export const fetcher = (url: string) => api.get(url).then(res => res.data);
 
 export default api;
+
+

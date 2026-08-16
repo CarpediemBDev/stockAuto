@@ -111,6 +111,11 @@ class UserSettings(Base):
     # 텔레그램 설정
     telegram_chat_id = Column(String, nullable=True)
     telegram_enabled = Column(Boolean, default=False)
+
+    # 텔레그램 연동 딥링크 토큰. 원본이 아닌 SHA-256 지문만 저장하며, 1회 사용 또는
+    # 만료 즉시 NULL로 비운다. 사용자명 기반 연동(누구나 추측 가능)을 대체하는 소유권 증명 수단.
+    telegram_link_token_hash = Column(String, nullable=True, index=True)
+    telegram_link_token_expires_at = Column(AwareDateTime, nullable=True)
     
     # 다국어 설정 (ko/en)
     language = Column(String(10), default="ko")

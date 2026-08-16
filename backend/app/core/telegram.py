@@ -1,14 +1,70 @@
 import asyncio
+import secrets
 import threading
+from datetime import timedelta
 import httpx
 from concurrent.futures import ThreadPoolExecutor
 from app.core.config import settings
 from app.brokers.broker_factory import get_broker_client
 from app.core.database import SessionLocal
-from app.core.models import UserSettings, Holding
+from app.core.models import UserSettings, Holding, utc_now_aware
 from app.bot.fx_cache import FXRateCache
 from app.core.logging import logger
 from app.core.i18n import I18n, resolve_user_language
+from app.core.security import hash_telegram_link_token
+
+# 연동 딥링크 토큰의 수명. 짧게 잡아 링크가 채팅 기록·브라우저 히스토리에 남더라도
+# 재사용 창을 최소화한다. 소비 즉시 폐기되므로 실질 수명은 이보다 더 짧다.
+TELEGRAM_LINK_TOKEN_TTL_MINUTES = 10
+# 텔레그램 /start 페이로드 한도(64자) 안에 들어가는 128비트 난수.
+TELEGRAM_LINK_TOKEN_BYTES = 16
+
+
+def issue_telegram_link_token(db, user_id: int) -> tuple[str, "object"]:
+    """사용자 본인 세션에서만 발급되는 1회용 연동 토큰을 만들고 (원본, 만료시각)을 돌려준다.
+
+    DB에는 원본이 아닌 SHA-256 지문만 남는다. 재발급하면 직전 토큰은 즉시 무효가 된다.
+    커밋은 호출자 책임(라우터의 트랜잭션 경계를 침범하지 않기 위함).
+    """
+    db_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+    if not db_settings:
+        db_settings = UserSettings(user_id=user_id)
+        db.add(db_settings)
+
+    token = secrets.token_urlsafe(TELEGRAM_LINK_TOKEN_BYTES)
+    expires_at = utc_now_aware() + timedelta(minutes=TELEGRAM_LINK_TOKEN_TTL_MINUTES)
+    db_settings.telegram_link_token_hash = hash_telegram_link_token(token)
+    db_settings.telegram_link_token_expires_at = expires_at
+    return token, expires_at
+
+
+def consume_telegram_link_token(db, token: str) -> UserSettings | None:
+    """연동 토큰을 검증하고 성공 시 해당 UserSettings를 반환하며 토큰을 즉시 폐기한다.
+
+    만료·불일치·이미 사용됨은 모두 None으로 동일하게 처리한다(존재 여부 노출 금지).
+    커밋은 호출자 책임.
+    """
+    normalized = (token or "").strip()
+    if not normalized:
+        return None
+
+    token_hash = hash_telegram_link_token(normalized)
+    db_settings = (
+        db.query(UserSettings)
+        .filter(UserSettings.telegram_link_token_hash == token_hash)
+        .first()
+    )
+    if not db_settings:
+        return None
+
+    expires_at = db_settings.telegram_link_token_expires_at
+    # 1회용이므로 만료된 토큰이라도 조회된 이상 즉시 비워 재시도 여지를 남기지 않는다.
+    db_settings.telegram_link_token_hash = None
+    db_settings.telegram_link_token_expires_at = None
+    if not expires_at or expires_at < utc_now_aware():
+        return None
+
+    return db_settings
 
 
 def _lang_from_telegram_code(code: str | None) -> str:
@@ -186,39 +242,48 @@ def _process_global_message(msg_chat_id: str, text: str, tg_lang_code: str | Non
     direct_message = None
     db = SessionLocal()
     try:
-        # 1. 딥링크 연동 시도 (/start username) 우선 처리
+        # 1. 딥링크 연동 시도 (/start <1회용 링크 토큰>) 우선 처리.
+        #    ⚠️ 과거에는 여기서 사용자명을 그대로 받아 연동했다. 전역 봇은 아무 텔레그램
+        #    사용자의 메시지나 수신하므로, 그 구조에서는 피해자 사용자명만 알면 chat_id를
+        #    남의 계정에 묶어 포트폴리오 조회와 자동매매 기동/정지를 탈취할 수 있었다.
+        #    사용자명은 비밀이 아니므로 소유권 증명이 되지 못한다 — 서버 발급 토큰만 받는다.
         if cmd == "/start" and len(parts) > 1:
-            auth_username = parts[1].strip()
-            from app.core.models import User
-            user = db.query(User).filter(User.username == auth_username).first()
-            if user:
-                # 동일한 chat_id를 가지고 있던 다른 계정들의 연동 해제 및 정리 (1:1 매핑 보장)
-                existing_others = db.query(UserSettings).filter(
-                    UserSettings.telegram_chat_id == msg_chat_id,
-                    UserSettings.user_id != user.id
-                ).all()
-                for other_setting in existing_others:
-                    other_setting.telegram_chat_id = ""
-                    other_setting.telegram_enabled = False
-
-                u_settings = db.query(UserSettings).filter(UserSettings.user_id == user.id).first()
-                if not u_settings:
-                    u_settings = UserSettings(user_id=user.id)
-                    db.add(u_settings)
-
-                u_settings.telegram_chat_id = msg_chat_id
-                u_settings.telegram_enabled = True
-                db.commit()
-
-                # 방금 연동된 계정이라 UserSettings.language를 SSOT로 사용한다.
+            u_settings = consume_telegram_link_token(db, parts[1])
+            if not u_settings:
+                db.commit()  # 실패해도 소비된 토큰 폐기는 확정한다.
                 direct_message = I18n.get_msg(
-                    resolve_user_language(db, user.id),
-                    "telegram.link_success",
-                    username=user.username,
+                    _lang_from_telegram_code(tg_lang_code), "telegram.link_invalid_token"
                 )
-                logger.info(f"[TelegramBot] Successfully linked Chat ID {msg_chat_id} to User: {user.username}")
-            else:
-                direct_message = I18n.get_msg(_lang_from_telegram_code(tg_lang_code), "telegram.link_user_not_found")
+                logger.warning(
+                    "[TelegramBot] Rejected link attempt with invalid/expired token from chat_id=%s",
+                    msg_chat_id,
+                )
+                return
+
+            linked_user_id = u_settings.user_id
+
+            # 동일한 chat_id를 가지고 있던 다른 계정들의 연동 해제 및 정리 (1:1 매핑 보장)
+            existing_others = db.query(UserSettings).filter(
+                UserSettings.telegram_chat_id == msg_chat_id,
+                UserSettings.user_id != linked_user_id
+            ).all()
+            for other_setting in existing_others:
+                other_setting.telegram_chat_id = ""
+                other_setting.telegram_enabled = False
+
+            u_settings.telegram_chat_id = msg_chat_id
+            u_settings.telegram_enabled = True
+            db.commit()
+
+            # 방금 연동된 계정이라 UserSettings.language를 SSOT로 사용한다.
+            from app.core.models import User
+            linked_user = db.query(User).filter(User.id == linked_user_id).first()
+            direct_message = I18n.get_msg(
+                resolve_user_language(db, linked_user_id),
+                "telegram.link_success",
+                username=linked_user.username if linked_user else "",
+            )
+            logger.info(f"[TelegramBot] Successfully linked Chat ID {msg_chat_id} to user_id={linked_user_id}")
             return
 
         # 2. 일반 명령어 수신 시: 텔레그램 연동이 활성화(telegram_enabled=True)된 유저만 조회
