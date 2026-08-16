@@ -100,11 +100,6 @@
     "portfolio_title": "실시간 포트폴리오 (Portfolio)",
     "strategy_catalog_title": "전략 카탈로그 (Strategy Catalog)",
     "strategy_catalog_desc": "StockAuto의 다양한 매매 전략을 확인하고 즉시 적용할 수 있습니다. 각 전략은 특정 장세에 최적화되어 있거나 모든 상황에 유연하게 대처할 수 있도록 설계되었습니다.",
-    "current_strategy_title": "현재 실행 전략",
-    "current_strategy_running": "가동 중",
-    "current_strategy_change": "설정에서 변경",
-    "current_strategy_unset": "설정된 전략 설명이 없습니다.",
-    "current_strategy_regime_hint": "시장 국면(상승/하락/횡보)은 상단 헤더에서 실시간으로 확인할 수 있습니다.",
     "close": "닫기"
   },
   "report": {
@@ -374,7 +369,7 @@
     "active_strategy": "Active Strategy (실행 전략)",
     "active_strategy_hint": "이 계정의 트레이딩 봇이 실행할 퀀트 매매 전략을 고릅니다.",
     "selected_strategy": "선택된 전략",
-    "strategy_save_hint": "카드를 선택한 뒤 하단의 저장 버튼을 눌러야 실제로 적용됩니다.",
+    "strategy_save_hint": "전략을 고른 뒤 하단의 저장 버튼을 눌러야 실제로 적용됩니다.",
     "strategy_load_failed": "사용 가능한 전략 정보를 불러오지 못했습니다.",
     "broker_load_failed": "사용 가능한 증권사 정보를 불러오지 못했습니다.",
     "key_only_badge": "키만",
