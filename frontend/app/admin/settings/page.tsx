@@ -562,7 +562,6 @@ export default function PersonalSettingsPage() {
                       value={dbSettings.strategy_type || "regime_switching"}
                       onSelect={(id) => setDbSettings((prev) => ({ ...prev, strategy_type: id }))}
                     />
-                    <p className="mt-2 text-[10px] text-zinc-500">{t("strategy_save_hint")}</p>
                   </div>
                 </div>
 

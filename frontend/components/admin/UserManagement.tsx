@@ -16,7 +16,8 @@ import {
   TrendingUp,
   TrendingDown,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Search
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -67,6 +68,8 @@ export function UserManagement() {
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const selectedUser = usersList.find(u => u.id === selectedUserId) || null;
   const [sortByProfit, setSortByProfit] = useState<boolean>(true); // 기본적으로 수익률 기준 정렬 활성화
+  const [tradeModeFilter, setTradeModeFilter] = useState<'ALL' | 'SIMULATED' | 'MOCK' | 'REAL'>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const itemsPerPage = 10;
 
@@ -193,15 +196,31 @@ export function UserManagement() {
 
 
 
-  // 정렬 규칙 적용된 유저 목록
-  const sortedUsers = Array.isArray(usersList) ? [...usersList].sort((a, b) => {
+  // 1. 거래모드 및 다차원 통합 검색(사용자명, 전략명, 증권사명) 필터링 적용
+  const filteredUsers = Array.isArray(usersList)
+    ? usersList.filter(u => {
+        const matchesMode = tradeModeFilter === 'ALL' || u.trade_mode === tradeModeFilter;
+        if (!matchesMode) return false;
+
+        if (!searchQuery.trim()) return true;
+        const q = searchQuery.toLowerCase().trim();
+        const matchUsername = u.username?.toLowerCase().includes(q);
+        const matchStrategy = (u.strategy_name || u.strategy_type)?.toLowerCase().includes(q);
+        const matchBroker = u.broker_provider?.toLowerCase().includes(q);
+
+        return matchUsername || matchStrategy || matchBroker;
+      })
+    : [];
+
+  // 2. 정렬 규칙 적용된 유저 목록 (선택된 거래모드 내 랭킹 정렬)
+  const sortedUsers = [...filteredUsers].sort((a, b) => {
     if (sortByProfit) {
       const aRate = Number(a.profit_rate) || 0;
       const bRate = Number(b.profit_rate) || 0;
       return bRate - aRate;
     }
     return a.id - b.id;
-  }) : [];
+  });
 
   const totalPages = Math.ceil(sortedUsers.length / itemsPerPage);
   const paginatedUsers = sortedUsers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -214,12 +233,62 @@ export function UserManagement() {
 
       {/* 사용자 관리 테이블 보드 */}
       <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-4 md:p-6 shadow-xl space-y-4">
-        <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-800 pb-3 gap-3">
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <Users size={18} className="text-blue-400" />
             {t('title')}
           </h2>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* 실시간 통합 검색 바 */}
+            <div className="relative flex items-center min-w-[180px] max-w-[240px]">
+              <Search size={14} className="absolute left-2.5 text-zinc-500 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                placeholder={t('search_placeholder')}
+                className="w-full bg-zinc-900/90 border border-zinc-800 focus:border-blue-500/50 text-slate-200 text-xs rounded-lg pl-8 pr-7 py-1.5 outline-none transition-colors placeholder:text-zinc-500 font-sans"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => {
+                    setSearchQuery('');
+                    setCurrentPage(1);
+                  }}
+                  className="absolute right-2 text-zinc-500 hover:text-zinc-300 p-0.5 rounded cursor-pointer"
+                  title={t('search_clear')}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            {/* 거래모드 필터 탭 */}
+            <div className="flex items-center bg-zinc-900/80 p-0.5 rounded-lg border border-zinc-800 text-xs">
+              {(['ALL', 'SIMULATED', 'MOCK', 'REAL'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => {
+                    setTradeModeFilter(mode);
+                    setCurrentPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
+                    tradeModeFilter === mode
+                      ? mode === 'REAL' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                        mode === 'MOCK' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                        mode === 'SIMULATED' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
+                        'bg-zinc-700 text-slate-100'
+                      : 'text-zinc-400 hover:text-slate-200'
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+
             {/* 랭킹 정렬 토글 스위치 */}
             <button
               onClick={() => {
@@ -236,7 +305,7 @@ export function UserManagement() {
               {t('sort_profit')}
             </button>
             <span className="text-[10px] text-zinc-400 font-semibold bg-zinc-800 px-2 py-0.5 rounded">
-              TOTAL: {usersList.length} USERS
+              TOTAL: {filteredUsers.length} USERS
             </span>
           </div>
         </div>
@@ -306,7 +375,10 @@ export function UserManagement() {
                           {user.trade_mode}
                         </span>
                       </td>
-                      <td className="px-2 md:px-3 py-3 text-slate-400 font-semibold text-xs">
+                      <td
+                        className="px-2 md:px-3 py-3 text-slate-400 font-semibold text-xs max-w-[140px] truncate"
+                        title={user.strategy_name || user.strategy_type?.replace(/_/g, ' ')}
+                      >
                         {user.strategy_name || user.strategy_type?.replace(/_/g, ' ')}
                       </td>
                       <td className="px-2 md:px-3 py-3">

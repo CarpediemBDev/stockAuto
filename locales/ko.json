@@ -131,6 +131,8 @@
     "users": {
       "title": "사용자 관리 & 실시간 아레나",
       "sort_profit": "수익률 랭킹순",
+      "search_placeholder": "사용자 / 전략 / 증권사 검색...",
+      "search_clear": "검색어 지우기",
       "loading": "사용자 데이터 로딩 중...",
       "no_data": "가입된 사용자가 없습니다.",
       "toast_bot_started": "봇이 성공적으로 가동되었습니다.",
@@ -459,7 +461,32 @@
       "regime_neutral": "횡보장 스퀴즈 타격",
       "no_description": "전략 설명이 없습니다.",
       "selected": "선택됨",
-      "select": "선택"
+      "select": "선택",
+      "catalog_and_compare": "전략 카탈로그 & 비교",
+      "modal_title": "퀀트 매매 전략 카탈로그 & 비교",
+      "modal_subtitle": "시장 국면 및 개인 위험 성향에 최적화된 퀀트 알고리즘 전략을 비교하고 선택하세요.",
+      "applying": "적용 중",
+      "select_action": "전략 선택"
+    },
+    "market_regime": {
+      "badge_title": "퀀트 국면 진단 & 전략 제어",
+      "regime_bullish": "상승장 (BULLISH)",
+      "regime_bearish": "하락장 (BEARISH)",
+      "regime_neutral": "횡보장 (NEUTRAL)",
+      "current_label": "현재 실행 전략:",
+      "tier_suffix": "{tier} TIER",
+      "optimal_running": "국면 최적 전략 운용 중",
+      "recommend": "퀀트 추천: {name}",
+      "default_summary": "현재 퀀트 알고리즘에 의해 자동 매매가 활성화되어 있습니다.",
+      "apply_recommended": "1-Click 퀀트 추천 적용",
+      "change_and_compare": "전략 변경 & 비교",
+      "loading": "설정을 불러오는 중...",
+      "confirm_title": "'{name}' 전략으로 지금 즉시 전환할까요?",
+      "confirm_desc": "🚨 현재 투자 모드({mode})의 라이브 자동매매 전략이 즉시 교체됩니다. 되돌리려면 다시 전환해야 합니다.",
+      "confirm_action": "즉시 전환",
+      "confirm_cancel": "취소",
+      "change_success": "'{name}' 전략으로 변경되었습니다.",
+      "change_failed": "전략 변경 중 오류가 발생했습니다."
     },
     "asset_chart": {
       "loading": "100% 리얼 자산 데이터 추적 연산 중...",

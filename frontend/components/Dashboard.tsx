@@ -7,7 +7,7 @@ import { AccountBalance } from "./AccountBalance";
 import PortfolioView from "./PortfolioView";
 import { AssetTrendChart } from "./AssetTrendChart";
 import { LiveTradeTicker } from "./LiveTradeTicker";
-import { CurrentStrategyBadge } from "./CurrentStrategyBadge";
+import { AIMarketRegimeWidget } from "./AIMarketRegimeWidget";
 
 import useSWR from "swr";
 import { pollInterval } from "@/lib/sse";
@@ -29,8 +29,10 @@ export function Dashboard() {
 
   return (
     <div className={`min-h-screen transition-colors duration-700 ${isReal && isBotRunning ? 'bg-red-950/20' : 'bg-black'}`}>
-      <div className="max-w-[1600px] mx-auto p-6 pt-6">
+      <div className="max-w-[1600px] mx-auto p-6 pt-6 space-y-6">
         <LiveTradeTicker latestLog={logs[0]} onClick={() => setIsLogsModalOpen(true)} />
+
+        <AIMarketRegimeWidget />
 
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center gap-3">
@@ -74,15 +76,8 @@ export function Dashboard() {
           </h2>
           <PortfolioView displayCurrency={displayCurrency} />
         </div>
-        
-        <div className="mb-12">
-          <h2 className="text-xl font-bold text-slate-100 mb-4 flex items-center">
-            <div className="w-1.5 h-6 bg-indigo-500 rounded-full mr-3"></div>
-            {t("current_strategy_title")}
-          </h2>
-          <CurrentStrategyBadge />
-        </div>
       </div>
+
 
       {/* 프리미엄 다크 글래스모피즘 모달 (자산 성장 차트) */}
       {isChartOpen && (
