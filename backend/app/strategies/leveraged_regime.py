@@ -41,19 +41,27 @@ class LeveragedRegime(BaseStrategy):
         self.base_allocation_pct = 1.0
         self.min_allocation_usd = 0.0
 
-    def compute_target_state(self, daily_closes: pd.Series) -> str:
-        """완결 일봉 종가 시리즈로 목표 상태("IN"=보유 / "OUT"=현금)를 판정합니다.
+    def compute_state_series(self, daily_closes: pd.Series) -> pd.Series:
+        """완결 일봉 종가 시리즈로 '매 시점의 확정 목표 상태'(IN/OUT) 시계열을 산출합니다.
 
-        상태기계: 시작은 OUT. SMA 위로 confirm_days 연속 마감 시 IN 확정,
-        아래로 confirm_days 연속 마감 시 OUT 확정. (백테스트 하네스와 동일 로직)
+        상태기계 SSOT: 시작은 OUT. SMA 위로 confirm_days 연속 마감 시 IN 확정,
+        아래로 confirm_days 연속 마감 시 OUT 확정(휩쏘 가드). 라이브 판정(compute_target_state)과
+        백테스트 엔진(자율 슬롯 경로)이 이 단일 전방 패스를 공유해 두 경로의 상태가 항상 일치한다.
+
+        반환: 입력(결측 제거) 인덱스에 정렬된 "IN"/"OUT" 문자열 시리즈. 각 값은 '그 종가까지
+        관측했을 때'의 확정 상태이므로, 백테스트는 state[t]로 판정하고 t+1 봉에서 체결하면
+        룩어헤드가 없다.
         """
-        if not self.use_filter:
-            return "IN"
-
         closes = daily_closes.dropna()
-        if len(closes) < self.sma_period + self.confirm_days:
-            # 데이터 부족 시 안전측(현금)으로 판정
-            return "OUT"
+        n = len(closes)
+
+        if not self.use_filter:
+            return pd.Series(["IN"] * n, index=closes.index)
+
+        states = ["OUT"] * n
+        if n < self.sma_period + self.confirm_days:
+            # 데이터 부족 구간은 전부 안전측(현금)
+            return pd.Series(states, index=closes.index)
 
         sma = closes.rolling(self.sma_period).mean()
         above = (closes > sma).astype(int).tolist()
@@ -61,7 +69,8 @@ class LeveragedRegime(BaseStrategy):
         state = 0  # 0=OUT, 1=IN
         streak_dir = None
         streak = 0
-        for d in above[self.sma_period - 1:]:
+        for i in range(self.sma_period - 1, n):
+            d = above[i]
             if d == streak_dir:
                 streak += 1
             else:
@@ -70,7 +79,19 @@ class LeveragedRegime(BaseStrategy):
                 state = 1
             elif state == 1 and d == 0 and streak >= self.confirm_days:
                 state = 0
-        return "IN" if state == 1 else "OUT"
+            states[i] = "IN" if state == 1 else "OUT"
+        return pd.Series(states, index=closes.index)
+
+    def compute_target_state(self, daily_closes: pd.Series) -> str:
+        """마지막 완결 일봉 기준 목표 상태("IN"=보유 / "OUT"=현금)를 반환합니다(라이브 스케줄러용).
+
+        상태 시계열 SSOT는 compute_state_series이며, 여기서는 그 마지막 값만 취한다.
+        """
+        series = self.compute_state_series(daily_closes)
+        if series.empty:
+            # 데이터 부족 시 안전측(현금)으로 판정
+            return "OUT"
+        return str(series.iloc[-1])
 
     def calculate_score(self, row, regime: str, is_entry: bool = True, score_card: list = None) -> float:
         """자율 슬롯은 스캐너 점수 파이프라인을 사용하지 않습니다. 항상 0점(미발화)."""

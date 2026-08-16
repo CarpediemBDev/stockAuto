@@ -129,3 +129,39 @@ async def test_peer_limit_short_circuits_principal_key_creation(monkeypatch):
 
     assert getattr(exc_info.value, "status_code", None) == 429
     assert set(fake_redis.counts) == {peer_key}
+
+
+@pytest.mark.real_rate_limiter
+def test_signup_rate_limiter_blocks_excessive_requests(monkeypatch):
+    """
+    회원가입(/signup) API에 동일 username으로 10번 초과 요청 시 429 Too Many Requests가 반환되는지 확인
+    """
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(rate_limiter_module, "get_redis_client", lambda: fake_redis)
+
+    for _ in range(10):
+        response = client.post(
+            "/api/v1/auth/signup",
+            json={"username": "target_signup_user", "password": "Password123456!"},
+        )
+        assert response.status_code in [200, 201, 400]
+
+    # 11번째 요청: 429 Too Many Requests 차단 확인
+    response = client.post(
+        "/api/v1/auth/signup",
+        json={"username": "target_signup_user", "password": "Password123456!"},
+    )
+    assert response.status_code == 429
+
+
+def test_auth_cookie_request_blocked_on_cross_site():
+    """
+    Sec-Fetch-Site가 cross-site인 경우 403 Forbidden으로 차단되는지 확인
+    """
+    response = client.post(
+        "/api/v1/auth/refresh",
+        headers={"sec-fetch-site": "cross-site"},
+        cookies={"refresh_token": "some_dummy_token"},
+    )
+    assert response.status_code == 403
+
