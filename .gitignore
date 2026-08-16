@@ -53,6 +53,8 @@ frontend/.env*
 .claude/
 # 개인 MCP 서버 등록(브라우저 자동화 등) — 팀 공유 설정이 아니라 로컬 도구 취향이라 제외
 .mcp.json
+# Playwright MCP 실행 산출물(페이지 스냅샷·콘솔 로그) — 저장소 루트에 매 실행마다 쌓인다
+.playwright-mcp/
 
 
 
