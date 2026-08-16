@@ -183,10 +183,22 @@ def assess_strategy_report(
     report: dict[str, Any],
     minimum_trades: int = 15,
     min_profit_factor: float = 1.0,
+    low_frequency: bool = False,
 ) -> dict[str, Any]:
     profile = get_strategy_data_profile(strategy_type)
     total_trades = int(report.get("total_trades", 0))
-    sample_score = min(total_trades / max(minimum_trades, 1), 1.0)
+    observation_days = int(report.get("observation_days", 0))
+
+    # 저빈도(자율/보유형) 전략은 '청산 거래 횟수'가 표본 적정성의 척도가 아니다(레짐은 연 1~2회 전환,
+    # 벤치마크는 영구보유로 매도 0회). 이 경우 관측 기간(거래일)을 표본 척도로 쓰고 거래 최소 게이트를
+    # 면제한다. 기본값(low_frequency=False)은 기존 스캐너 전략 동작을 그대로 보존한다.
+    min_observation_days = 60
+    if low_frequency:
+        sample_score = min(observation_days / 120.0, 1.0) if observation_days > 0 else 1.0
+        sample_adequate = observation_days >= min_observation_days
+    else:
+        sample_score = min(total_trades / max(minimum_trades, 1), 1.0)
+        sample_adequate = total_trades >= minimum_trades
 
     total_return = float(report.get("total_return_rate", 0.0))
     benchmark_return = float(report.get("qqq_bench_return_rate", 0.0))
@@ -216,15 +228,19 @@ def assess_strategy_report(
     # 수익성 하드 게이트: 손실/저효율 전략은 거래 표본·데이터 출처가 정상이라도
     # 자동선정 후보에서 제외한다. (트리아지 결과: 게이트가 수익성을 안 봐서
     # -85% 전략도 selection_eligible=True로 통과하던 결함 차단)
-    is_profitable = total_return > 0.0 and profit_factor > min_profit_factor
+    if low_frequency:
+        # 저빈도/보유형(레짐·벤치마크)은 실현 손익비(profit_factor)가 무의미하다(매도가 0~1회).
+        # 수익성은 관측 기간 전체의 총수익률로 판정한다.
+        is_profitable = total_return > 0.0
+    else:
+        is_profitable = total_return > 0.0 and profit_factor > min_profit_factor
     beats_benchmark = total_return > benchmark_return
     eligible = (
         profile.selection_eligible
-        and total_trades >= minimum_trades
+        and sample_adequate
         and is_profitable
     )
 
-    observation_days = int(report.get("observation_days", 0))
     if eligible and total_trades >= 30 and observation_days >= 120:
         confidence_grade = "A"
     elif eligible:
@@ -237,10 +253,15 @@ def assess_strategy_report(
     exclusion_reasons = []
     if not profile.selection_eligible:
         exclusion_reasons.append(profile.reason)
-    if total_trades < minimum_trades:
-        exclusion_reasons.append(
-            f"청산 거래 {total_trades}회로 최소 기준 {minimum_trades}회에 미달합니다."
-        )
+    if not sample_adequate:
+        if low_frequency:
+            exclusion_reasons.append(
+                f"관측 기간 {observation_days}거래일로 최소 {min_observation_days}거래일에 미달합니다."
+            )
+        else:
+            exclusion_reasons.append(
+                f"청산 거래 {total_trades}회로 최소 기준 {minimum_trades}회에 미달합니다."
+            )
     if not is_profitable:
         exclusion_reasons.append(
             f"수익성 미달(총수익률 {total_return:.2f}%, PF {profit_factor:.2f}) — "

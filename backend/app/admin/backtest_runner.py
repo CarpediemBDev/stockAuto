@@ -40,7 +40,8 @@ def _build_tournament_cache_path(
     cache_dir = Path(__file__).resolve().parents[2] / "data" / "backtest_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir / (
-        f"tournament_v3_{start_date}_{end_date}_{len(normalized_tickers)}_{ticker_digest}.json"
+        # v4: 자율 슬롯 참가자(레짐/벤치마크) 병합으로 결과 집합이 바뀌어 기존 v3 캐시를 무효화한다.
+        f"tournament_v4_{start_date}_{end_date}_{len(normalized_tickers)}_{ticker_digest}.json"
     )
 
 # 가상 DB 보유 레코드 모사 클래스
@@ -472,6 +473,36 @@ def run_multi_strategy_sim(base_sim, slots_cfg, initial_cash, tickers_list):
         **calculate_performance_metrics(equity_curve, initial_value=initial_cash),
     }
  
+# 스캐너 참가자는 유니버스 전 종목을 1시간봉으로 채점하므로, 동적 추출 종목이 많으면(전 계정 합산
+# 시 1000+개) 대항전이 사실상 완주하지 못한다. 1시간봉 백테스트가 몇 분 내 끝나도록 상한을 둔다.
+MAX_TOURNAMENT_TICKERS = 40
+
+
+def _prioritize_and_cap_tickers(
+    holding_tickers: List[str],
+    trade_tickers: List[str],
+    watch_tickers: List[str],
+    max_n: int = MAX_TOURNAMENT_TICKERS,
+) -> List[str]:
+    """보유 → 거래이력 → 관심종목 우선순위로 중복 제거(순서 보존) 후 상한을 적용한다.
+
+    실제 보유·거래 종목을 우선 채택해 표본의 대표성을 살리고, 상한으로 1시간봉 대항전의 완주를 보장한다.
+    (레짐/벤치마크 참가자는 자체 자산 QLD/QQQ를 쓰므로 이 목록·상한과 무관하다.)
+    """
+    ordered: List[str] = []
+    seen: set = set()
+    for ticker in list(holding_tickers) + list(trade_tickers) + list(watch_tickers):
+        if not ticker:
+            continue
+        clean = ticker.strip().upper()
+        if clean and clean not in seen:
+            seen.add(clean)
+            ordered.append(clean)
+    if max_n and len(ordered) > max_n:
+        return ordered[:max_n]
+    return ordered
+
+
 def get_dynamic_tickers_list(tickers_list: List[str] = None, db = None) -> List[str]:
     if not tickers_list and db:
         try:
@@ -479,11 +510,13 @@ def get_dynamic_tickers_list(tickers_list: List[str] = None, db = None) -> List[
             watch_tickers = [w.ticker for w in db.query(WatchList.ticker).all() if w.ticker]
             holding_tickers = [h.ticker for h in db.query(Holding.ticker).all() if h.ticker]
             trade_tickers = [t.ticker for t in db.query(TradeLog.ticker).all() if t.ticker]
-            
-            raw_tickers = set(watch_tickers + holding_tickers + trade_tickers)
-            clean_tickers = {t.strip().upper() for t in raw_tickers if t}
-            tickers_list = list(clean_tickers)
-            logger.info(f"[Backtest Tournament] Dynamically extracted {len(tickers_list)} tickers from Watchlist, Holdings, and TradeLogs: {tickers_list}")
+
+            raw_count = len({(t or "").strip().upper() for t in watch_tickers + holding_tickers + trade_tickers if t})
+            tickers_list = _prioritize_and_cap_tickers(holding_tickers, trade_tickers, watch_tickers)
+            logger.info(
+                f"[Backtest Tournament] Extracted {raw_count} unique tickers, capped to "
+                f"{len(tickers_list)} (max {MAX_TOURNAMENT_TICKERS}) for tractable 1h backtest: {tickers_list}"
+            )
         except Exception as e:
             logger.error(f"[Backtest Tournament] Failed to extract tickers dynamically: {e}", exc_info=True)
     return tickers_list
@@ -523,6 +556,70 @@ async def run_dynamic_tournament(start_date: str, end_date: str, tickers_list: L
     cached = check_tournament_cache(start_date, end_date, tickers_list)
     if cached: return cached
     return await _run_dynamic_tournament_internal(start_date, end_date, tickers_list)
+
+def _shape_autonomous_result(strategy_type: str, report: dict) -> dict:
+    """엔진 자율 경로(get_summary_report) 결과를 토너먼트 참가자 dict 형태로 정형한다(순수 함수).
+
+    스캐너 참가자와 동일한 키(strategy_type/name/final_value/.../ticker_stats/equity_curve)를 채워
+    아레나가 무변경으로 렌더할 수 있게 한다.
+    """
+    stats: dict = {}
+    for log in report.get("trade_logs", []):
+        ticker = log.get("ticker")
+        t_type = log.get("trade_type")
+        pnl = log.get("realized_pnl", 0.0)
+        if ticker not in stats:
+            stats[ticker] = {"buys": 0, "sells": 0, "pnl": 0.0}
+        if t_type == "BUY":
+            stats[ticker]["buys"] += 1
+        elif t_type == "SELL":
+            stats[ticker]["sells"] += 1
+            stats[ticker]["pnl"] += pnl
+
+    curve = [
+        {
+            "timestamp": e["timestamp"].strftime('%Y-%m-%d %H:%M:%S')
+            if hasattr(e["timestamp"], 'strftime') else str(e["timestamp"]),
+            "total": e["total"],
+        }
+        for e in report.get("equity_curve", [])
+    ]
+
+    return {
+        "strategy_type": strategy_type,
+        "name": Translator.translate_strategy(strategy_type, "ko"),
+        "final_value": report["final_value"],
+        "total_pnl": report["total_pnl"],
+        "total_return_rate": report["total_return_rate"],
+        "mdd": report["mdd"],
+        "total_trades": report["total_trades"],
+        "win_rate": report["win_rate"],
+        "ticker_stats": stats,
+        "equity_curve": curve,
+    }
+
+
+async def _run_autonomous_participant(start_date: str, end_date: str, cash: float,
+                                      strategy_type: str, asset: str) -> tuple[dict, dict]:
+    """자율 슬롯 전략(레짐/벤치마크)을 일봉으로 별도 서브런하고 (참가자dict, 원본report)를 반환한다.
+
+    스캐너 base_sim(1h)과 데이터축이 다르므로 자산 유니버스([asset])로 자체 prepare_data를 수행한다.
+    엔진의 자율 경로(_run_autonomous)를 재사용하므로 상태기계·룩어헤드 차단은 라이브와 동일 SSOT다.
+    """
+    sim = BacktestSimulator(
+        tickers=[asset],
+        start_date=start_date,
+        end_date=end_date,
+        interval="1d",  # 자율 상태기계는 일봉 정의
+        initial_cash=cash,
+        strategy_type=strategy_type,
+    )
+    await sim.prepare_data()
+    report = sim.run()
+    if not report or "error" in report:
+        raise RuntimeError(report.get("error", "자율 참가자 리포트 없음") if report else "빈 리포트")
+    return _shape_autonomous_result(strategy_type, report), report
+
 
 async def _run_dynamic_tournament_internal(start_date: str, end_date: str, tickers_list: List[str] = None) -> List[Dict[str, Any]]:
     """과거 지정된 특정 기간(start_date ~ end_date) 동안 5대 전략 토너먼트 배틀을 실행하고 그 통계와 자산 곡선을 캐시/반환합니다."""
@@ -837,6 +934,24 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
         "equity_curve": curve_ts
     })
 
+    # ------------------ [자율 슬롯 참가자: 지수 레버리지 레짐 / QQQ 벤치마크] ------------------
+    # 종목 채점을 쓰지 않는 자율 전략은 엔진 자율 경로(_run_autonomous)로 같은 창을 일봉 서브런해
+    # 병합한다. 아레나는 반환 리스트를 동적 렌더하므로 프론트 무변경으로 노출된다.
+    autonomous_specs = [
+        ("leveraged_regime", "QLD"),
+        ("benchmark_qqq_hold", "QQQ"),
+    ]
+    autonomous_reports: dict = {}
+    for auto_strategy_type, auto_asset in autonomous_specs:
+        try:
+            auto_result, auto_report = await _run_autonomous_participant(
+                start_date, end_date, cash, auto_strategy_type, auto_asset,
+            )
+            results.append(auto_result)
+            autonomous_reports[auto_strategy_type] = auto_report
+        except Exception as e:
+            logger.warning(f"[Tournament] 자율 참가자 {auto_strategy_type}({auto_asset}) 실행 실패, 스킵: {e}")
+
     report_lookup = {
         "strategy_c_ep": report_ep_c,
         "senior_simple": report_senior,
@@ -846,6 +961,7 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
         "strategy_c_aggressive": report_pb,
         "exploded_c": report_ts,
     }
+    report_lookup.update(autonomous_reports)
     qqq_initial = float(base_sim.qqq_metrics["Close"].iloc[0])
     qqq_final = float(base_sim.qqq_metrics["Close"].iloc[-1])
     qqq_return = (qqq_final / qqq_initial - 1.0) * 100.0
@@ -873,6 +989,8 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
                 result["strategy_type"],
                 result,
                 minimum_trades=15,
+                # 자율(저빈도/보유형) 참가자는 거래 횟수 대신 관측 기간으로 표본 적정성을 판정한다.
+                low_frequency=result["strategy_type"] in autonomous_reports,
             )
         )
 
@@ -884,7 +1002,9 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
         reverse=True,
     )
 
-    # 캐시 저장
+    # 캐시 저장 — cache_path는 이 함수 스코프에서 정의되지 않아 저장이 항상 NameError로 실패하고 있었다
+    # (아레나가 결과를 캐시하지 못해 프론트가 무한 재폴링하던 근본 원인). 엔드포인트와 동일 키로 재계산한다.
+    cache_path = _build_tournament_cache_path(start_date, end_date, tickers_list)
     try:
         with cache_path.open("w", encoding="utf-8") as f_w:
             json.dump(results, f_w, ensure_ascii=False, indent=2)

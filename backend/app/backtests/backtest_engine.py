@@ -255,6 +255,12 @@ class BacktestSimulator:
             "1h": 45,
             "1d": 240,
         }.get(self.interval, 60)
+        # 자율 슬롯(레짐 상태기계)은 신호 지수의 장기 SMA(예: 200일)를 요구하므로, 요청 시작일에서
+        # SMA가 유효하려면 그 이전에 최소 sma_period 거래일이 다운로드돼야 한다. 거래일↔달력일
+        # 환산(~1.5배) + 여유를 두어 워밍업을 확대한다(스캐너 경로 무영향, 다운로드 범위만 확장).
+        if getattr(self.strategy, "is_autonomous", False):
+            sma_period = int(getattr(self.strategy, "sma_period", 200))
+            warmup_days = max(warmup_days, int(sma_period * 1.6) + 30)
         download_start = start_datetime - timedelta(days=warmup_days)
         download_end = end_datetime + timedelta(days=1)
         
@@ -885,8 +891,75 @@ class BacktestSimulator:
         row = metrics.loc[timestamp]
         return self.strategy.calculate_score(row, regime, is_entry)
 
+    def _run_autonomous(self):
+        """자율 슬롯(지수 레버리지 레짐 계열) 전용 백테스트 경로.
+
+        스캐너 채점(calculate_score)·손절/트레일링/피라미딩을 일절 사용하지 않는다. 대신
+        신호 지수(QQQ) 완결 일봉으로 LeveragedRegime.compute_state_series(상태기계 SSOT)를 한 번
+        계산하고, 매 봉에서 '직전 완결봉의 확정 상태'로 판정해 자산 티커(QLD/TQQQ/QQQ)를 전액
+        매수(IN)하거나 전량 청산(OUT)한다. 판정은 close[t]에서 나오고 체결은 t+1 봉가로 이뤄지므로
+        룩어헤드가 없다(라이브 process_autonomous_slots와 등가).
+        """
+        if self.interval != "1d":
+            raise ValueError(
+                f"자율 슬롯 전략은 일봉(1d) 백테스트만 지원합니다(요청 인터벌: {self.interval}). "
+                "레짐 상태기계가 일별 SMA/확정일 기준으로 정의됩니다."
+            )
+
+        asset = getattr(self.strategy, "asset_ticker", None)
+        if asset not in self.processed_metrics:
+            raise ValueError(
+                f"자율 슬롯 자산 티커 '{asset}'의 데이터가 준비되지 않았습니다. "
+                f"백테스트 유니버스(tickers)에 '{asset}'를 포함해야 합니다."
+            )
+
+        # 상태 시계열은 워밍업을 포함한 '전체' 일봉으로 계산해야 요청 시작일에서 SMA가 유효하다.
+        state_series = self.strategy.compute_state_series(self.qqq_data["Close"])
+        asset_metrics = self.processed_metrics[asset]
+
+        logger.info(
+            f"[Backtest][Autonomous] {self.strategy.name} | 자산={asset} | "
+            f"타임라인 {len(self.timeline)}봉 | 신호=QQQ SMA{getattr(self.strategy, 'sma_period', '?')}"
+        )
+
+        # 직전 완결봉의 확정 상태(룩어헤드 차단). 시작 전 기본은 현금(OUT).
+        prev_state = "OUT"
+        for t in self.timeline:
+            if t not in asset_metrics.index:
+                # 자산 상장 이전 구간 등 가격 부재 봉은 현금 보유로 평가(스킵).
+                continue
+            price = float(asset_metrics.loc[t, "Close"])
+
+            # 1. 마크투마켓 (자산 1종만 평가)
+            self.broker.update_equity(t, {asset: price})
+
+            # 2. 직전 완결봉 상태로 목표 집행 (체결은 현재 봉가 = 신호 익일 체결 등가)
+            holding = self.broker.holdings.get(asset)
+            if prev_state == "IN" and holding is None:
+                fee = float(settings.SIMULATED_FEE_RATE)
+                qty = int(self.broker.cash / (price * (1 + fee))) if price > 0 else 0
+                if qty >= 1:
+                    self.broker.buy_order(asset, qty, price, buy_stage=3, timestamp=t, ticker_name=asset)
+            elif prev_state == "OUT" and holding is not None:
+                self.broker.sell_order(
+                    asset, holding["quantity"], price, "레짐 이탈(OUT) 전량 청산", t
+                )
+
+            # 3. 현재 봉의 확정 상태를 다음 루프의 '직전 상태'로 넘긴다.
+            state_at_t = state_series.get(t)
+            if state_at_t is not None:
+                prev_state = str(state_at_t)
+
+        logger.info("[Backtest][Autonomous] Simulation loop complete.")
+        return self.get_summary_report()
+
     def run(self):
         """정렬된 시간축을 순차적으로 흘려보내며 매수실패/체결/익절/손절 시나리오를 구동합니다."""
+        # 자율 슬롯 전략(레버리지 레짐 계열)은 종목 채점 파이프라인을 쓰지 않으므로 전용 경로로 분기한다.
+        # 스캐너 경로(아래 로직)는 무변경으로 완전히 격리 보존된다.
+        if getattr(self.strategy, "is_autonomous", False):
+            return self._run_autonomous()
+
         logger.info("[Backtest] Simulation loop started.")
 
         # 정합성 가드: 다운로드 실패 등으로 tickers_data와 processed_metrics가 어긋나면
