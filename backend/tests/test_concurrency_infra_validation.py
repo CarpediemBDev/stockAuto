@@ -63,7 +63,7 @@ async def test_telegram_status_fallback_on_kis_failure(monkeypatch):
 
     # Track message sent to Telegram
     sent_messages = []
-    def mock_send_message_sync(user_id, text):
+    def mock_send_message_sync(user_id, text, db=None, parse_mode="Markdown"):
         sent_messages.append((user_id, text))
         return True
     monkeypatch.setattr(telegram, "send_message_sync", mock_send_message_sync)
@@ -191,13 +191,185 @@ def test_telegram_status_closes_command_session_before_broker_fetch(monkeypatch)
     monkeypatch.setattr(telegram, "SessionLocal", lambda: next(sessions))
     monkeypatch.setattr(telegram, "get_broker_client", lambda _settings: Broker())
     monkeypatch.setattr(telegram, "FXRateCache", mock.MagicMock(get_rate=lambda: 1350.0))
-    monkeypatch.setattr(telegram, "send_message_sync", lambda user_id, text: sent_messages.append((user_id, text)) or True)
+    monkeypatch.setattr(
+        telegram,
+        "send_message_sync",
+        lambda user_id, text, db=None, parse_mode="Markdown": sent_messages.append((user_id, text)) or True,
+    )
 
     telegram._process_command(user_id=42, text="/status")
 
     assert command_db.close.called is True
     assert holdings_db.close.called is True
     assert sent_messages and sent_messages[0][0] == 42
+
+
+def test_dispatch_alert_resolves_chat_id_before_leaving_caller_thread(monkeypatch):
+    """디스패치가 호출자 세션으로 chat_id를 먼저 확정하고, 전송 스레드는 DB를 안 건드려야 한다.
+
+    전송 스레드가 세션을 열면 (a) 요청이 끝난 뒤라 닫힌 세션을 쓰거나 (b) 기본 DB를 조회해
+    격리된 DB에서 호출했는데도 실제 사용자에게 메시지가 나간다. 둘 다 이 구조로 막는다.
+    """
+    caller_db = mock.MagicMock()
+    mock_settings = mock.MagicMock(spec=UserSettings)
+    mock_settings.user_id = 42
+    mock_settings.telegram_enabled = True
+    mock_settings.telegram_chat_id = "chat-42"
+    caller_db.query.return_value.filter.return_value.first.return_value = mock_settings
+
+    def _forbidden_session_local(*_args, **_kwargs):
+        raise AssertionError("전송 경로가 모듈 레벨 SessionLocal(기본 DB)을 열었다")
+
+    monkeypatch.setattr(telegram, "SessionLocal", _forbidden_session_local)
+    monkeypatch.setattr(telegram.settings, "TELEGRAM_BOT_TOKEN", "token")
+
+    sent = []
+    worker_threads = []
+
+    def fake_send_to_chat(chat_id, text, **kwargs):
+        worker_threads.append(threading.current_thread().name)
+        sent.append((chat_id, text, kwargs.get("parse_mode"), kwargs.get("attempts")))
+        return True
+
+    monkeypatch.setattr(telegram, "send_to_chat_sync", fake_send_to_chat)
+
+    future = telegram.dispatch_alert(42, "잠금 경고", db=caller_db, parse_mode=None, attempts=3)
+
+    assert future is not None, "연동된 사용자인데 전송이 예약되지 않았다"
+    assert future.result(timeout=5) is True
+    assert sent == [("chat-42", "잠금 경고", None, 3)]
+    # 전송이 호출자 스레드가 아닌 전용 워커에서 실행돼야 요청이 재시도 대기에 붙잡히지 않는다.
+    assert worker_threads[0] != threading.current_thread().name
+    assert worker_threads[0].startswith("TelegramAlert"), worker_threads[0]
+    # 호출자 세션은 디스패치가 닫지 않는다(라우터 트랜잭션 보호).
+    assert caller_db.close.called is False
+
+
+def test_dispatch_alert_returns_none_when_not_linked(monkeypatch):
+    """미연동 사용자에게는 스레드를 소비하지 않고 곧바로 포기해야 한다."""
+    caller_db = mock.MagicMock()
+    mock_settings = mock.MagicMock(spec=UserSettings)
+    mock_settings.user_id = 42
+    mock_settings.telegram_enabled = False
+    mock_settings.telegram_chat_id = ""
+    caller_db.query.return_value.filter.return_value.first.return_value = mock_settings
+
+    monkeypatch.setattr(telegram.settings, "TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setattr(
+        telegram,
+        "send_to_chat_sync",
+        lambda *a, **k: pytest.fail("미연동 사용자에게 전송을 시도했다"),
+    )
+
+    assert telegram.dispatch_alert(42, "x", db=caller_db) is None
+
+
+def test_markdown_sanitizer_neutralizes_formatting_chars():
+    """외부 값의 Markdown 서식 문자가 제거되는지 검증.
+
+    남겨두면 짝수개는 값을 조용히 훼손하고(밑줄이 이탤릭 마크업으로 소비됨),
+    홀수개는 Telegram이 400 can't parse entities로 메시지 전체를 거부한다.
+    """
+    assert telegram.sanitize_markdown_value("bruteforce_tester_new") == "bruteforcetesternew"
+    assert telegram.sanitize_markdown_value("AAPL`*x*`") == "AAPLx"
+    assert telegram.sanitize_markdown_value("[NVDA]") == "NVDA]"
+    # 서식 문자가 없으면 원문 그대로여야 한다(불필요한 훼손 금지).
+    assert telegram.sanitize_markdown_value("Apple Inc. (Class A)") == "Apple Inc. (Class A)"
+    assert telegram.sanitize_markdown_value(12345) == "12345"
+
+
+def test_telegram_holdings_sanitize_ticker_name(monkeypatch):
+    """보유 종목명이 Markdown 서식 문자를 담고 있어도 마크업이 어긋나지 않아야 한다."""
+    command_db = mock.MagicMock()
+    holdings_db = mock.MagicMock()
+    mock_settings = mock.MagicMock(spec=UserSettings)
+    mock_settings.user_id = 42
+    mock_settings.trade_mode = "SIMULATED"
+    mock_settings.broker_provider = None
+    mock_settings.is_running = False
+
+    holding = mock.MagicMock(spec=Holding)
+    holding.ticker = "TS_LA"
+    holding.ticker_name = "Tesla_Motors*Inc"
+    holding.quantity = 3
+    holding.avg_price = 250.0
+
+    def command_query_dispatcher(model):
+        q = mock.MagicMock()
+        if model == UserSettings:
+            q.filter.return_value.first.return_value = mock_settings
+        return q
+
+    def holdings_query_dispatcher(model):
+        q = mock.MagicMock()
+        if model == Holding:
+            q.filter.return_value.all.return_value = [holding]
+        return q
+
+    command_db.query.side_effect = command_query_dispatcher
+    holdings_db.query.side_effect = holdings_query_dispatcher
+    sessions = iter([command_db, holdings_db])
+    sent = []
+
+    class Broker:
+        def get_account_balance(self):
+            return {
+                "total_asset": 1000.0,
+                "cash_balance": 250.0,
+                "stock_balance": 750.0,
+                "profit_rate": 1.0,
+            }
+
+    monkeypatch.setattr(telegram, "SessionLocal", lambda: next(sessions))
+    monkeypatch.setattr(telegram, "get_broker_client", lambda _settings: Broker())
+    monkeypatch.setattr(telegram, "FXRateCache", mock.MagicMock(get_rate=lambda: 1350.0))
+    monkeypatch.setattr(
+        telegram,
+        "send_message_sync",
+        lambda user_id, text, db=None, parse_mode="Markdown": sent.append((text, parse_mode)) or True,
+    )
+
+    telegram._process_command(user_id=42, text="/status")
+
+    assert sent, "상태 응답이 발송되지 않았다"
+    text, parse_mode = sent[0]
+    assert parse_mode == "Markdown", "상태 응답은 서식을 유지해야 한다"
+    assert "TSLA" in text and "TS_LA" not in text
+    assert "Tesla_Motors" not in text and "TeslaMotorsInc" in text
+
+
+def test_telegram_command_error_sends_without_markdown(monkeypatch):
+    """예외 메시지는 서식을 끄고 원문 그대로 보내야 한다.
+
+    밑줄을 포함한 예외 문자열(컬럼명·경로에서 흔하다)을 Markdown으로 보내면 값이 훼손되거나
+    홀수개일 때 발송 자체가 실패해 오류 내용이 사용자에게 도달하지 않는다.
+    """
+    command_db = mock.MagicMock()
+    mock_settings = mock.MagicMock(spec=UserSettings)
+    mock_settings.user_id = 42
+    command_db.query.return_value.filter.return_value.first.return_value = mock_settings
+
+    error_text = "no such column: user_settings.telegram_chat_id"
+
+    def boom(_db, _user_id):
+        raise RuntimeError(error_text)
+
+    monkeypatch.setattr(telegram, "SessionLocal", lambda: command_db)
+    monkeypatch.setattr(telegram, "resolve_user_language", boom)
+
+    sent = []
+    monkeypatch.setattr(
+        telegram,
+        "send_message_sync",
+        lambda user_id, text, db=None, parse_mode="Markdown": sent.append((text, parse_mode)) or True,
+    )
+
+    telegram._process_command(user_id=42, text="/status")
+
+    assert sent, "오류 알림이 발송되지 않았다"
+    text, parse_mode = sent[0]
+    assert parse_mode is None, "예외 문자열을 Markdown으로 보내면 발송이 실패할 수 있다"
+    assert error_text in text, "예외 원문이 훼손 없이 전달돼야 한다"
 
 
 def test_translations_router_uses_core_get_db():

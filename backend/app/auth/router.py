@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+from sqlalchemy import update, case
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel, Field, field_validator
@@ -6,7 +7,7 @@ from typing import Optional
 from app.core.database import get_db
 from app.core.models import User, UserSettings, RefreshToken, utc_now_aware
 from app.core.config import get_allowed_origins, settings
-from app.core.logging import logger
+from app.core.logging import logger, log_security_event
 from app.core.security import (
     DUMMY_PASSWORD_HASH,
     REFRESH_TOKEN_EXPIRE_DAYS,
@@ -274,28 +275,26 @@ def signup(
 @router.post("/login", response_model=TokenResponseSchema)
 def login(
     payload: LoginSchema,
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
     _rate_limit: None = Depends(RateLimiter(max_requests=5, window_seconds=60, key_field="username"))
 ) -> dict:
     """
-    사용자 로그인 및 JWT 발급 API (브루트포스 방어 및 타이밍 공격 방어 포함)
+    사용자 로그인 및 JWT 발급 API (원자적 브루트포스 방어 및 레이스 컨디션 차단)
     """
     user = db.query(User).filter(User.username == payload.username).first()
 
     # 잠금 상태 우선 체크 (DoS 방어)
+    now = utc_now_aware()
     if user and user.locked_until:
-        if user.locked_until > utc_now_aware():
+        if user.locked_until > now:
             logger.warning(f"[Security] Blocked login attempt on locked account: {payload.username}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="로그인 실패 5회 초과로 계정이 잠겼습니다. 잠시 후 다시 시도해주세요."
             )
-        else:
-            # 잠금 시간 15분이 지나고 다시 로그인을 시도한 경우, 실패 횟수를 0으로 클리어
-            user.failed_login_attempts = 0
-            user.locked_until = None
-            db.commit()
+        # 만료된 잠금은 선제 커밋하지 않고 패스워드 검증 결과에 따라 단일 트랜잭션으로 원자적 처리
 
     # 타이밍 공격 방어: 유저가 존재하지 않더라도 더미 bcrypt 연산을 돌려 응답 소요 시간 대칭화
     if user:
@@ -307,20 +306,71 @@ def login(
 
     if not user or not is_password_correct:
         if user:
-            user.failed_login_attempts += 1
-            if user.failed_login_attempts >= 5:
-                user.locked_until = utc_now_aware() + timedelta(minutes=15)
+            # 실패 카운트 증가와 잠금 시간 설정을 단일 원자적 UPDATE(case)로 결합 처리
+            # 만료된 잠금(locked_until <= now)이었던 경우 실패 횟수는 1로 리셋되고 잠금 해제
+            now = utc_now_aware()
+            lock_duration = now + timedelta(minutes=15)
+
+            new_attempts_expr = case(
+                (User.locked_until <= now, 1),
+                else_=User.failed_login_attempts + 1
+            )
+            new_locked_expr = case(
+                (User.locked_until <= now, None),
+                (User.failed_login_attempts + 1 >= 5, lock_duration),
+                else_=User.locked_until
+            )
+
+            new_failed_attempts, new_locked_until = db.execute(
+                update(User)
+                .where(User.id == user.id)
+                .values(
+                    failed_login_attempts=new_attempts_expr,
+                    locked_until=new_locked_expr
+                )
+                .returning(User.failed_login_attempts, User.locked_until)
+            ).one()
+
+            db.expire(user, ["failed_login_attempts", "locked_until"])
+            db.commit()
+
+            just_crossed_threshold = (new_failed_attempts == 5 and new_locked_until is not None)
+            if just_crossed_threshold:
                 logger.error(f"[Security] Account {user.username} locked due to 5 consecutive failures.")
+                # 전용 보안 로그에 구조화 기록. stockauto.log는 봇 로그에 밀려 며칠이면
+                # 회전으로 사라지고, DB에는 현재 상태만 남아 리셋되면 흔적이 없어진다.
+                # 접속 출처를 함께 남긴다 - 없으면 누가 시도했는지 사후에 알 방법이 없다.
+                log_security_event(
+                    "account_locked",
+                    user_id=user.id,
+                    username=user.username,
+                    failed_attempts=new_failed_attempts,
+                    locked_until=new_locked_until,
+                    lock_minutes=15,
+                    ip=request.client.host if request.client else None,
+                    user_agent=request.headers.get("user-agent"),
+                )
+
+            logger.warning(f"[Auth] Failed login attempt for user: {payload.username} (Failed attempts: {new_failed_attempts})")
+
+            if just_crossed_threshold:
+                # 잠금을 커밋한 뒤에 알린다. db를 넘겨 호출자와 같은 DB에서 chat_id를 확정하게
+                # 한다(격리 DB 누수 방지). 확정 후 전송만 전용 스레드로 넘어가므로 재시도 대기가
+                # 요청 워커를 붙잡지 않는다 - BackgroundTasks는 이 분기가 raise HTTPException으로
+                # 끝나 실행되지 않으므로 쓸 수 없다.
+                # parse_mode=None: 계정명 서식 훼손 방지, attempts=3: P0 알림 일시 순단 재시도
                 try:
-                    from app.core.telegram import send_message_sync
-                    send_message_sync(
+                    from app.core.telegram import dispatch_alert
+                    dispatch_alert(
                         user.id,
-                        f"🚨 [보안 경고] 계정({user.username})에 5회 연속 로그인 실패가 발생하여 15분간 로그인이 잠겼습니다. 본인의 시도가 아니라면 즉시 비밀번호를 변경해 주십시오."
+                        f"🚨 [보안 경고] 계정({user.username})에 5회 연속 로그인 실패가 발생하여 15분간 로그인이 잠겼습니다. 본인의 시도가 아니라면 즉시 비밀번호를 변경해 주십시오.",
+                        db=db,
+                        parse_mode=None,
+                        attempts=3,
+                        timeout_seconds=3.0,
                     )
                 except Exception as alert_err:
                     logger.warning(f"[Security] Failed to send account lock telegram alert: {alert_err}")
-            db.commit()
-            logger.warning(f"[Auth] Failed login attempt for user: {payload.username} (Failed attempts: {user.failed_login_attempts})")
         else:
             logger.warning(f"[Auth] Failed login attempt for non-existent user: {payload.username}")
 
@@ -329,9 +379,26 @@ def login(
             detail="아이디 또는 비밀번호가 올바르지 않습니다."
         )
 
-    # 성공 시 상태 초기화
-    user.failed_login_attempts = 0
-    user.locked_until = None
+    # 성공 시: 잠금이 없거나 이미 만료된 경우에만 원자적 리셋
+    now = utc_now_aware()
+    result = db.execute(
+        update(User)
+        .where(
+            User.id == user.id,
+            (User.locked_until.is_(None)) | (User.locked_until <= now)
+        )
+        .values(failed_login_attempts=0, locked_until=None)
+    )
+    if result.rowcount == 0:
+        # bcrypt 검증 시간 동안 동시 요청에 의해 계정이 잠긴 경우 (Lost Lockout Race 방어)
+        db.rollback()
+        logger.warning(f"[Security] Login succeeded but account was locked concurrently: {user.username}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="로그인 처리 중 계정이 잠겼습니다. 잠시 후 다시 시도해주세요."
+        )
+
+    db.expire(user, ["failed_login_attempts", "locked_until"])
     db.commit()
     logger.info(f"[Auth] User logged in successfully: {user.username}")
 

@@ -20,7 +20,7 @@
     "already_stopped": "⚠️ *The trading loop is already stopped.*",
     "loop_stopped": "🔴 *The autonomous trading loop has stopped.*",
     "unknown_command": "❓ *Unknown command.*\nAvailable commands: `/status`, `/run`, `/stop`",
-    "command_error": "⚠️ *Error while executing command:* {error}",
+    "command_error": "⚠️ Error while executing command: {error}",
     "daily_report": "📊 *[Daily Auto-Trading Closing Report]*\n\nHere is the settlement result of automated trading over the last 24 hours.\n───────────────────\n• *Total Sells:* `{total_trades}`\n• *Wins:* `{win_trades}`\n• *Daily Win Rate:* `{win_rate:.1f}%`\n• *Daily Realized PnL:* `${total_pnl:,.2f}`\n───────────────────\nYou can review the full cumulative scorecard and equity curve in the **[📊 Scorecard]** menu of the web dashboard!",
     "daily_report_manual": "📊 *[Daily Trading Report (Manual Request)]*\n\nHere is the trading result for the last 24 hours you requested.\n───────────────────\n• *Total Sells:* `{total_trades}`\n• *Wins:* `{win_trades}`\n• *Daily Win Rate:* `{win_rate:.1f}%`\n• *Daily Realized PnL:* `${total_pnl:,.2f}`\n───────────────────\nYou can review the full cumulative scorecard and equity curve in the **[📊 Scorecard]** menu of the web dashboard!",
     "no_recent_sells": "⚠️ No sell (profit-realizing) records in the last 24 hours, so the report cannot be sent.",
