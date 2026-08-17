@@ -1,6 +1,7 @@
 import asyncio
 import secrets
 import threading
+import time
 from datetime import timedelta
 import httpx
 from concurrent.futures import ThreadPoolExecutor
@@ -67,6 +68,28 @@ def consume_telegram_link_token(db, token: str) -> UserSettings | None:
     return db_settings
 
 
+# 레거시 Markdown이 서식으로 해석하는 문자들. 백슬래시 이스케이프는 MarkdownV2에만 문서화돼
+# 있고 레거시 모드에서는 보장되지 않으므로, 값에서 제거하는 방식으로 결정론적으로 무력화한다.
+_MARKDOWN_SIGNIFICANT_CHARS = ("`", "*", "_", "[")
+
+
+def sanitize_markdown_value(value) -> str:
+    """Markdown 서식 메시지에 끼워 넣을 외부 값에서 서식 문자를 제거한다.
+
+    티커명·계정명처럼 짧은 식별자에 쓴다. 서식 문자가 그대로 들어가면 값이 조용히 훼손되거나
+    (짝수개면 이탤릭·볼드 마크업으로 소비됨), 홀수개면 Telegram이 400 can't parse entities로
+    메시지 전체를 거부해 알림이 누락된다. 백틱으로 감싼 자리도 값 안의 백틱이 코드 스팬을
+    탈출시키므로 함께 제거한다.
+
+    자유 서식 텍스트(예외 메시지 등)에는 쓰지 않는다 - 내용이 깎이므로 parse_mode=None으로
+    서식 자체를 끄는 쪽이 맞다.
+    """
+    text = str(value)
+    for char in _MARKDOWN_SIGNIFICANT_CHARS:
+        text = text.replace(char, "")
+    return text
+
+
 def _lang_from_telegram_code(code: str | None) -> str:
     """텔레그램 update의 from.language_code를 앱 언어로 매핑한다.
 
@@ -82,20 +105,84 @@ _global_poll_thread = None
 _global_stop_event = None
 _telegram_executor = None
 
-def send_message_sync(user_id: int, text: str) -> bool:
+# 재시도해도 결과가 달라지지 않는 실패는 즉시 포기한다. 400(서식 파싱 실패), 403(봇 차단),
+# 404(chat 없음)를 재시도하면 호출자 응답만 늦어질 뿐 성공 확률은 0이다.
+# 반대로 429(rate limit)와 5xx, 네트워크 예외는 잠시 뒤 성공할 수 있다.
+_TELEGRAM_RETRYABLE_STATUS = (429, 500, 502, 503, 504)
+
+
+def resolve_target_chat_id(user_id: int, db=None) -> str | None:
+    """연동이 활성화된 사용자의 chat_id를 조회한다. 발송은 하지 않는다.
+
+    db를 넘기면 그 세션으로 조회한다. 요청 스코프 세션을 가진 호출자(라우터)는 반드시 자기
+    세션을 넘겨야 한다 — 넘기지 않으면 모듈 레벨 SessionLocal을 열어 호출자가 어떤 DB를 쓰든
+    항상 기본 DB를 조회하므로, 격리된 DB(통합 테스트의 인메모리 등)에서 호출해도 기본 DB의
+    동일 user_id 연동 채팅으로 실제 메시지가 나간다.
+    """
+    owns_session = db is None
+    session = db or SessionLocal()
+    try:
+        db_settings = session.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        if not db_settings or not db_settings.telegram_enabled:
+            return None
+        return db_settings.telegram_chat_id or None
+    finally:
+        # 넘겨받은 세션은 호출자 소유다. 여기서 닫으면 호출자의 트랜잭션이 끊긴다.
+        if owns_session:
+            session.close()
+
+
+def send_message_sync(
+    user_id: int,
+    text: str,
+    db=None,
+    parse_mode: str | None = "Markdown",
+    attempts: int = 1,
+    backoff_seconds: float = 0.3,
+    timeout_seconds: float = 5.0,
+) -> bool:
     """
     특정 사용자의 텔레그램으로 메시지 동기 전송 (글로벌 봇 토큰 활용)
-    """
-    db = SessionLocal()
-    try:
-        db_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
-        if not db_settings or not db_settings.telegram_enabled:
-            return False
-        token = settings.TELEGRAM_BOT_TOKEN
-        chat_id = db_settings.telegram_chat_id
-    finally:
-        db.close()
 
+    db 계약은 resolve_target_chat_id와 같다.
+
+    parse_mode=None은 서식 없이 원문 그대로 보낸다. 사용자 입력(계정명·에러 문자열 등)을
+    끼운 메시지는 이쪽을 써야 한다. 레거시 Markdown은 밑줄을 이탤릭 마크업으로 소비해
+    값을 조용히 훼손하고(짝수개), 홀수개면 400 can't parse entities로 발송 자체가 실패한다.
+
+    attempts를 1보다 크게 주면 전송 가능한 실패(429·5xx·네트워크 예외)에 한해 재시도한다.
+    기본값 1은 기존 동작(단발 시도)이다. 유실되면 안 되는 알림만 값을 올린다 - 호출자를
+    그만큼 붙잡으므로 요청 처리 경로에서는 상한을 작게 유지해야 한다.
+    """
+    chat_id = resolve_target_chat_id(user_id, db=db)
+    if not chat_id:
+        return False
+    return send_to_chat_sync(
+        chat_id,
+        text,
+        parse_mode=parse_mode,
+        attempts=attempts,
+        backoff_seconds=backoff_seconds,
+        timeout_seconds=timeout_seconds,
+        log_label=f"User {user_id}",
+    )
+
+
+def send_to_chat_sync(
+    chat_id: str,
+    text: str,
+    parse_mode: str | None = "Markdown",
+    attempts: int = 1,
+    backoff_seconds: float = 0.3,
+    timeout_seconds: float = 5.0,
+    log_label: str = "",
+) -> bool:
+    """이미 확정된 chat_id로 전송한다. DB를 전혀 건드리지 않는다.
+
+    조회와 전송을 나눠 둔 이유는, 전송을 다른 스레드로 넘길 때 요청 스코프 세션을 함께
+    넘기면 이미 닫힌 세션을 쓰게 되기 때문이다(dispatch_alert 참고).
+    """
+    token = settings.TELEGRAM_BOT_TOKEN
     if not token or not chat_id:
         return False
 
@@ -103,31 +190,112 @@ def send_message_sync(user_id: int, text: str) -> bool:
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown"
     }
-    try:
-        with httpx.Client() as client:
-            res = client.post(url, json=payload, timeout=5.0)
-            if res.status_code != 200:
-                logger.warning(f"[Telegram User {user_id}] Failed to send message. Code: {res.status_code}, Res: {res.text}")
-            return res.status_code == 200
-    except Exception as e:
-        logger.exception(f"[Telegram User {user_id}] Send exception")
-        return False
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
 
-async def _send_message_async_coro(user_id: int, text: str) -> bool:
+    total_attempts = max(1, attempts)
+    for attempt in range(1, total_attempts + 1):
+        is_last = attempt == total_attempts
+        try:
+            with httpx.Client() as client:
+                res = client.post(url, json=payload, timeout=timeout_seconds)
+                if res.status_code == 200:
+                    return True
+                logger.warning(
+                    f"[Telegram {log_label}] Failed to send message. "
+                    f"Code: {res.status_code}, Res: {res.text} (attempt {attempt}/{total_attempts})"
+                )
+                if res.status_code not in _TELEGRAM_RETRYABLE_STATUS:
+                    return False
+        except Exception:
+            logger.exception(f"[Telegram {log_label}] Send exception (attempt {attempt}/{total_attempts})")
+
+        if is_last:
+            return False
+        time.sleep(backoff_seconds * attempt)
+
+    return False
+
+
+# 알림 전송 전용 스레드 풀. 요청 처리 워커를 재시도 대기로 붙잡지 않기 위한 것이다.
+# 상한을 두는 이유는 알림이 몰릴 때 스레드가 무한히 늘지 않게 하기 위함이다 - 상한을 넘으면
+# 큐에서 대기하며, 요청 스레드는 submit 직후 곧바로 돌아간다.
+# 봇 폴링용 _telegram_executor와 분리했다. 폴링 수명주기(start/stop_telegram_bot)에 묶이면
+# 봇이 꺼진 상태에서 발생한 보안 경고를 보낼 수 없다.
+_ALERT_EXECUTOR_MAX_WORKERS = 4
+_alert_executor: ThreadPoolExecutor | None = None
+_alert_executor_lock = threading.Lock()
+
+
+def _get_alert_executor() -> ThreadPoolExecutor:
+    global _alert_executor
+    if _alert_executor is None:
+        with _alert_executor_lock:
+            if _alert_executor is None:
+                _alert_executor = ThreadPoolExecutor(
+                    max_workers=_ALERT_EXECUTOR_MAX_WORKERS,
+                    thread_name_prefix="TelegramAlert",
+                )
+    return _alert_executor
+
+
+def dispatch_alert(
+    user_id: int,
+    text: str,
+    db=None,
+    parse_mode: str | None = None,
+    attempts: int = 3,
+    backoff_seconds: float = 0.3,
+    timeout_seconds: float = 3.0,
+):
+    """연동 정보는 호출자 세션으로 즉시 확정하고, 전송만 별도 스레드로 넘긴다.
+
+    요청 처리 경로에서 유실되면 안 되는 알림(계정 잠금 등)에 쓴다. 동기 발송은 재시도까지
+    포함하면 요청 스레드를 수 초간 붙잡아, 잠금을 반복 유발하는 방식으로 워커를 고갈시킬 수
+    있다. 반대로 FastAPI BackgroundTasks는 이 용도에 쓸 수 없다 - 엔드포인트가 정상 반환할
+    때만 응답에 background가 붙으므로, raise HTTPException으로 끝나는 분기(로그인 실패)에서는
+    태스크가 아예 실행되지 않아 알림이 전량 유실된다.
+
+    chat_id를 여기서 미리 확정하는 것이 핵심이다. 전송 스레드에 db를 넘기면 요청이 끝난 뒤
+    닫힌 세션을 쓰게 되고, 넘기지 않으면 스레드가 기본 DB를 조회해 격리 DB에서 호출해도 실제
+    사용자에게 메시지가 나간다.
+
+    반환값은 전송 Future이며 대상이 없으면 None이다. 호출자는 기다릴 필요가 없고,
+    테스트는 Future로 완료를 결정론적으로 대기할 수 있다.
+    """
+    chat_id = resolve_target_chat_id(user_id, db=db)
+    if not chat_id:
+        return None
+
+    return _get_alert_executor().submit(
+        send_to_chat_sync,
+        chat_id,
+        text,
+        parse_mode=parse_mode,
+        attempts=attempts,
+        backoff_seconds=backoff_seconds,
+        timeout_seconds=timeout_seconds,
+        log_label=f"Alert User {user_id}",
+    )
+
+async def _send_message_async_coro(user_id: int, text: str, db=None, parse_mode: str | None = "Markdown") -> bool:
     """
     비동기식 텔레그램 메시지 전송 코루틴 (httpx.AsyncClient 활용)
+
+    db·parse_mode 계약은 send_message_sync와 동일하다.
     """
-    db = SessionLocal()
+    owns_session = db is None
+    session = db or SessionLocal()
     try:
-        db_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        db_settings = session.query(UserSettings).filter(UserSettings.user_id == user_id).first()
         if not db_settings or not db_settings.telegram_enabled:
             return False
         token = settings.TELEGRAM_BOT_TOKEN
         chat_id = db_settings.telegram_chat_id
     finally:
-        db.close()
+        if owns_session:
+            session.close()
 
     if not token or not chat_id:
         return False
@@ -136,8 +304,9 @@ async def _send_message_async_coro(user_id: int, text: str) -> bool:
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown"
     }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     try:
         async with httpx.AsyncClient() as client:
             res = await client.post(url, json=payload, timeout=5)
@@ -148,20 +317,28 @@ async def _send_message_async_coro(user_id: int, text: str) -> bool:
         logger.exception(f"[Telegram User {user_id}] Async send exception")
         return False
 
-def send_message_async(user_id: int, text: str):
+def send_message_async(user_id: int, text: str, parse_mode: str | None = "Markdown"):
     """
     비동기식 텔레그램 메시지 전송 (Non-blocking asyncio Task 스케줄링)
+
+    여기에는 의도적으로 db 인자를 두지 않는다. 발송이 호출자보다 늦게 실행되는 fire-and-forget
+    이므로 요청 스코프 세션을 넘기면 이미 닫힌 세션을 쓰게 된다. 세션을 재사용해야 하는 호출자는
+    _send_message_async_coro를 직접 await 하거나 send_message_sync를 쓴다.
     """
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(_send_message_async_coro(user_id, text))
+        loop.create_task(_send_message_async_coro(user_id, text, parse_mode=parse_mode))
     except RuntimeError:
         # 이벤트 루프가 없는 동기식 백그라운드 스레드인 경우 안전하게 동기식 발송으로 대체
-        send_message_sync(user_id, text)
+        send_message_sync(user_id, text, parse_mode=parse_mode)
 
-def _send_direct_message(chat_id: str, text: str) -> bool:
+def _send_direct_message(chat_id: str, text: str, parse_mode: str | None = "Markdown") -> bool:
     """
     유저 매핑 전 /start 안내 등 챗 ID만 알 때 다이렉트로 메시지를 전송하는 헬퍼
+
+    parse_mode 계약은 send_message_sync와 같다. 현재 이 함수로 나가는 메시지는 서식이 균형
+    잡힌 정적 템플릿 3종이고 유일한 동적 값(link_success의 username)은 정제해서 넣지만,
+    새 동적 메시지를 추가할 때 서식을 끌 수 있도록 하드코딩을 파라미터로 뺐다.
     """
     token = settings.TELEGRAM_BOT_TOKEN
     if not token:
@@ -170,8 +347,9 @@ def _send_direct_message(chat_id: str, text: str) -> bool:
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "Markdown"
     }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     try:
         with httpx.Client() as client:
             res = client.post(url, json=payload, timeout=5.0)
@@ -278,10 +456,12 @@ def _process_global_message(msg_chat_id: str, text: str, tg_lang_code: str | Non
             # 방금 연동된 계정이라 UserSettings.language를 SSOT로 사용한다.
             from app.core.models import User
             linked_user = db.query(User).filter(User.id == linked_user_id).first()
+            # 템플릿이 백틱으로 감싸므로 밑줄은 안전하지만, 값 안의 백틱은 코드 스팬을 탈출한다.
+            # username 검증은 길이(3~50)만 보고 문자 종류를 제한하지 않으므로 값을 정제한다.
             direct_message = I18n.get_msg(
                 resolve_user_language(db, linked_user_id),
                 "telegram.link_success",
-                username=linked_user.username if linked_user else "",
+                username=sanitize_markdown_value(linked_user.username) if linked_user else "",
             )
             logger.info(f"[TelegramBot] Successfully linked Chat ID {msg_chat_id} to user_id={linked_user_id}")
             return
@@ -327,9 +507,9 @@ def _process_command(user_id: int, text: str):
             db.close()
             db = None
 
-    def send_reply(message: str) -> bool:
+    def send_reply(message: str, parse_mode: str | None = "Markdown") -> bool:
         close_db()
-        return send_message_sync(user_id, message)
+        return send_message_sync(user_id, message, parse_mode=parse_mode)
 
     try:
         db_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
@@ -429,11 +609,14 @@ def _process_command(user_id: int, text: str):
                 msg += I18n.get_msg(lang, "telegram.status.no_holdings")
             else:
                 for h in holdings:
+                    # 티커·종목명은 외부(브로커·시세) 유래 값이라 Markdown 서식 문자를 제거한다.
+                    # 템플릿이 *{ticker}* ({ticker_name})로 감싸므로 값에 밑줄·별표가 있으면
+                    # 마크업이 어긋나 종목명이 훼손되거나 상태 조회 응답 전체가 발송 실패한다.
                     msg += I18n.get_msg(
                         lang,
                         "telegram.status.holding_line",
-                        ticker=h.ticker,
-                        ticker_name=h.ticker_name,
+                        ticker=sanitize_markdown_value(h.ticker),
+                        ticker_name=sanitize_markdown_value(h.ticker_name),
                         quantity=h.quantity,
                         avg_price=h.avg_price,
                     )
@@ -449,7 +632,12 @@ def _process_command(user_id: int, text: str):
                 db.rollback()  # 💡 예외 발생 시 트랜잭션 롤백 및 커넥션 오염 방지
             except Exception:
                 pass
-        send_reply(I18n.get_msg(lang, "telegram.command_error", error=str(e)))
+        # 예외 문자열은 자유 서식 텍스트이고 컬럼명·경로 탓에 밑줄을 흔히 포함한다. 값을 깎으면
+        # 원인 파악이 어려워지므로 서식을 끄고 원문 그대로 전달한다(템플릿의 볼드도 함께 제거함).
+        send_reply(
+            I18n.get_msg(lang, "telegram.command_error", error=str(e)),
+            parse_mode=None,
+        )
     finally:
         close_db()
 
