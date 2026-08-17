@@ -378,9 +378,9 @@ StockAuto는 8,000개가 넘는 나스닥 상장 주식의 한글명을 자동�
 graph TD
     Frontend["Frontend UI Components"] -->|"1. API Request"| Router["app/trades/router_account.py"]
     DB_Settings[("DB UserSettings - trade_mode")] -->|"2. Read current_user.settings"| Router
-    Router -->|"3. get_broker_client - settings"| Factory["app/bot/broker_factory.py"]
-    Factory -- "MOCK / REAL Mode" --> KIS["app/bot/kis_broker.py - KISBroker"]
-    Factory -- "SIMULATED Mode" --> Mock["app/bot/simulated_broker.py - LocalSimulatedBroker"]
+    Router -->|"3. get_broker_client - settings"| Factory["app/brokers/broker_factory.py"]
+    Factory -- "MOCK / REAL Mode" --> KIS["app/brokers/kis_broker.py - KISBroker"]
+    Factory -- "SIMULATED Mode" --> Mock["app/brokers/simulated_broker.py - LocalSimulatedBroker"]
     KIS --> KIS_API["KIS OpenAPI Server"]
     Mock --> DB_SQLite[("Local SQLite DB")]
     Mock --> YFinance["Yahoo Finance - Live Price"]

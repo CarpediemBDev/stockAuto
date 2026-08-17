@@ -154,7 +154,7 @@ STRATEGY_TYPE=my_new_strategy
 
 1.  **컴파일 무결성 검증**:
     ```bash
-    python -m py_compile app/strategies/*.py app/bot/backtest_engine.py app/scanner/scanner.py app/bot/scheduler.py
+    python -m py_compile app/strategies/*.py app/backtests/backtest_engine.py app/scanner/scanner.py app/bot/scheduler.py
     ```
 2.  **역사적 12대 토너먼트 PnL 검증**:
     ```bash

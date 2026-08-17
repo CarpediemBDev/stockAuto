@@ -73,7 +73,7 @@ cache_key = (
 yfinance의 한도 검사 기준점은 백테스트 종료일(download_end)이 아니라 **프로그램을 실행하고 있는 현재 시간(오늘)**입니다. 따라서 동적으로 과거 한계를 역산하여 클리핑해야 합니다.
 
 `python
-# backend/app/bot/backtest_engine.py
+# backend/app/backtests/backtest_engine.py
 
 # yfinance 한도는 언제나 '현재 호출하는 시점(오늘)' 기준이므로,
 # download_end가 아닌 datetime.now() 기준으로 역산하고 2일의 안전 마진을 둡니다.

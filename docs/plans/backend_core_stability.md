@@ -16,7 +16,7 @@ StockAuto 백엔드 코어는 초당 수십 건 이상의 마켓 데이터 분�
 ## 🚫 2. 안정성 약점 상세 분석 및 비판 (Severity Ratings)
 
 ### 🚨 [P0] `TossBroker` 연동 시 다형성 위반으로 인한 런타임 크래시 및 주문 유실
-*   **해당 위치**: `backend/app/bot/toss_broker.py` ([toss_broker.py](file:///d:/dev/workspace/stockAuto/backend/app/bot/toss_broker.py#L83-L113)) 및 `backend/app/bot/base_broker.py`
+*   **해당 위치**: `backend/app/brokers/toss_broker.py` (L83-L113) 및 `backend/app/brokers/base_broker.py`
 *   **위반 불변식**: 브로커 엔진 인터페이스 단일화 원칙(Polymorphism) 및 Duck Typing 안정성 위반
 *   **생산자/소비자 영향**: 
     *   **생산자**: `TossBroker.buy_order(...)`, `TossBroker.sell_order(...)`
