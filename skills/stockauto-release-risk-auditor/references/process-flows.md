@@ -14,7 +14,7 @@ Invariant:
 
 Inspect:
 - `backend/app/admin/router.py`
-- `backend/app/bot/broker_factory.py`
+- `backend/app/brokers/broker_factory.py`
 - `backend/tests/test_admin_settings_safety.py`
 - `backend/tests/test_trading_catalog.py`
 

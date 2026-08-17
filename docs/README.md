@@ -17,6 +17,8 @@
 | [API_STANDARD.md](API_STANDARD.md) | 전역 응답 래퍼, API 계약 규격 |
 | [SCANNER_DATA_FLOW.md](SCANNER_DATA_FLOW.md) | 스캐너 데이터 파이프라인 흐름 |
 | [CACHING_GUIDE.md](CACHING_GUIDE.md) | 캐시 경계(공용 vs 개인) 및 갱신 규칙 |
+| [DATA_CACHING.md](DATA_CACHING.md) | yfinance Parquet 로컬 캐싱 엔진, 캐시 키 생성 기준, 인터벌별 API 한도 우회 정책 |
+| [RUNNER_MANUAL.md](RUNNER_MANUAL.md) | 백테스트·수집 러너 스크립트의 역할과 연결 관계 |
 | [SYSTEM_MANUAL.md](SYSTEM_MANUAL.md) | 시스템 전체 운영 매뉴얼 |
 | [SYSTEM_SETTINGS.md](SYSTEM_SETTINGS.md) | 런타임 시스템 설정 항목 정본 |
 | [REACT_GUIDE.md](REACT_GUIDE.md) | React 19 훅·렌더링 트러블슈팅 |
@@ -33,6 +35,7 @@
 | [strategy_architecture.md](strategy_architecture.md) | 전략 패턴 **OOP 아키텍처** (신규 전략 추가 가이드) |
 | [FILTER.md](FILTER.md) | 매수 후보 필터(Gap/RVOL/Catalyst) 정의 |
 | [SIGNAL.md](SIGNAL.md) | 매도/익절/트레일링 신호 정의 |
+| [new_strategy_proposals.md](new_strategy_proposals.md) | 신규 돌파·단타 전략 기획 제안서 (미채택 후보 룰셋) |
 
 ## 🚀 운영·배포 문서
 

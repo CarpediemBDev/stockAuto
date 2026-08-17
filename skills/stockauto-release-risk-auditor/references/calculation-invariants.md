@@ -76,8 +76,8 @@ Invariant:
 - Drawdown is based on equity curve peak-to-trough, not trade-only PnL.
 
 Inspect:
-- `backend/app/bot/backtest_engine.py`
-- `backend/app/bot/backtest_metrics.py`
+- `backend/app/backtests/backtest_engine.py`
+- `backend/app/backtests/backtest_metrics.py`
 - `backend/tests/test_backtest_metrics.py`
 - `backend/tests/test_backtest_data_range.py`
 

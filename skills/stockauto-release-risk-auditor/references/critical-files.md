@@ -14,9 +14,9 @@ Use this reference to build an impact map before changing sensitive files.
 ## Trading
 
 - `backend/app/bot/scheduler.py`: automated trading orchestration.
-- `backend/app/bot/broker_factory.py`: broker/mode capability gate.
-- `backend/app/bot/kis_api.py`, `kis_broker.py`: KIS live/mock integration.
-- `backend/app/bot/toss_api.py`, `toss_broker.py`: Toss integration.
+- `backend/app/brokers/broker_factory.py`: broker/mode capability gate.
+- `backend/app/brokers/kis_api.py`, `backend/app/brokers/kis_broker.py`: KIS live/mock integration.
+- `backend/app/brokers/toss_api.py`, `backend/app/brokers/toss_broker.py`: Toss integration.
 - `backend/app/bot/order_reconciler.py`: pending/partial/final fill handling.
 - `backend/app/bot/order_discovery.py`: recovery of unresolved broker orders.
 - `backend/app/core/locks.py`: duplicate order boundary.
