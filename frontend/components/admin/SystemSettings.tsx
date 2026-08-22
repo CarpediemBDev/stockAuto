@@ -135,7 +135,7 @@ export function SystemSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl space-y-5">
+      <div className="bg-surface-card/80 backdrop-blur-xl rounded-2xl border border-zinc-800/80 p-6 shadow-xl space-y-5">
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <div>
             <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">

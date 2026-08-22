@@ -3,6 +3,7 @@
 import React, { useCallback, useState } from 'react';
 import useSWR from 'swr';
 import { pollInterval } from '@/lib/sse';
+import { getProfitColor } from '@/lib/theme';
 import { Activity, AlertTriangle, Moon, RefreshCw, ShieldCheck, Star, TrendingUp, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -215,7 +216,7 @@ export function AfterHoursScanner({
                     </td>
                     <td className="py-4 px-3">
                       <div className="flex flex-col items-center gap-1.5 text-[11px] font-bold">
-                        <span className={candidate.details.regular_change_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                        <span className={getProfitColor(candidate.details.regular_change_pct)}>
                           {t("after_hours.regular")} {candidate.details.regular_change_pct >= 0 ? '+' : ''}{candidate.details.regular_change_pct}%
                         </span>
                         <span className="text-zinc-400">{t("after_hours.final_hour")} {candidate.details.final_hour_return_pct >= 0 ? '+' : ''}{candidate.details.final_hour_return_pct}%</span>
@@ -224,7 +225,7 @@ export function AfterHoursScanner({
                     </td>
                     <td className="py-4 px-3">
                       <div className="flex flex-col items-center gap-1.5 text-[11px] font-bold">
-                        <span className={candidate.details.after_hours_change_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                        <span className={getProfitColor(candidate.details.after_hours_change_pct)}>
                           {t("after_hours.after")} {candidate.details.after_hours_change_pct >= 0 ? '+' : ''}{candidate.details.after_hours_change_pct}%
                         </span>
                         <span className="text-zinc-400">{t("after_hours.volume_ratio")} {(candidate.details.after_hours_volume_ratio * 100).toFixed(1)}%</span>

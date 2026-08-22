@@ -5,6 +5,7 @@ import { TradeLog } from "./TradeLogs";
 import { accountAPI, isCancel } from "@/lib/api";
 import { reportHandledError, DEFAULT_FX_RATE, krwToUsd, usdToKrw } from "@/lib/utils";
 import { useTranslations } from "next-intl";
+import { getProfitColor } from "@/lib/theme";
 
 interface AssetTrendChartProps {
   displayCurrency: "KRW" | "USD";
@@ -236,9 +237,7 @@ export function AssetTrendChart({ displayCurrency, logs }: AssetTrendChartProps)
             </h3>
             {changePct !== 0 && (
               <span
-                className={`text-xs font-extrabold px-2 py-0.5 rounded-full ${
-                  changePct >= 0 ? "bg-emerald-950/50 text-emerald-400" : "bg-red-950/50 text-red-400"
-                }`}
+                className={`text-xs font-extrabold px-2 py-0.5 rounded-full ${getProfitColor(changePct, { badge: true })}`}
               >
                 {changePct >= 0 ? "+" : ""}
                 {changePct.toFixed(2)}%

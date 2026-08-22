@@ -27,7 +27,7 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[#020617] text-slate-200">
+    <main className="min-h-screen text-slate-200">
       <MarketHeader />
       <Dashboard />
     </main>

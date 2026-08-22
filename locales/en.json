@@ -101,6 +101,7 @@
     "close": "Close"
   },
   "report": {
+    "loading": "Loading your trading report...",
     "load_failed": "Failed to load data.",
     "title": "Overall Trading Report",
     "subtitle": "Analyzes core investment performance such as total cumulative profit and win rate for the account.",
@@ -110,7 +111,11 @@
     "gross_loss": "Gross loss:",
     "win_rate": "Win Rate",
     "profit_factor": "Profit Factor",
+    "profit_factor_excellent": "Excellent - profit is at least 2x gross loss",
+    "profit_factor_good": "Good - gross profit exceeds gross loss",
+    "profit_factor_poor": "Needs improvement - gross loss exceeds gross profit",
     "total_trades": "Total Trades",
+    "total_trades_desc": "Counted from closed (sold) positions only",
     "wins": "Wins:",
     "losses": "Losses:",
     "count_suffix": "",

@@ -123,7 +123,7 @@ export function TranslationManager() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl space-y-4">
+      <div className="bg-surface-card/80 backdrop-blur-xl rounded-2xl border border-zinc-800/80 p-6 shadow-xl space-y-4">
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <Plus size={18} className="text-blue-400" />
@@ -142,7 +142,7 @@ export function TranslationManager() {
               placeholder={t("translation.ticker_placeholder")}
               value={newTicker}
               onChange={(e) => setNewTicker(e.target.value)}
-              className="w-full bg-[#0a0f1d] border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 tracking-widest font-mono uppercase"
+              className="w-full bg-surface-card-subtle border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 tracking-widest font-mono uppercase"
               disabled={isSubmitting}
             />
           </div>
@@ -153,7 +153,7 @@ export function TranslationManager() {
               placeholder={t("translation.name_placeholder")}
               value={newNameKo}
               onChange={(e) => setNewNameKo(e.target.value)}
-              className="w-full bg-[#0a0f1d] border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full bg-surface-card-subtle border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
               disabled={isSubmitting}
             />
           </div>
@@ -167,7 +167,7 @@ export function TranslationManager() {
         </form>
       </div>
 
-      <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl space-y-4">
+      <div className="bg-surface-card/80 backdrop-blur-xl rounded-2xl border border-zinc-800/80 p-6 shadow-xl space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-zinc-800 pb-4">
           <div>
             <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
@@ -189,7 +189,7 @@ export function TranslationManager() {
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full bg-[#0a0f1d] border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="w-full bg-surface-card-subtle border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
           </div>
         </div>
@@ -233,7 +233,7 @@ export function TranslationManager() {
                               type="text"
                               value={editingName}
                               onChange={(e) => setEditingName(e.target.value)}
-                              className="bg-[#05080f] border border-blue-500/50 rounded-lg px-3 py-1 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              className="bg-surface-card-subtle border border-indigo-500/50 rounded-lg px-3 py-1 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") handleUpdate(item.id);
                                 if (e.key === "Escape") setEditingId(null);
@@ -270,9 +270,9 @@ export function TranslationManager() {
                       Showing <strong className="text-zinc-300">{indexOfFirstItem + 1}</strong> to <strong className="text-zinc-300">{Math.min(indexOfLastItem, filteredTranslations.length)}</strong> of <strong className="text-zinc-300">{filteredTranslations.length}</strong> items
                     </span>
                     <div className="flex items-center gap-1.5">
-                      <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-3 py-2 rounded-xl text-xs font-bold border border-zinc-800 bg-[#0a0f1d] hover:bg-zinc-800/60 disabled:opacity-40 text-zinc-400 hover:text-white transition-all">Previous</button>
+                      <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-3 py-2 rounded-xl text-xs font-bold border border-zinc-800 bg-surface-card-subtle hover:bg-zinc-800/60 disabled:opacity-40 text-zinc-400 hover:text-white transition-all">Previous</button>
                       <button type="button" className="w-9 h-9 rounded-xl text-xs font-bold transition-all flex items-center justify-center bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg border border-teal-500/20">{currentPage}</button>
-                      <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-3 py-2 rounded-xl text-xs font-bold border border-zinc-800 bg-[#0a0f1d] hover:bg-zinc-800/60 disabled:opacity-40 text-zinc-400 hover:text-white transition-all">Next</button>
+                      <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-3 py-2 rounded-xl text-xs font-bold border border-zinc-800 bg-surface-card-subtle hover:bg-zinc-800/60 disabled:opacity-40 text-zinc-400 hover:text-white transition-all">Next</button>
                     </div>
                   </div>
                 )}

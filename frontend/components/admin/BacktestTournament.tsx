@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { adminAPI } from '@/lib/api';
+import { getProfitColor } from '@/lib/theme';
 import { 
   Trophy, 
   Activity, 
@@ -215,7 +216,7 @@ export function BacktestTournament() {
     <div className="space-y-6">
       
       {/* 아레나 헤더 및 날짜 캘린더 피커 컨트롤 바 */}
-      <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-6 shadow-xl space-y-4">
+      <div className="bg-surface-card/80 backdrop-blur-xl rounded-2xl border border-zinc-800/80 p-6 shadow-xl space-y-4">
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between border-b border-zinc-800 pb-4 gap-4">
           <div className="space-y-1">
             <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2.5">
@@ -451,7 +452,7 @@ export function BacktestTournament() {
                       </span>
                     </div>
 
-                    <div className="bg-[#0b0f19] border border-zinc-800/80 rounded-2xl p-5 shadow-2xl space-y-4">
+                    <div className="bg-surface-card-subtle border border-zinc-800/80 rounded-2xl p-5 shadow-2xl space-y-4">
                       
                       <div className="grid grid-cols-2 gap-3">
                         <div className="bg-zinc-900/40 rounded-xl p-3.5 border border-zinc-800/40">
@@ -459,7 +460,7 @@ export function BacktestTournament() {
                             {t("backtest.cumulative_pnl")}
                           </span>
                           <span className={`text-base font-mono font-extrabold block
-                            ${selectedStrategy.total_pnl > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            ${getProfitColor(selectedStrategy.total_pnl, { neutralZero: true })}`}>
                             {formatMoneyUSD(selectedStrategy.total_pnl)}
                           </span>
                         </div>
@@ -469,7 +470,7 @@ export function BacktestTournament() {
                           </span>
                           <div className="flex items-baseline gap-1.5">
                             <span className={`text-base font-mono font-extrabold block
-                              ${selectedStrategy.total_return_rate > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              ${getProfitColor(selectedStrategy.total_return_rate, { neutralZero: true })}`}>
                               {selectedStrategy.total_return_rate.toFixed(2)}%
                             </span>
                             <span className="text-[10px] text-rose-500 font-bold font-mono">
@@ -527,7 +528,6 @@ export function BacktestTournament() {
                         {Object.keys(selectedStrategy.ticker_stats || {}).map((ticker) => {
                           const stat = selectedStrategy.ticker_stats[ticker] || { buys: 0, sells: 0, pnl: 0 };
                           const total = stat.buys + stat.sells;
-                          const isProfit = stat.pnl > 0;
                           const isZero = total === 0;
 
                           return (
@@ -555,12 +555,12 @@ export function BacktestTournament() {
                                   <span className="text-zinc-750 font-normal">$0.00</span>
                                 ) : (
                                   <>
-                                    <span className={isProfit ? 'text-emerald-400' : 'text-rose-400'}>
+                                    <span className={getProfitColor(stat.pnl)}>
                                       {formatMoneyUSD(stat.pnl)}
                                     </span>
                                     <div className="w-1.5 h-6 rounded bg-zinc-900 overflow-hidden shrink-0">
                                       <div 
-                                        className={`w-full rounded ${isProfit ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                                        className={`w-full rounded ${getProfitColor(stat.pnl, { solid: true })}`}
                                         style={{ height: `${Math.min(100, Math.max(15, (Math.abs(stat.pnl) / 5000) * 100))}%` }}
                                       ></div>
                                     </div>

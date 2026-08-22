@@ -19,6 +19,7 @@ import {
   X
 } from "lucide-react";
 import { cn, reportHandledError } from "@/lib/utils";
+import { getProfitColor } from "@/lib/theme";
 import { scannerAPI } from "@/lib/api";
 import useSWR from "swr";
 import { pollInterval } from "@/lib/sse";
@@ -338,7 +339,7 @@ export function OverseasScanner({
                           <div className="flex items-center gap-1.5">
                             <span className={cn(
                               "text-[11px] font-bold px-1.5 py-0.5 rounded",
-                              d.gap > 0 ? "bg-rose-500/10 text-rose-400" : "bg-blue-500/10 text-blue-400"
+                              getProfitColor(d.gap, { bg: true })
                             )}>
                               {d.gap > 0 ? '+' : ''}{d.gap}%
                             </span>

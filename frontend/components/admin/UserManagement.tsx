@@ -232,7 +232,7 @@ export function UserManagement() {
 
 
       {/* 사용자 관리 테이블 보드 */}
-      <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-4 md:p-6 shadow-xl space-y-4">
+      <div className="bg-surface-card/80 backdrop-blur-xl rounded-2xl border border-zinc-800/80 p-4 md:p-6 shadow-xl space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-zinc-800 pb-3 gap-3">
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
             <Users size={18} className="text-blue-400" />
@@ -250,7 +250,7 @@ export function UserManagement() {
                   setCurrentPage(1);
                 }}
                 placeholder={t('search_placeholder')}
-                className="w-full bg-zinc-900/90 border border-zinc-800 focus:border-blue-500/50 text-slate-200 text-xs rounded-lg pl-8 pr-7 py-1.5 outline-none transition-colors placeholder:text-zinc-500 font-sans"
+                className="w-full bg-surface-card-subtle border border-zinc-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 placeholder-zinc-500 transition-all"
               />
               {searchQuery && (
                 <button
@@ -504,10 +504,10 @@ export function UserManagement() {
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed top-0 right-0 h-full w-full max-w-md bg-[#0f1424] border-l border-zinc-800/80 shadow-2xl z-50 overflow-y-auto flex flex-col"
+              className="fixed top-0 right-0 h-full w-full max-w-md bg-surface-card border-l border-zinc-800/80 shadow-2xl z-50 overflow-y-auto flex flex-col"
             >
               {/* Header */}
-              <div className="flex items-center justify-between p-6 border-b border-zinc-800/80 bg-[#0c0f1c]/50">
+              <div className="flex items-center justify-between p-6 border-b border-zinc-800/80 bg-surface-card-subtle/80">
                 <div className="flex items-center gap-2.5">
                   <div className="p-2 bg-blue-500/10 rounded-xl">
                     <Users size={20} className="text-blue-400" />
@@ -528,7 +528,7 @@ export function UserManagement() {
               {/* Body */}
               <div className="p-6 space-y-6 flex-1">
                 {/* User Header Info Card */}
-                <div className="bg-[#0b0e1a]/40 border border-zinc-800/40 rounded-2xl p-4 flex items-center justify-between">
+                <div className="bg-surface-card-subtle/50 border border-zinc-800/40 rounded-2xl p-4 flex items-center justify-between">
                   <div className="space-y-1">
                     <div className="text-xs text-zinc-500 font-semibold">{t('col_username')}</div>
                     <div className="text-lg font-bold text-slate-200">{selectedUser.username}</div>
@@ -549,7 +549,7 @@ export function UserManagement() {
                     <Calendar size={14} className="text-zinc-500" />
                     {t('section_account')}
                   </h4>
-                  <div className="bg-[#0b0e1a]/20 border border-zinc-800/50 rounded-2xl p-4 space-y-3.5 text-sm">
+                  <div className="bg-surface-card-subtle/30 border border-zinc-800/50 rounded-2xl p-4 space-y-3.5 text-sm">
                     <div className="flex justify-between items-center">
                       <span className="text-zinc-500 text-xs font-semibold">{t('field_signup_at')}</span>
                       <span className="text-slate-300 font-mono text-xs font-semibold">
@@ -571,7 +571,7 @@ export function UserManagement() {
                     <Bot size={14} className="text-zinc-500" />
                     {t('section_strategy')}
                   </h4>
-                  <div className="bg-[#0b0e1a]/20 border border-zinc-800/50 rounded-2xl p-4 space-y-3.5 text-sm">
+                  <div className="bg-surface-card-subtle/30 border border-zinc-800/50 rounded-2xl p-4 space-y-3.5 text-sm">
                     <div className="flex justify-between items-center">
                       <span className="text-zinc-500 text-xs font-semibold">{t('field_current_mode')}</span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -613,12 +613,12 @@ export function UserManagement() {
                   </h4>
                   <div className="space-y-2">
                     {!selectedUser.credentials || selectedUser.credentials.length === 0 ? (
-                      <div className="bg-[#0b0e1a]/10 border border-zinc-800/30 rounded-2xl p-4 text-center text-xs text-zinc-500 font-semibold">
+                      <div className="bg-surface-card-subtle/20 border border-zinc-800/30 rounded-2xl p-4 text-center text-xs text-zinc-500 font-semibold">
                         {t('no_broker_api')}
                       </div>
                     ) : (
                       selectedUser.credentials.map((cred, idx) => (
-                        <div key={idx} className="bg-[#0b0e1a]/20 border border-zinc-800/50 rounded-2xl p-4 space-y-2 text-sm">
+                        <div key={idx} className="bg-surface-card-subtle/30 border border-zinc-800/50 rounded-2xl p-4 space-y-2 text-sm">
                           <div className="flex justify-between items-center">
                             <span className="font-bold text-slate-350 text-xs">{cred.broker_name}</span>
                             <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
@@ -659,7 +659,7 @@ export function UserManagement() {
                     <Send size={14} className="text-zinc-500" />
                     {t('section_telegram')}
                   </h4>
-                  <div className="bg-[#0b0e1a]/20 border border-zinc-800/50 rounded-2xl p-4 space-y-3.5 text-sm">
+                  <div className="bg-surface-card-subtle/30 border border-zinc-800/50 rounded-2xl p-4 space-y-3.5 text-sm">
                     <div className="flex justify-between items-center">
                       <span className="text-zinc-500 text-xs font-semibold">{t('field_notify_status')}</span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -679,7 +679,7 @@ export function UserManagement() {
               </div>
 
               {/* Footer Actions */}
-              <div className="p-6 border-t border-zinc-800/80 bg-[#0c0f1c]/30 flex gap-3">
+              <div className="p-6 border-t border-zinc-800/80 bg-surface-card-subtle/50 flex gap-3">
                 <button
                   onClick={() => handleToggleUserBot(selectedUser.id)}
                   disabled={actionUserId === selectedUser.id}

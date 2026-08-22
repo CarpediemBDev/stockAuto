@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { TradeLog } from "./TradeLogs";
 import { cn } from "@/lib/utils";
+import { getProfitColor } from "@/lib/theme";
 import { useTimezone } from "@/store/timezoneStore";
 import { useTranslations } from "next-intl";
 
@@ -123,13 +124,13 @@ export function LiveTradeTicker({ latestLog, onClick }: LiveTradeTickerProps) {
               <span className="text-zinc-600 font-extrabold shrink-0">|</span>
               <span className={cn(
                 "font-bold flex items-center gap-0.5",
-                isProfit ? "text-emerald-400" : "text-rose-400"
+                getProfitColor(pnl)
               )}>
                 {t("ticker.net_return")} {isProfit ? "▲" : "▼"} {Math.abs(rate).toFixed(2)}%
               </span>
               <span className={cn(
                 "font-mono font-black",
-                isProfit ? "text-emerald-400" : "text-rose-400"
+                getProfitColor(pnl)
               )}>
                 ({isProfit ? "+" : "-"}${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
               </span>

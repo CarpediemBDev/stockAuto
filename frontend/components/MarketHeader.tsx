@@ -3,30 +3,33 @@
 import React from 'react';
 import { TrendingUp, TrendingDown, DollarSign, Activity } from 'lucide-react';
 import { useMarketOverview, type MarketQuote } from '@/hooks/useMarketOverview';
+import { getProfitColor, getRegimeTheme } from '@/lib/theme';
 
 const MarketHeader = () => {
   // 국면·시세 조회는 useMarketOverview 훅이 SSOT다(중복 useSWR/타입 선언 금지).
   const { data: marketData, isLoading } = useMarketOverview();
   const data = marketData || null;
 
-  if (isLoading && !data) return <div className="h-14 bg-[#0f172a] border-b border-slate-800 animate-pulse"></div>;
-  if (!data) return <div className="h-14 bg-[#0f172a] border-b border-slate-800"></div>;
+  if (isLoading && !data) return <div className="h-14 bg-surface-card/80 border-b border-zinc-800/80 animate-pulse"></div>;
+  if (!data) return <div className="h-14 bg-surface-card/80 border-b border-zinc-800/80"></div>;
   const marketCondition = data.market_condition ?? data.sentiment;
+  const regimeTheme = getRegimeTheme(marketCondition);
 
   const renderValue = (item: MarketQuote | null, label: string, icon: React.ReactNode) => {
     if (!item) return null;
     const isUp = item.change >= 0;
+    const profitColor = getProfitColor(item.change);
     
     return (
-      <div className="flex items-center space-x-3 px-6 border-r border-slate-800 last:border-r-0">
-        <div className="p-1.5 bg-slate-800/50 rounded-full text-slate-400">
+      <div className="flex items-center space-x-3 px-6 border-r border-zinc-800/80 last:border-r-0">
+        <div className="p-1.5 bg-zinc-800/50 rounded-full text-zinc-400">
           {icon}
         </div>
         <div className="flex flex-col">
-          <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider mb-0.5">{label}</span>
+          <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider mb-0.5">{label}</span>
           <div className="flex items-center space-x-2">
             <span className="text-sm font-bold text-slate-200">{item.current.toLocaleString()}</span>
-            <span className={`text-[11px] font-medium flex items-center ${isUp ? 'text-rose-500' : 'text-blue-500'}`}>
+            <span className={`text-[11px] font-medium flex items-center ${profitColor}`}>
               {isUp ? '+' : ''}{item.change.toLocaleString()} ({isUp ? '+' : ''}{item.change_pct}%)
               {isUp ? <TrendingUp size={12} className="ml-0.5" /> : <TrendingDown size={12} className="ml-0.5" />}
             </span>
@@ -37,7 +40,7 @@ const MarketHeader = () => {
   };
 
   return (
-    <div className="w-full bg-[#0f172a]/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-50">
+    <div className="w-full bg-surface-card/80 backdrop-blur-md border-b border-zinc-800/80 sticky top-0 z-50">
       <div className="max-w-[1600px] mx-auto h-14 flex items-center justify-between px-6">
         <div className="flex items-center">
           {renderValue(data.nasdaq, 'NASDAQ', <Activity size={14} />)}
@@ -45,12 +48,9 @@ const MarketHeader = () => {
         </div>
         
         <div className="flex items-center space-x-2">
-          <div className={`px-4 py-1.5 rounded-full text-[11px] font-bold tracking-tight border flex items-center space-x-2
-            ${marketCondition === 'BULLISH' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 
-              marketCondition === 'BEARISH' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' : 
-              'bg-slate-500/10 text-slate-400 border-slate-500/20'}`}>
-            <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${marketCondition === 'BULLISH' ? 'bg-rose-500' : marketCondition === 'BEARISH' ? 'bg-blue-500' : 'bg-slate-400'}`}></div>
-            <span className="uppercase">Market {marketCondition}</span>
+          <div className={`px-4 py-1.5 rounded-full text-[11px] font-bold tracking-tight border flex items-center space-x-2 ${regimeTheme.badgeClass}`}>
+            <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${regimeTheme.dotColor}`}></div>
+            <span className="uppercase">Market {regimeTheme.label}</span>
           </div>
         </div>
       </div>

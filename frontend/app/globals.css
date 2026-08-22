@@ -5,6 +5,16 @@
   color-scheme: dark;
   --background: #09090b;
   --foreground: #ededed;
+  --surface-card: #0c101d;
+  --surface-card-subtle: #080c16;
+  --surface-card-highlight: #0f1528;
+  --surface-glass: color-mix(in srgb, var(--surface-card) 70%, transparent);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --profit: #10b981;
+  --loss: #f43f5e;
+  --bullish: #10b981;
+  --bearish: #f43f5e;
 }
 
 @theme inline {
@@ -12,6 +22,16 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-noto-sans-kr), -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   --font-mono: var(--font-geist-mono);
+  --color-surface-card: var(--surface-card);
+  --color-surface-card-subtle: var(--surface-card-subtle);
+  --color-surface-card-highlight: var(--surface-card-highlight);
+  --color-surface-glass: var(--surface-glass);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-profit: var(--profit);
+  --color-loss: var(--loss);
+  --color-bullish: var(--bullish);
+  --color-bearish: var(--bearish);
 }
 
 body {

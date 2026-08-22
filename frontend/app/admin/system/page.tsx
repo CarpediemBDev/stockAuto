@@ -44,7 +44,7 @@ const MetricCard = ({
   icon: React.ElementType,
   warning?: boolean
 }) => (
-  <div className="relative group overflow-hidden rounded-2xl bg-[#1C1F26]/60 backdrop-blur-xl border border-white/5 p-6 hover:border-white/10 transition-all duration-300">
+  <div className="relative group overflow-hidden rounded-2xl bg-surface-card/80 backdrop-blur-xl border border-white/5 p-6 hover:border-white/10 transition-all duration-300">
     <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
     <div className="flex justify-between items-start mb-4">
       <div className="p-3 bg-white/5 rounded-xl border border-white/5">
@@ -67,7 +67,7 @@ export default function SystemHealthPage() {
   const { core, bot, brokers, loadingCore, loadingBot, loadingBrokers, refetch } = useSystemHealth(refreshInterval);
 
   return (
-    <div className="min-h-screen bg-[#0A0D14] text-white selection:bg-blue-500/30 selection:text-blue-200">
+    <div className="min-h-screen text-white selection:bg-indigo-500/30 selection:text-indigo-200">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pt-24 space-y-8">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -143,7 +143,7 @@ export default function SystemHealthPage() {
             {loadingBot && <RefreshCw className="w-4 h-4 text-gray-500 animate-spin ml-2" />}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="flex items-center justify-between p-5 rounded-2xl bg-[#1C1F26]/60 border border-white/5">
+            <div className="flex items-center justify-between p-5 rounded-2xl bg-surface-card/80 border border-white/5">
               <div className="flex items-center gap-4">
                 <div className="p-3 bg-white/5 rounded-xl">
                   <Bot className="w-6 h-6 text-indigo-400" />
@@ -167,7 +167,7 @@ export default function SystemHealthPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between p-5 rounded-2xl bg-[#1C1F26]/60 border border-white/5">
+            <div className="flex items-center justify-between p-5 rounded-2xl bg-surface-card/80 border border-white/5">
               <div className="flex items-center gap-4">
                 <div className="p-3 bg-white/5 rounded-xl">
                   <RefreshCw className={`w-6 h-6 text-purple-400 ${bot?.trading_loop.is_processing ? 'animate-spin' : ''}`} />

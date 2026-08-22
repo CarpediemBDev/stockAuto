@@ -2,6 +2,7 @@
 
 import { useTimezone } from "@/store/timezoneStore";
 import { useTranslations } from "next-intl";
+import { getProfitColor } from "@/lib/theme";
 
 export interface TradeLog {
   id: number;
@@ -90,11 +91,7 @@ export function TradeLogs({ logs, isModalMode = false }: TradeLogsProps) {
                     </td>
                     <td className="p-4 text-right">
                       {isSell && hasPnL ? (
-                        <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold whitespace-nowrap ${
-                          isProfit 
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                            : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                        }`}>
+                        <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold whitespace-nowrap ${getProfitColor(pnl, { badge: true })}`}>
                           {isProfit ? '▲' : '▼'} {Math.abs(rate).toFixed(2)}%
                         </span>
                       ) : (
@@ -103,9 +100,7 @@ export function TradeLogs({ logs, isModalMode = false }: TradeLogsProps) {
                     </td>
                     <td className="p-4 text-right">
                       {isSell && hasPnL ? (
-                        <span className={`text-sm font-bold font-mono tracking-tight ${
-                          isProfit ? 'text-emerald-400' : 'text-rose-400'
-                        }`}>
+                        <span className={`text-sm font-bold font-mono tracking-tight ${getProfitColor(pnl)}`}>
                           {isProfit ? '+' : '-'}${Math.abs(pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       ) : (
