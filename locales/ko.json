@@ -101,6 +101,7 @@
     "close": "닫기"
   },
   "report": {
+    "loading": "성적표를 불러오는 중입니다...",
     "load_failed": "데이터를 불러오지 못했습니다.",
     "title": "종합 매매 성적표",
     "subtitle": "계좌의 전체 누적 수익금과 승률 등 핵심 투자 성과를 분석합니다.",
@@ -110,7 +111,11 @@
     "gross_loss": "총손실:",
     "win_rate": "승률 (Win Rate)",
     "profit_factor": "프로핏 팩터",
+    "profit_factor_excellent": "매우 우수 · 총손실 대비 수익이 2배 이상",
+    "profit_factor_good": "양호 · 총수익이 총손실보다 큼",
+    "profit_factor_poor": "개선 필요 · 총손실이 총수익보다 큼",
     "total_trades": "총 거래 횟수",
+    "total_trades_desc": "수익 실현(매도)이 완료된 거래 기준",
     "wins": "익절:",
     "losses": "손절:",
     "count_suffix": "회",

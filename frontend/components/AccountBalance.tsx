@@ -3,6 +3,7 @@
 import React, { useCallback, useMemo } from "react";
 import { Wallet, TrendingUp, DollarSign, PieChart, ShieldAlert, Zap, Crown, Activity } from "lucide-react";
 import { cn, krwToUsd } from "@/lib/utils";
+import { getProfitColor, getRegimeTheme } from "@/lib/theme";
 import useSWR from "swr";
 import { pollInterval } from "@/lib/sse";
 import { useFreshness } from "@/hooks/useFreshness";
@@ -165,9 +166,7 @@ export function AccountBalance({
             {formatMoney(balance.total_asset)}
           </div>
           {balance.profit_loss !== undefined && (
-            <span className={`text-xs font-semibold mt-1.5 flex items-center gap-1 ${
-              balance.profit_loss >= 0 ? "text-emerald-400" : "text-rose-400"
-            }`}>
+            <span className={`text-xs font-semibold mt-1.5 flex items-center gap-1 ${getProfitColor(balance.profit_loss)}`}>
               <span>{balance.profit_loss >= 0 ? "▲" : "▼"}</span>
               <span>
                 {balance.profit_loss >= 0 ? "+" : "-"}
@@ -180,12 +179,12 @@ export function AccountBalance({
         {/* Profit Rate */}
         <div className="bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-2xl p-6 shadow-xl transition-transform hover:scale-[1.02] duration-300">
           <div className="flex items-center gap-3 mb-2">
-            <div className={cn("p-2 rounded-lg", isProfit ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>
+            <div className={cn("p-2 rounded-lg", getProfitColor(balance.profit_rate, { bg: true }))}>
               <TrendingUp size={20} className={cn(!isProfit && "rotate-180")} />
             </div>
             <h3 className="text-zinc-400 font-medium text-sm">{t("balance.profit_rate")}</h3>
           </div>
-          <div className={cn("text-3xl font-extrabold tracking-tight", isProfit ? "text-emerald-400" : "text-rose-400")}>
+          <div className={cn("text-3xl font-extrabold tracking-tight", getProfitColor(balance.profit_rate))}>
             {isProfit ? "+" : ""}{balance.profit_rate}%
           </div>
         </div>
@@ -221,7 +220,7 @@ export function AccountBalance({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 relative z-10">
         
         {/* Left: 격리형 2슬롯 통합 자산 원장 (col-span-2) */}
-        <div className="lg:col-span-2 bg-[#090d16]/70 backdrop-blur-xl border border-zinc-800/80 rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col justify-between">
+        <div className="lg:col-span-2 bg-surface-card/80 backdrop-blur-xl border border-zinc-800/80 rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col justify-between">
           {/* Glow Accents */}
           <div className="absolute top-0 right-0 -mt-12 -mr-12 w-48 h-48 bg-indigo-500/5 rounded-full blur-3xl"></div>
           <div className="absolute bottom-0 left-0 -mb-12 -ml-12 w-48 h-48 bg-emerald-500/5 rounded-full blur-3xl"></div>
@@ -435,7 +434,7 @@ export function AccountBalance({
         </div>
 
         {/* Right: QQQ 관제탑 (col-span-1) */}
-        <div className="bg-[#090d16]/70 backdrop-blur-xl border border-zinc-800/80 rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[360px]">
+        <div className="bg-surface-card/80 backdrop-blur-xl border border-zinc-800/80 rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[360px]">
           {/* Glow Accents */}
           <div className="absolute top-0 right-0 -mt-12 -mr-12 w-48 h-48 bg-blue-500/5 rounded-full blur-3xl"></div>
           <div className="absolute bottom-0 left-0 -mb-12 -ml-12 w-48 h-48 bg-indigo-500/5 rounded-full blur-3xl"></div>
@@ -502,8 +501,7 @@ export function AccountBalance({
               <div className="mt-4 text-center">
                 <span className={cn(
                   "text-xs font-black tracking-tight",
-                  regime === "BULLISH" ? "text-emerald-400" :
-                  regime === "NEUTRAL" ? "text-amber-400" : "text-rose-400"
+                  getRegimeTheme(regime).textColor
                 )}>
                   {regime === "BULLISH" ? t("balance.regime_bullish") :
                    regime === "NEUTRAL" ? t("balance.regime_neutral") : t("balance.regime_bearish")}

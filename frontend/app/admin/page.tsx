@@ -48,14 +48,14 @@ export default function AdminPage() {
 
   if (!isInitialized || !isAuthenticated || !isAdmin) {
     return (
-      <div className="min-h-[calc(100vh-4rem)] bg-[#090d16] text-white flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      <div className="min-h-[calc(100vh-4rem)] text-white flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#090d16] text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-[1400px] mx-auto">
 
         <div className="mb-8 border-b border-zinc-800 pb-5">
@@ -71,7 +71,7 @@ export default function AdminPage() {
 
           {/* 사이드바 메뉴 */}
           <div className="space-y-2 lg:col-span-1">
-            <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-4 space-y-1.5 shadow-xl">
+            <div className="bg-surface-card/80 backdrop-blur-xl rounded-2xl border border-zinc-800/80 p-4 space-y-1.5 shadow-xl">
               <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 px-3 mb-2 block">
                 Menu Directories
               </span>
@@ -125,7 +125,7 @@ export default function AdminPage() {
             {activeTab === "backtest" && <BacktestTournament />}
 
             {activeTab !== "translation" && activeTab !== "users" && activeTab !== "runtime_settings" && activeTab !== "system" && activeTab !== "backtest" && (
-              <div className="bg-[#0f1524]/60 backdrop-blur-md rounded-2xl border border-zinc-800/80 p-12 text-center shadow-xl">
+              <div className="bg-surface-card/80 backdrop-blur-xl rounded-2xl border border-zinc-800/80 p-12 text-center shadow-xl">
                 <Loader2 size={48} className="mx-auto text-zinc-600 mb-4 animate-pulse" />
                 <h3 className="text-lg font-bold text-slate-300">{t("panel.coming_soon_title")}</h3>
                 <p className="text-sm text-zinc-500 mt-2">
