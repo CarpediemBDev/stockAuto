@@ -28,8 +28,15 @@ class OpeningRangeBreakout(BaseStrategy):
             orb_low = self._safe_get(row, 'BB_lower')
             
         if is_entry:
+            # 시초 레인지 고가도 폴백(BB_upper)도 없으면 `close > 0.0`이 되고, 거래량 필터도
+            # volume_ma20 기본값 1.0 때문에 `volume > 1.5`로 퇴화해 사실상 무조건 통과한다.
+            # 라이브 시그널에는 두 값이 모두 없으므로 실제로 존재할 때만 채점한다.
+            volume_baseline = self._safe_get(row, 'volume_ma20')
+            if not orb_high > 0.0 or not volume_baseline > 0.0:
+                return 0.0
+
             # 30분 시초 고가를 거래량과 함께 강하게 상방 돌파
-            if close > orb_high and volume > self._safe_get(row, 'volume_ma20', 1.0) * 1.5:
+            if close > orb_high and volume > volume_baseline * 1.5:
                 return 100.0
             return 0.0
         else:
