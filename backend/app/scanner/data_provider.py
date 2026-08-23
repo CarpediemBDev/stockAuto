@@ -141,6 +141,17 @@ async def fetch_index_data(market_index: str = "QQQ") -> pd.DataFrame:
     """
     return await fetch_ohlcv(market_index, interval="15m", period="10d")
 
+
+async def fetch_index_daily(market_index: str = "QQQ") -> pd.DataFrame:
+    """지수의 일봉 데이터를 가져옵니다.
+
+    상대강도(relative_strength)를 백테스트와 같은 시간축으로 계산하기 위한 전용
+    조회입니다. `fetch_index_data`(15분봉 10일)로 계산하면 종목은 5일, 지수는 10일
+    수익률이 되어 서로 다른 구간을 빼는 잘못된 뺄셈이 됩니다. 종목 일봉과 동일한
+    조회 조건(1년 일봉)을 써서 두 항의 구간을 맞춥니다.
+    """
+    return await fetch_ohlcv(market_index, interval="1d", period="1y")
+
 # 로컬 디스크 Parquet 캐시 디렉터리 정의
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "cache")
 
