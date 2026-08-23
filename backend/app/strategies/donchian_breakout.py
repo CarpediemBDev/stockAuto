@@ -19,20 +19,30 @@ class DonchianBreakout(BaseStrategy):
             
         d_high = self._safe_get(row, 'donchian_high_20')
         d_low = self._safe_get(row, 'donchian_low_10')
-        
+
         # fallback if features are not pre-calculated
         if d_high == 0.0:
             d_high = self._safe_get(row, 'BB_upper')
         if d_low == 0.0:
             d_low = self._safe_get(row, 'BB_lower')
-            
+
         if is_entry:
+            # 채널 상단도 폴백(BB_upper)도 없으면 `close > 0.0`이 되어 모든 종목이 돌파로
+            # 판정된다. 라이브 시그널에는 두 값이 모두 없으므로 기준선이 실제로 존재할
+            # 때만 채점한다.
+            if not d_high > 0.0:
+                return 0.0
+
             # 20일 최고가 돌파 시 진입
             if close > d_high:
                 return 100.0
             return 0.0
         else:
-            # 10일 최저가 이상 유지 시 홀딩
+            # 10일 최저가 이상 유지 시 홀딩.
+            # 하단이 없으면 이탈 판정이 불가능해 홀딩으로 남고, 실제 청산은 손절·트레일링
+            # 스탑이 담당한다.
+            if not d_low > 0.0:
+                return 100.0
             if close >= d_low:
                 return 100.0
             return 30.0

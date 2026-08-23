@@ -41,10 +41,16 @@ from app.bot.trade_calculations import (
 from app.scanner.data_provider import (
     fetch_ohlcv,
     fetch_index_data,
+    fetch_index_daily,
     fetch_bulk_ohlcv,
     fetch_ticker_news
 )
 from app.scanner.news_analyzer import analyze_news_sentiment
+from app.scanner.signal_contract import (
+    build_canonical_metrics,
+    canonical_dist_to_high,
+    canonical_relative_strength,
+)
 from app.core.system_settings import (
     SETTING_ENABLE_GEMINI_NEWS_ANALYSIS,
     is_system_setting_enabled,
@@ -242,6 +248,9 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
     # 1. 지수 데이터 확보 (Relative Strength 계산용)
     df_qqq = await fetch_index_data(MARKET_INDEX)
     qqq_perf = (df_qqq['Close'].iloc[-1] / df_qqq['Close'].iloc[0] - 1) if not df_qqq.empty else 0
+    # 전략 채점용 상대강도는 백테스트와 시간축을 맞춰야 하므로 지수 일봉을 따로 받는다.
+    # (위 qqq_perf는 15분봉 10일 기준이라 종목 5일 수익률과 구간이 어긋난다)
+    df_qqq_daily = await fetch_index_daily(MARKET_INDEX)
     
     # 1.5. 최소 거래대금 기준 설정 (설정된 한국 돈 기준 환산)
     from app.bot.fx_cache import FXRateCache
@@ -512,7 +521,11 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                 cand['EMA20'] = cand.get('EMA20', 0.0)
                 cand['is_rsi_bb_extreme'] = is_rsi_bb_extreme
                 cand['OBV_divergence'] = 1.0 if is_obv_accumulation else -1.0
-                cand['relative_strength'] = cand.get('relative_strength', cand.get('rs', 0.0) / 100.0)
+                # 1단계가 채운 15분봉 기준값을 백테스트와 같은 일봉 기준으로 덮어쓴다.
+                # 스캐너 자체 채점(아래 calculate_strategy_score)과 스케줄러 채점이
+                # 같은 값을 보도록 details가 아니라 cand 단계에서 통일한다.
+                cand['relative_strength'] = canonical_relative_strength(last_close, df_daily, df_qqq_daily)
+                cand['dist_to_high'] = canonical_dist_to_high(last_close, df_daily)
                 cand['premarket_gap_pct'] = cand.get('premarket_gap_pct', 0.0)
                 cand['news_sentiment'] = news_sentiment
                 cand['news_sentiment_score'] = news_sentiment_score
@@ -590,7 +603,10 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                         "EMA120": cand.get('EMA120', None),
                         "OBV_divergence": cand.get('OBV_divergence', -1.0),
                         "is_double_bb_buy": is_double_bb_buy,
-                        "is_double_bb_sell": is_double_bb_sell
+                        "is_double_bb_sell": is_double_bb_sell,
+                        # 백테스트 표준 이름 필드(signal_contract가 단독 소유). 이 병합이 빠지면
+                        # 전략이 값을 못 찾아 조용히 미진입으로 퇴화한다.
+                        **build_canonical_metrics(cand, last_close, wick_ratio, df_5m, df_daily),
                     }
                 })
             except Exception as item_err:
@@ -613,6 +629,8 @@ async def analyze_single_ticker(ticker: str, bypass_fundamental: bool = False) -
         sentiment = await check_market_sentiment()
         df_qqq = await fetch_index_data(MARKET_INDEX)
         qqq_perf = (df_qqq['Close'].iloc[-1] / df_qqq['Close'].iloc[0] - 1) if not df_qqq.empty else 0
+        # 전략 채점용 상대강도는 일봉 기준(백테스트와 동일 시간축)으로 별도 산출한다.
+        df_qqq_daily = await fetch_index_daily(MARKET_INDEX)
 
         # 데이터 수집 (데이터 프로바이더 연동으로 강결합 제거)
         df_15m, df_5m, df_daily = await asyncio.gather(
@@ -706,6 +724,10 @@ async def analyze_single_ticker(ticker: str, bypass_fundamental: bool = False) -
         else:
             cand['EMA120'] = None
 
+        # 진입 경로와 동일하게 일봉 기준으로 통일한다(청산 채점도 같은 값을 봐야 한다).
+        cand['relative_strength'] = canonical_relative_strength(last_close, df_daily, df_qqq_daily)
+        cand['dist_to_high'] = canonical_dist_to_high(last_close, df_daily)
+
         final_score = strategy_instance.calculate_score(cand, sentiment, is_entry=False)
         final_score -= fundamental_penalty
         final_score = max(0.0, min(float(final_score), 100.0))
@@ -751,7 +773,9 @@ async def analyze_single_ticker(ticker: str, bypass_fundamental: bool = False) -
                 "EMA120": cand.get('EMA120', None),
                 "OBV_divergence": cand.get('OBV_divergence', -1.0),
                 "is_double_bb_buy": is_double_bb_buy,
-                "is_double_bb_sell": is_double_bb_sell
+                "is_double_bb_sell": is_double_bb_sell,
+                # 청산 채점 경로도 같은 계약을 따른다(scheduler.py의 보유 종목 재채점).
+                **build_canonical_metrics(cand, last_close, wick_ratio, df_5m, df_daily),
             }
         }
     except Exception as e:

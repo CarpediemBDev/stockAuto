@@ -27,8 +27,14 @@ class ChaikinAtr(BaseStrategy):
             ema10 = self._safe_get(row, 'EMA9')
             
         if is_entry:
+            # 채널 상단(폴백 포함)과 거래량 기준선이 없으면 `close > 0.0`, `volume > 1.2`가 되어
+            # 두 조건 모두 항상 참으로 퇴화한다. 기준값이 실제로 있을 때만 채점한다.
+            volume_baseline = self._safe_get(row, 'volume_ma20')
+            if not donchian_high > 0.0 or not volume_baseline > 0.0:
+                return 0.0
+
             # 변동성 극수축 후 거래량 실린 돈키언 채널 돌파 + 변동성 증가 개시
-            if cv > 0.0 and close > donchian_high and volume > self._safe_get(row, 'volume_ma20', 1.0) * 1.2:
+            if cv > 0.0 and close > donchian_high and volume > volume_baseline * 1.2:
                 return 100.0
             return 0.0
         else:

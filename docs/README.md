@@ -29,6 +29,8 @@
 
 | 문서 | 소유 주제 |
 |---|---|
+| [strategy_alpha_verdict.md](strategy_alpha_verdict.md) | **QQQ 초과 알파 존부 최종 판정**과 근거 원장, 반증 조건, 금지 항목 — 신규 전략 기획 전 필독 |
+| [LEVERAGED_REGIME_GRID_REPORT.md](LEVERAGED_REGIME_GRID_REPORT.md) | **지수 레버리지 레짐 20년 전수 파라미터 그리드 서치 및 강건성 분석 보고서** (최적 생존 파라미터 원장) |
 | [strategy_specification.md](strategy_specification.md) | 전략 **명세 정본** (레짐 스위칭, 11대 대가 기법 통합) |
 | [strategy_scorecard.md](strategy_scorecard.md) | 종목 **채점 기준표**와 장세별 시나리오 |
 | [strategy_map.md](strategy_map.md) | 전략 ↔ **소스 파일 구현 맵** (추적표) |

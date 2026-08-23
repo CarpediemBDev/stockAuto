@@ -158,6 +158,7 @@ def test_release_risk_check_runs_numeric_and_process_scripts(tmp_path, monkeypat
     (scripts_dir / "check_chaos_fuzzing.py").write_text("", encoding="utf-8")
     (scripts_dir / "auto_rollback_guard.py").write_text("", encoding="utf-8")
     (scripts_dir / "check_strategy_consistency.py").write_text("", encoding="utf-8")
+    (scripts_dir / "check_signal_field_contract.py").write_text("", encoding="utf-8")
     (scripts_dir / "check_migration_safety.py").write_text("", encoding="utf-8")
     calls = []
 
@@ -176,5 +177,6 @@ def test_release_risk_check_runs_numeric_and_process_scripts(tmp_path, monkeypat
         "check_chaos_fuzzing.py",
         "auto_rollback_guard.py",
         "check_strategy_consistency.py",
+        "check_signal_field_contract.py",
         "check_migration_safety.py",
     }
