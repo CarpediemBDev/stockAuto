@@ -19,8 +19,7 @@ class ChaikinAtr(BaseStrategy):
             
         cv = self._safe_get(row, 'chaikin_volatility', 0.0)
         donchian_high = self._safe_get(row, 'donchian_high_20')
-        if donchian_high == 0.0:
-            donchian_high = self._safe_get(row, 'BB_upper') # fallback
+        # 볼린저 상단으로 대체하지 않는다(다른 지표를 같은 이름으로 측정하게 된다).
             
         ema10 = self._safe_get(row, 'EMA10')
         if ema10 == 0.0:

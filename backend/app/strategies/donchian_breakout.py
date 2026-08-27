@@ -20,16 +20,13 @@ class DonchianBreakout(BaseStrategy):
         d_high = self._safe_get(row, 'donchian_high_20')
         d_low = self._safe_get(row, 'donchian_low_10')
 
-        # fallback if features are not pre-calculated
-        if d_high == 0.0:
-            d_high = self._safe_get(row, 'BB_upper')
-        if d_low == 0.0:
-            d_low = self._safe_get(row, 'BB_lower')
+        # 볼린저 밴드로 대체하지 않는다. 채널 돌파와 밴드 이탈은 다른 신호이고,
+        # 갈아끼우면 이름만 돈키언인 채로 볼린저 전략을 측정하게 된다.
+        # 채널값은 indicator_metrics.build_indicator_metrics가 두 경로 모두에 공급한다.
 
         if is_entry:
-            # 채널 상단도 폴백(BB_upper)도 없으면 `close > 0.0`이 되어 모든 종목이 돌파로
-            # 판정된다. 라이브 시그널에는 두 값이 모두 없으므로 기준선이 실제로 존재할
-            # 때만 채점한다.
+            # 채널 상단이 없으면 `close > 0.0`이 되어 모든 종목이 돌파로 판정된다.
+            # 기준선이 실제로 존재할 때만 채점한다.
             if not d_high > 0.0:
                 return 0.0
 

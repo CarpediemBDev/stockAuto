@@ -198,7 +198,12 @@ def guard_dev_database_untouched():
 
     from app.core.database import IS_SQLITE_DATABASE, db_path
 
-    watched_tables = ("users", "stock_translations", "strategies", "trade_logs")
+    # 실행 중인 봇이 계속 쓰는 테이블(trade_logs, action_logs, account_equity_snapshots)은
+    # 넣지 않는다. 개발 서버가 떠 있는 상태에서 테스트를 돌리면 봇의 정상 매매가
+    # "테스트가 개발 DB를 오염시켰다"로 오탐된다(2026-08-24 실제 발생: 테스트 실행 중
+    # user 13의 체결 1건이 기록돼 세션이 실패했다). 여기 남기는 것은 봇이 평시에
+    # 건드리지 않는 테이블뿐이다.
+    watched_tables = ("users", "stock_translations", "strategies")
 
     def _snapshot():
         if not IS_SQLITE_DATABASE or not os.path.exists(db_path):

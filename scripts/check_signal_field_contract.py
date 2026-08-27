@@ -27,6 +27,12 @@ from pathlib import Path
 CONTRACT_MODULE = Path("backend") / "app" / "scanner" / "signal_contract.py"
 SCANNER_MODULE = Path("backend") / "app" / "scanner" / "scanner.py"
 STRATEGY_DIR = Path("backend") / "app" / "strategies"
+METRICS_MODULE = Path("backend") / "app" / "scanner" / "indicator_metrics.py"
+
+# metrics['이름'] = 리터럴 대입이 아니라 헬퍼가 동적으로 붙이는 컬럼.
+# 정적 수집에 안 잡히므로 여기에 명시한다(app/scanner/indicators.py의
+# calculate_double_bb_reversion_signals가 생산).
+DYNAMIC_METRIC_FIELDS = frozenset({"is_double_bb_buy", "is_double_bb_sell"})
 
 # 전략이 지표를 읽는 유일한 통로.
 FIELD_READ_PATTERN = re.compile(r"_safe_get\(row,\s*'([A-Za-z0-9_]+)'")
@@ -62,7 +68,8 @@ def _declared_sets(root: Path) -> tuple:
     missing = [
         name
         for name in ("LIVE_SIGNAL_KEYS", "UNSUPPORTED_LIVE_FIELDS",
-                     "PENDING_LIVE_FIELDS", "CANONICAL_FIELDS")
+                     "PENDING_LIVE_FIELDS", "CANONICAL_FIELDS",
+                     "LIVE_ONLY_FIELDS")
         if name not in assignments
     ]
     if missing:
@@ -79,7 +86,8 @@ def _declared_sets(root: Path) -> tuple:
             raise SystemExit(f"  [FAIL] {name}은 사유별 딕셔너리여야 합니다.")
         for value in node.values:
             bucket |= _string_constants(value)
-    return live, canonical, unsupported, pending
+    live_only = _string_constants(assignments["LIVE_ONLY_FIELDS"])
+    return live, canonical, unsupported, pending, live_only
 
 
 def _scanner_detail_keys(root: Path, canonical: set) -> set:
@@ -106,6 +114,28 @@ def _scanner_detail_keys(root: Path, canonical: set) -> set:
     return keys
 
 
+def _backtest_metric_fields(root: Path) -> set:
+    """indicator_metrics.py가 만드는 지표 이름을 AST로 수집한다.
+
+    metrics['이름'] = ... 형태의 대입만 센다. 동적으로 컬럼을 붙이는 헬퍼
+    (calculate_double_bb_reversion_signals 등)는 여기서 보이지 않으므로,
+    그 산출물은 signal_contract의 LIVE_ONLY_FIELDS나 결손 선언으로 다루지 말고
+    이 함수의 예외 목록에 적어 둔다.
+    """
+    produced = set(DYNAMIC_METRIC_FIELDS)
+    for node in ast.walk(_parse(root / METRICS_MODULE)):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if (isinstance(target, ast.Subscript)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == "metrics"
+                    and isinstance(target.slice, ast.Constant)
+                    and isinstance(target.slice.value, str)):
+                produced.add(target.slice.value)
+    return produced
+
+
 def _strategy_fields(root: Path) -> dict:
     """전략 파일별로 읽는 필드 집합을 모은다."""
     out = {}
@@ -120,9 +150,10 @@ def _strategy_fields(root: Path) -> dict:
 
 def main() -> int:
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1]
-    live, canonical, unsupported, pending = _declared_sets(root)
+    live, canonical, unsupported, pending, live_only = _declared_sets(root)
     actual = _scanner_detail_keys(root, canonical)
     strategy_fields = _strategy_fields(root)
+    backtest_fields = _backtest_metric_fields(root)
     all_read = set().union(*strategy_fields.values()) if strategy_fields else set()
 
     errors = []
@@ -158,8 +189,34 @@ def main() -> int:
             "라이브에 이미 실리는데 결손으로 남은 선언(제거 필요): " + ", ".join(sorted(stale))
         )
 
+    # (3-b) 역방향 결손: 라이브는 싣는데 백테스트 지표가 만들지 않는 필드.
+    # 이 경우 같은 전략이 라이브와 백테스트에서 서로 다른 조건으로 돌아가고,
+    # 백테스트 성적을 라이브의 예측치로 쓸 수 없게 된다. 앞의 (1)~(3)은 전부
+    # "라이브가 백테스트보다 적게 받는" 방향만 보므로 여기서 반대편을 막는다.
+    backtest_missing = (all_read & live) - backtest_fields - live_only
+    if backtest_missing:
+        owners = sorted(
+            strategy
+            for strategy, fields in strategy_fields.items()
+            if fields & backtest_missing
+        )
+        errors.append(
+            "라이브에는 실리지만 백테스트 지표가 만들지 않는 필드: "
+            + ", ".join(sorted(backtest_missing))
+            + f" (영향 전략: {', '.join(owners)}) "
+            "(indicator_metrics.py에 계산을 추가하거나 LIVE_ONLY_FIELDS에 사유와 함께 선언하세요)"
+        )
+
+    # (3-c) 백테스트가 이미 만드는데 라이브 전용으로 선언된 필드 = 노후 선언.
+    stale_live_only = live_only & backtest_fields
+    if stale_live_only:
+        errors.append(
+            "백테스트가 이미 만드는데 LIVE_ONLY_FIELDS에 남은 선언(제거 필요): "
+            + ", ".join(sorted(stale_live_only))
+        )
+
     # (4) 어떤 전략도 읽지 않는 선언 = 사문화된 목록.
-    orphan = (unsupported | pending) - all_read
+    orphan = (unsupported | pending | live_only) - all_read
     if orphan:
         errors.append(
             "어떤 전략도 읽지 않는 결손 선언(제거 필요): " + ", ".join(sorted(orphan))
