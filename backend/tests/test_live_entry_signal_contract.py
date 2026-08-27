@@ -13,6 +13,8 @@
 에러도 로그도 남지 않아 "오늘은 살 종목이 없네"와 구분되지 않는 것이 이 결함의 성질이다.
 따라서 이 파일은 정적 선언이 아니라 실제 발화 여부로 계약을 검증한다.
 """
+from functools import lru_cache
+
 import pytest
 
 from app.scanner.signal_contract import (
@@ -105,16 +107,26 @@ def _base_signal():
     }
 
 
+@lru_cache(maxsize=None)
+def _cached_snapshot(drift_pct_per_bar, seed):
+    """같은 (추세, 시드)의 지표 스냅샷을 재사용한다.
+
+    스냅샷 한 번이 300봉 기준 1초 가까이 걸려서, 캐시 없이는 이 파일 하나로 테스트
+    실행이 수 분 늘어난다. 반환값은 호출부가 수정하므로 항상 사본을 준다.
+    """
+    from app.scanner.signal_contract import daily_indicator_snapshot
+
+    return daily_indicator_snapshot(_synthetic_daily_frame(drift_pct_per_bar, seed))
+
+
 def live_signal(drift_pct_per_bar=-0.05, seed=101):
     """라이브가 실제로 만드는 것과 같은 경로로 진입 채점 입력을 만든다.
 
     지표 값을 손으로 적어두면 스캐너가 새 지표를 싣기 시작할 때 테스트 입력만 낡아
     조용히 무의미해지므로, 라이브와 같은 daily_indicator_snapshot을 통과시킨다.
     """
-    from app.scanner.signal_contract import daily_indicator_snapshot
-
     signal = _base_signal()
-    signal.update(daily_indicator_snapshot(_synthetic_daily_frame(drift_pct_per_bar, seed)))
+    signal.update(_cached_snapshot(drift_pct_per_bar, seed))
     return signal
 
 
@@ -272,6 +284,11 @@ def test_breakout_strategies_still_work_when_indicators_are_present(strategy_typ
         "Close": 500.0,           # 어떤 기준선보다도 높은 종가
         "Volume": 5e8,            # 거래량 필터 통과
         "chaikin_volatility": 5.0,
+        # 시초 레인지는 장중 5분봉에서만 나오므로 라이브·백테스트 어느 쪽도 싣지 않는다.
+        # 볼린저 밴드로 대체하면 이름만 ORB인 다른 전략을 재는 셈이라 폴백을 없앴고,
+        # 대신 값이 실제로 주어졌을 때 정상 판정하는지를 여기서 확인한다.
+        "orb_high_30m": 400.0,
+        "orb_low_30m": 380.0,
     })
     assert max(entry_score(strategy, breakout, regime) for regime in REGIMES) == 100.0
 

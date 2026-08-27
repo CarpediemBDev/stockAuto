@@ -21,16 +21,14 @@ class OpeningRangeBreakout(BaseStrategy):
         orb_low = self._safe_get(row, 'orb_low_30m')
         vwap = self._safe_get(row, 'VWAP', self._safe_get(row, 'EMA9'))
         
-        # fallback
-        if orb_high == 0.0:
-            orb_high = self._safe_get(row, 'BB_upper')
-        if orb_low == 0.0:
-            orb_low = self._safe_get(row, 'BB_lower')
+        # 볼린저 밴드로 대체하지 않는다. 밴드는 변동성 통계이고 시초 레인지는 당일
+        # 장초반 30분의 실제 고저다. 갈아끼우면 이름만 ORB이고 실제로는 볼린저 돌파를
+        # 측정하게 되어, 백테스트 성적이 이 전략의 성적이 아니게 된다.
             
         if is_entry:
-            # 시초 레인지 고가도 폴백(BB_upper)도 없으면 `close > 0.0`이 되고, 거래량 필터도
-            # volume_ma20 기본값 1.0 때문에 `volume > 1.5`로 퇴화해 사실상 무조건 통과한다.
-            # 라이브 시그널에는 두 값이 모두 없으므로 실제로 존재할 때만 채점한다.
+            # 시초 레인지 고가가 없으면 `close > 0.0`이 되고, 거래량 필터도 volume_ma20
+            # 기본값 1.0 때문에 `volume > 1.5`로 퇴화해 사실상 무조건 통과한다.
+            # 두 값이 실제로 존재할 때만 채점한다.
             volume_baseline = self._safe_get(row, 'volume_ma20')
             if not orb_high > 0.0 or not volume_baseline > 0.0:
                 return 0.0

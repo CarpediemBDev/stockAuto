@@ -90,6 +90,18 @@ LIVE_SIGNAL_KEYS = frozenset({
     "vol_sma20", "volume", "volume_ma20", "volume_poc", "williams_r", "zscore",
 })
 
+# 라이브 신호에는 실리지만 백테스트 지표(app/scanner/indicator_metrics.py)가 만들지
+# 못하는 필드. 장중 프레임이 있어야 산출되므로 일봉 기반 백테스트에서는 채울 수 없다.
+#
+# 이 방향의 결손은 앞의 것들과 반대로 터진다. 라이브에서는 조건이 살아 있고 백테스트에서만
+# 죽으므로, 같은 전략이 두 경로에서 서로 다르게 동작한다. 2026-08-23에 strategy_c가 이 상태로
+# 실거래 587건을 집행했다(is_cup/is_vcp/premarket_gap_pct는 이후 백테스트에도 배선했고,
+# is_orb_breakout만 남았다). 목록에 남는 동안은 해당 전략의 백테스트 성적을 라이브 성적의
+# 예측치로 쓸 수 없다.
+LIVE_ONLY_FIELDS = frozenset({
+    "is_orb_breakout",   # 장초반 30분 레인지 돌파. 5분봉이 있어야 산출된다
+})
+
 # 라이브에서 원리상 산출 불가능한 필드. 외부 데이터 없이는 채울 수 없으므로 해당
 # 전략은 라이브에서 진입하지 못한다. 카탈로그에서 선택 불가로 막는 것이 정답이며,
 # 데이터를 조달하기 전까지 이 목록에 남는다.
@@ -265,7 +277,9 @@ def daily_indicator_snapshot(df_daily) -> dict:
         return {}
 
     try:
-        metrics = build_indicator_metrics(df_daily, interval="1d")
+        # 패턴 플래그(is_vcp/is_cup)는 스캐너가 같은 감지기로 이미 계산해 신호에 싣는다.
+        # 여기서 봉마다 다시 돌리면 스캔 한 사이클이 종목당 수 초씩 느려진다.
+        metrics = build_indicator_metrics(df_daily, interval="1d", include_pattern_flags=False)
     except Exception:
         # 지표 계산 실패가 스캔 전체를 멈추게 해서는 안 된다. 값을 싣지 않으면
         # 전략은 진입하지 않을 뿐이고, 이는 잘못된 값으로 매매하는 것보다 안전하다.

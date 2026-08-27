@@ -19,6 +19,8 @@ from app.bot.trade_calculations import (
 )
 from app.scanner.indicators import (
     calculate_atr,
+    detect_cup_and_handle,
+    detect_vcp_pattern,
     calculate_connors_rsi,
     calculate_double_bb_reversion_signals,
     calculate_ema,
@@ -31,12 +33,33 @@ from app.scanner.indicators import (
 )
 
 
+def _rolling_pattern_flag(df, detector, min_bars, window_bars):
+    """봉마다 패턴 감지기를 돌려 0.0/1.0 시리즈를 만든다.
+
+    감지기는 프레임을 받아 '마지막 봉 기준' 성립 여부를 돌려주는 스칼라 함수다.
+    라이브 스캐너가 쓰는 바로 그 함수를 백테스트에서도 그대로 호출해야 두 경로의
+    패턴 판정이 같아진다. 재구현하면 이름만 같고 뜻이 다른 지표가 또 생긴다
+    (2026-08-23: strategy_c가 라이브에서만 is_cup/is_vcp를 받아 서로 다른 전략이 됐다).
+    """
+    import pandas as pd
+
+    values = [0.0] * len(df)
+    for position in range(min_bars, len(df)):
+        window = df.iloc[max(0, position - window_bars + 1):position + 1]
+        try:
+            values[position] = 1.0 if detector(window) else 0.0
+        except Exception:
+            values[position] = 0.0
+    return pd.Series(values, index=df.index)
+
+
 def build_indicator_metrics(
     df: pd.DataFrame,
     qqq_data: pd.DataFrame = None,
     qqq_metrics: pd.DataFrame = None,
     interval: str = "1d",
     rolling_box_minutes: float = DEFAULT_ROLLING_BOX_MINUTES,
+    include_pattern_flags: bool = True,
 ) -> pd.DataFrame:
     """OHLCV 프레임에서 전략이 읽는 모든 지표를 계산한다.
 
@@ -47,6 +70,9 @@ def build_indicator_metrics(
         qqq_metrics: 지수 레짐 컬럼('regime')을 가진 프레임.
         interval: df의 봉 간격. 롤링 박스 길이를 봉 수로 환산하는 데 쓴다.
         rolling_box_minutes: 전략이 선언한 롤링 박스 길이(분).
+        include_pattern_flags: VCP·컵앤핸들 패턴 플래그를 계산할지 여부. 감지기를 봉마다
+            호출해야 해서 비용이 크다. 라이브 스캐너는 이 두 값을 자체적으로 계산해
+            신호에 이미 싣고 있으므로, 라이브 스냅샷 경로는 False로 건너뛴다.
 
     Returns:
         df.index를 그대로 쓰는 지표 프레임.
@@ -576,7 +602,9 @@ def build_indicator_metrics(
     # 허스트 지수 근사 — 60봉 분산비. 0.5보다 크면 추세, 작으면 평균회귀 성향.
     log_returns = np.log(df['Close'] / df['Close'].shift(1))
     var_1 = log_returns.rolling(60).var()
-    var_5 = log_returns.rolling(60).sum().rolling(5).apply(lambda x: x.var(), raw=True)
+    # 5봉 누적수익의 분산. rolling.apply(lambda)는 봉마다 파이썬 호출이 일어나 프레임
+    # 하나에 수백 ms가 든다. 같은 값을 벡터 연산으로 구한다.
+    var_5 = log_returns.rolling(5).sum().rolling(60).var()
     with np.errstate(divide='ignore', invalid='ignore'):
         hurst = 0.5 + 0.5 * np.log((var_5 / (5 * var_1)).replace([np.inf, -np.inf], np.nan)) / np.log(5)
     metrics['hurst_exponent'] = hurst.fillna(0.5).clip(0.0, 1.0)
@@ -608,5 +636,17 @@ def build_indicator_metrics(
     # 소문자 별칭 — 일부 전략이 close/volume으로 읽는다.
     metrics['close'] = df['Close']
     metrics['volume'] = df['Volume']
+
+    # ------------------------------------------------------------------
+    # [5] 라이브 스캐너만 싣던 패턴 플래그. 백테스트가 만들지 않아 strategy_c가
+    # 라이브와 백테스트에서 서로 다른 조건으로 돌던 것을 해소한다(역방향 결손).
+    # ------------------------------------------------------------------
+    if include_pattern_flags:
+        metrics['is_vcp'] = _rolling_pattern_flag(df, detect_vcp_pattern, 60, 60)
+        metrics['is_cup'] = _rolling_pattern_flag(df, detect_cup_and_handle, 80, 80)
+
+    # 프리마켓 갭 — 일봉에는 장전 거래가 없으므로 시가 갭이 같은 개념이다.
+    # 라이브는 장전 세션 갭을, 백테스트는 전일 종가 대비 시가 갭을 쓴다.
+    metrics['premarket_gap_pct'] = metrics['gap_pct']
 
     return metrics
