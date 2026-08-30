@@ -531,10 +531,15 @@ def check_backend_tests(root: Path) -> bool:
         + os.pathsep
         + env.get("PYTHONPATH", "")
     )
+    # 2026-08-30 실측: 전체 스위트가 약 250초로 종전 예산 240초를 넘겼다. 초과분은
+    # 특정 테스트의 퇴화가 아니라 통합 테스트 누적이다(scanner_multitenancy 33초,
+    # scanner_router 23초 x 2, scanner_tenant_isolation 23초). Redis가 내려가 있으면
+    # 락 연결 재시도로 15초쯤 더 붙는다. 타임아웃으로 죽으면 실패 원인이 로그에
+    # 남지 않아 진단 자체가 불가능해지므로, 여유를 두되 무한정은 아닌 값으로 잡는다.
     result = run_command(
         [backend_python(root), "-m", "pytest"],
         cwd=backend_dir,
-        timeout=240,
+        timeout=600,
         env=env,
     )
 
@@ -592,7 +597,11 @@ def check_frontend_e2e(root: Path) -> bool:
         safe_print(f"  {YELLOW}[WARN] Playwright config not found. Skipping E2E checks.{RESET}\n")
         return True
 
-    result = run_command("npm run test:e2e", cwd=frontend_dir, timeout=180, shell=True)
+    # 2026-08-30 실측: 8건 통과에 2.7분(약 162초)이 걸려 종전 예산 180초에 아슬아슬하게
+    # 걸쳐 있었다. 프론트 빌드와 dev 서버 기동 시간이 포함된 값이라 머신 부하에 따라
+    # 쉽게 넘어가며, 실제로 같은 커밋에서 통과와 실패가 번갈아 나왔다. pytest 예산과
+    # 같은 종류의 문제이므로 함께 올린다(테스트 실패와 타임아웃은 구분돼야 한다).
+    result = run_command("npm run test:e2e", cwd=frontend_dir, timeout=420, shell=True)
     if result.returncode != 0:
         safe_print(f"  {RED}[FAIL] Playwright E2E failed.{RESET}")
         print_result_output(result)

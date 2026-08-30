@@ -102,6 +102,73 @@ LIVE_ONLY_FIELDS = frozenset({
     "is_orb_breakout",   # 장초반 30분 레인지 돌파. 5분봉이 있어야 산출된다
 })
 
+# 신규 진입을 막는 전략 (SSOT). 청산 경로가 결손이라 시그널로 못 빠져나오는 전략이다.
+#
+# 진입만 되고 청산이 죽은 조합이 가장 위험하다. 청산 조건이 결손 필드를 읽으면
+# `_safe_get`이 0.0을 돌려주고 `close >= 기준선(0.0)`이 항상 참이 되어 **홀딩 판정이
+# 영구히 유지**된다. 포지션은 잡히는데 시그널로는 절대 못 나오고 손절·트레일링으로만
+# 정리된다.
+#
+# `is_selectable=0`(카탈로그 차단)만으로는 부족하다. 그 플래그는 카탈로그 조회
+# (app/strategy_catalog/router.py)와 전략 변경 검증(app/admin/router.py)에서만 쓰이고
+# 스케줄러는 보지 않는다. 이미 그 전략으로 설정된 계정은 계속 매수한다. 그래서 진입
+# 채점 경로(app/bot/scheduler.py)에서도 함께 막는다.
+#
+# 청산 경로는 건드리지 않는다 - 기존 보유분은 그대로 두고 신규 진입만 막는 것이 의도다.
+ENTRY_BLOCKED_STRATEGIES = {
+    "청산 경로 필드 결손 - 시그널 청산 불가(2026-08-30)": (
+        "asqs",              # is_float_rotation (유통주식수 데이터 없음)
+        "macro_momentum",    # yield_curve_spread, inflation_expectation (매크로 미연동)
+        "strategy_c",        # news_sentiment, news_sentiment_score (뉴스 감성 중첩 누락)
+        # 아래 2종은 이미 is_selectable=0이지만 그 플래그는 스케줄러를 거치지 않는다.
+        # 실측 결과 각각 계정 1개가 붙어 보유분(3건/2건)을 들고 계속 매수 중이었다.
+        "strategy_b",        # news_sentiment, news_sentiment_score
+        "exploded_c",        # news_sentiment, news_sentiment_score
+    ),
+}
+
+ENTRY_BLOCKED_STRATEGY_SET = frozenset(
+    strategy
+    for strategies in ENTRY_BLOCKED_STRATEGIES.values()
+    for strategy in strategies
+)
+
+# 폴백 치환 선언 (SSOT). 원본 필드가 비었을 때 다른 필드로 갈아타는 경로다.
+#
+# 이 목록이 따로 있어야 하는 이유: 위의 결손 검사들은 "필드에 값이 있는가"를 본다.
+# 폴백은 값을 실제로 채우므로 그 검사를 전부 통과한다. 전략은 정상 채점되지만
+# **측정 대상이 바뀐다**. opening_range_breakout이 orb_high_30m 대신 BB_upper를 읽던
+# 시절, 이름은 ORB인데 실제로는 볼린저 돌파를 재고 있었고 어떤 가드도 그것을 잡지
+# 못했다(2026-08-23 판정 문서 §8 후속 과제).
+#
+# 형식은 "전략파일:원본필드->대체필드"이며 scripts/check_signal_field_contract.py가
+# AST로 검출한 결과와 **정확히 일치**해야 한다. 새 치환을 추가하거나 제거하면 가드가
+# 반려하므로, 무엇을 실제로 재고 있는지가 항상 diff에 남는다.
+#
+# 원본이 UNSUPPORTED/PENDING으로 선언된 치환은 가드가 "대체 측정 중"으로 경고한다.
+# 그 전략의 백테스트 성적은 이름이 말하는 것의 성적이 아니다.
+FALLBACK_SUBSTITUTIONS = {
+    "VWAP 미산출 시 단기 EMA로 대체(둘 다 당일 평균가 근사, 의미 보존)": (
+        "lava_volume:VWAP->EMA9",
+        "opening_range_breakout:VWAP->EMA9",
+    ),
+    "EMA10 미산출 시 EMA9로 대체(1봉 차이, 추세 판정 의미 보존)": (
+        "chaikin_atr:EMA10->EMA9",
+        "gex_pinning:EMA10->EMA9",
+    ),
+    "OHLC 개별값 결손 시 종가로 대체(봉 자체가 없으면 앞단에서 이미 0점)": (
+        "institutional_follow:Open->Close",
+        "institutional_follow:High->Close",
+        "institutional_follow:Low->Close",
+    ),
+    "거래량 이동평균 결손 시 당봉 거래량으로 대체(비율이 1.0이 되어 조건이 닫힌다)": (
+        "institutional_follow:vol_sma20->Volume",
+    ),
+    "직전 CCI 결손 시 현재 CCI로 대체(차분이 0이 되어 진입 조건이 닫힌다)": (
+        "woodies_cci:cci_prev->cci",
+    ),
+}
+
 # 라이브에서 원리상 산출 불가능한 필드. 외부 데이터 없이는 채울 수 없으므로 해당
 # 전략은 라이브에서 진입하지 못한다. 카탈로그에서 선택 불가로 막는 것이 정답이며,
 # 데이터를 조달하기 전까지 이 목록에 남는다.
