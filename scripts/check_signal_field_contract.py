@@ -69,7 +69,7 @@ def _declared_sets(root: Path) -> tuple:
         name
         for name in ("LIVE_SIGNAL_KEYS", "UNSUPPORTED_LIVE_FIELDS",
                      "PENDING_LIVE_FIELDS", "CANONICAL_FIELDS",
-                     "LIVE_ONLY_FIELDS")
+                     "LIVE_ONLY_FIELDS", "FALLBACK_SUBSTITUTIONS")
         if name not in assignments
     ]
     if missing:
@@ -87,7 +87,14 @@ def _declared_sets(root: Path) -> tuple:
         for value in node.values:
             bucket |= _string_constants(value)
     live_only = _string_constants(assignments["LIVE_ONLY_FIELDS"])
-    return live, canonical, unsupported, pending, live_only
+
+    node = assignments["FALLBACK_SUBSTITUTIONS"]
+    if not isinstance(node, ast.Dict):
+        raise SystemExit("  [FAIL] FALLBACK_SUBSTITUTIONS는 사유별 딕셔너리여야 합니다.")
+    fallbacks = set()
+    for value in node.values:
+        fallbacks |= _string_constants(value)
+    return live, canonical, unsupported, pending, live_only, fallbacks
 
 
 def _scanner_detail_keys(root: Path, canonical: set) -> set:
@@ -136,6 +143,118 @@ def _backtest_metric_fields(root: Path) -> set:
     return produced
 
 
+def _safe_get_field(node: ast.AST):
+    """노드가 `_safe_get(row, '필드', ...)` 호출이면 그 필드 이름을 준다."""
+    if isinstance(node, ast.Call) and node.func:
+        name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+        if name in ("float", "int", "bool") and node.args:
+            # float(self._safe_get(row, 'X', ...)) 같은 캐스팅은 벗겨서 본다.
+            return _safe_get_field(node.args[0])
+        if name == "_safe_get" and len(node.args) >= 2:
+            first, second = node.args[0], node.args[1]
+            if (isinstance(first, ast.Name) and first.id == "row"
+                    and isinstance(second, ast.Constant)
+                    and isinstance(second.value, str)):
+                return second.value
+    return None
+
+
+def _safe_get_default(node: ast.Call):
+    """`_safe_get` 호출의 기본값 노드를 준다(위치 3번째 또는 default= 키워드)."""
+    if len(node.args) >= 3:
+        return node.args[2]
+    for keyword in node.keywords:
+        if keyword.arg == "default":
+            return keyword.value
+    return None
+
+
+def _resolve_field(node: ast.AST, bindings: dict):
+    """노드가 가리키는 필드를 푼다. 직접 읽기 또는 앞서 필드로 바인딩된 변수."""
+    if node is None:
+        return None
+    direct = _safe_get_field(node)
+    if direct:
+        return direct
+    if isinstance(node, ast.Name):
+        return bindings.get(node.id)
+    # float(close) 처럼 감싼 경우만 한 겹 벗긴다.
+    if (isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) in ("float", "int", "bool")
+            and node.args):
+        return _resolve_field(node.args[0], bindings)
+    return None
+
+
+def _fallback_substitutions(root: Path) -> set:
+    """전략 코드의 폴백 치환(원본 필드가 없을 때 다른 필드로 갈아타는 경로)을 수집한다.
+
+    필드 '존재' 검사는 이 경로를 통과한다 — 값은 실제로 채워지기 때문이다. 그래서
+    전략은 정상 채점되지만 **측정 대상이 바뀐다**(예: ORB가 시초 레인지가 아니라
+    볼린저 밴드를 재게 된다). 원본이 결손으로 선언된 상태에서 이 경로가 살아 있으면
+    그 전략의 백테스트 성적은 이름이 말하는 것과 다른 것의 성적이다.
+
+    검출 형태 2종:
+      A. `_safe_get(row, 'X', <다른 필드>)` — 기본값 자리에 대체 필드
+      B. `if X == 0.0: X = _safe_get(row, 'Y')` — 결손 확인 후 재대입
+
+    반환 형식은 `"전략:원본->대체"` 문자열 집합이며, signal_contract.py의
+    FALLBACK_SUBSTITUTIONS 선언과 정확히 일치해야 한다.
+    """
+    found = set()
+    for path in sorted((root / STRATEGY_DIR).glob("*.py")):
+        if path.stem in ("__init__", "base_strategy", "strategy_factory", "strategy_catalog"):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for func in ast.walk(tree):
+            if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            # 변수 -> 필드 바인딩을 소스 순서대로 쌓는다.
+            bindings, assigns = {}, []
+            for node in ast.walk(func):
+                if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                    target = node.targets[0]
+                    if isinstance(target, ast.Name):
+                        assigns.append((node.lineno, target.id, node.value))
+            for _, name, value in sorted(assigns, key=lambda item: item[0]):
+                field = _safe_get_field(value)
+                if field:
+                    bindings.setdefault(name, field)
+
+            # (A) 기본값 자리에 다른 필드가 들어간 호출.
+            for node in ast.walk(func):
+                if not isinstance(node, ast.Call):
+                    continue
+                source = _safe_get_field(node)
+                if not source:
+                    continue
+                target_field = _resolve_field(_safe_get_default(node), bindings)
+                if target_field and target_field != source:
+                    found.add(f"{path.stem}:{source}->{target_field}")
+
+            # (B) 결손 확인 후 재대입.
+            for node in ast.walk(func):
+                if not isinstance(node, ast.If):
+                    continue
+                tested = {
+                    child.id for child in ast.walk(node.test)
+                    if isinstance(child, ast.Name) and child.id in bindings
+                }
+                if not tested:
+                    continue
+                for stmt in ast.walk(node):
+                    if not (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1):
+                        continue
+                    target = stmt.targets[0]
+                    if not (isinstance(target, ast.Name) and target.id in tested):
+                        continue
+                    source = bindings.get(target.id)
+                    replacement = _resolve_field(stmt.value, bindings)
+                    if source and replacement and replacement != source:
+                        found.add(f"{path.stem}:{source}->{replacement}")
+    return found
+
+
 def _strategy_fields(root: Path) -> dict:
     """전략 파일별로 읽는 필드 집합을 모은다."""
     out = {}
@@ -150,10 +269,11 @@ def _strategy_fields(root: Path) -> dict:
 
 def main() -> int:
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1]
-    live, canonical, unsupported, pending, live_only = _declared_sets(root)
+    live, canonical, unsupported, pending, live_only, declared_fallbacks = _declared_sets(root)
     actual = _scanner_detail_keys(root, canonical)
     strategy_fields = _strategy_fields(root)
     backtest_fields = _backtest_metric_fields(root)
+    actual_fallbacks = _fallback_substitutions(root)
     all_read = set().union(*strategy_fields.values()) if strategy_fields else set()
 
     errors = []
@@ -222,6 +342,21 @@ def main() -> int:
             "어떤 전략도 읽지 않는 결손 선언(제거 필요): " + ", ".join(sorted(orphan))
         )
 
+    # (5) 폴백 치환. 필드 존재 검사는 이 경로를 통과하므로(값은 채워진다) 별도로 센다.
+    # 선언과 실제가 어긋나면 반려한다 - 그래야 "무엇을 실제로 재고 있는지"가 diff에 남는다.
+    new_fallbacks = actual_fallbacks - declared_fallbacks
+    if new_fallbacks:
+        errors.append(
+            "선언되지 않은 폴백 치환: " + ", ".join(sorted(new_fallbacks))
+            + " (제거하거나 signal_contract.py의 FALLBACK_SUBSTITUTIONS에 사유와 함께 선언하세요)"
+        )
+    stale_fallbacks = declared_fallbacks - actual_fallbacks
+    if stale_fallbacks:
+        errors.append(
+            "코드에 없는데 FALLBACK_SUBSTITUTIONS에 남은 선언(제거 필요): "
+            + ", ".join(sorted(stale_fallbacks))
+        )
+
     if errors:
         print("[FAIL] 라이브 신호 필드 계약 위반")
         for error in errors:
@@ -238,6 +373,20 @@ def main() -> int:
     )
     # 콘솔 코드페이지(cp949)에서 인코딩할 수 없는 문자는 쓰지 않는다.
     print(f"     라이브 미지원 필드에 의존하는 전략 {len(blocked)}종: 카탈로그 노출 정리 대상")
+
+    # 원본이 결손으로 선언된 치환 = 그 전략은 이름과 다른 것을 재고 있다.
+    # 반려하지는 않는다(선언돼 있으므로 의도된 상태다). 대신 매 실행마다 드러낸다.
+    substituted = sorted(
+        item for item in actual_fallbacks
+        if item.split("->")[0].split(":")[1] in (unsupported | pending)
+    )
+    if substituted:
+        print(f"     [WARN] 대체 측정 중인 전략 {len(substituted)}건 - "
+              "백테스트 성적을 이름 그대로 믿지 말 것:")
+        for item in substituted:
+            print(f"       - {item}")
+    else:
+        print(f"     폴백 치환 {len(actual_fallbacks)}건 전부 원본이 라이브 가용: 대체 측정 없음")
     return 0
 
 

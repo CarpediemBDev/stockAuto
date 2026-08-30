@@ -321,6 +321,8 @@ n=40에서 IC 0.068은 표준오차(약 0.158) 안에 완전히 묻힌다. 게�
 
 > **측정 기준 고정:** 위 수치는 **main @ `982bb49` 클린 트리**, `user_settings` 97행 기준이다. 분모가 다르면 종수가 달라지므로 인용 시 반드시 함께 밝힌다.
 >
+> ⚠️ **이 표는 결함 발견 시점의 기록이며 현재 상태가 아니다.** 지표 SSOT 통합과 진입 차단이 반영된 현행 상태는 `backend/tests/strategy_entry_states.json` 스냅샷이 단독으로 소유한다(2026-08-30 기준 112종, 진입가능 71 / 미진입-지표누락 20 / 차단-청산결손 13 / 미진입-의도차단 4 / 자율 4). 현황을 인용할 때는 이 표가 아니라 스냅샷을 읽는다.
+>
 > | 기준 | 분모 | 미진입 | 경계 처리 |
 > | :--- | ---: | ---: | :--- |
 > | 본 문서 | 94 (`user_settings` 97 − 자율 3) | **73** | `core_satellite` 포함 |
@@ -506,11 +508,11 @@ git show <commit>:backend/app/scanner/indicator_metrics.py > /tmp/chk/backend/ap
 > **가드가 잡지 못하는 것 (2건):**
 >
 > 1. **의미 불일치.** §4.5의 관측 구간 불일치(`relative_strength`, `dist_to_high`)는 값이 존재하고 타입도 맞으므로 이 대조를 통과한다. **필드 존재 검사와 의미 일치 검사는 별개**이며, 후자는 백테스트–라이브 동일 입력 대조로만 잡힌다.
-> 2. **폴백 치환.** 필드가 없을 때 다른 필드로 갈아타는 코드(`opening_range_breakout`의 `orb_high_30m` → `BB_upper`)는 **존재 검사를 통과한다.** 전략은 정상 채점되지만 측정 대상이 바뀐다. 이 사례는 §2 신뢰도 등급의 "대체 측정"으로만 잡히며, 자동 검출 수단이 없다.
+> 2. **폴백 치환.** 필드가 없을 때 다른 필드로 갈아타는 코드(`opening_range_breakout`의 `orb_high_30m` → `BB_upper`)는 **존재 검사를 통과한다.** 전략은 정상 채점되지만 측정 대상이 바뀐다. **2026-08-30에 자동 검출을 배선했다** — `check_signal_field_contract.py`가 AST로 치환 2종(기본값 자리 대체, `if X == 0.0` 후 재대입)을 잡아 `signal_contract.py`의 `FALLBACK_SUBSTITUTIONS` 선언과 목록 차분을 대조한다. 현재 검출 9건이며 원본이 전부 라이브 가용이라 대체 측정 중인 전략은 0건이다.
 >
 > **역방향 결손 검사의 현재 상태:** `origin/main` @ `6e70629`의 `check_signal_field_contract.py`에는 **백테스트 쪽 대조가 없다**(188줄, `_backtest_metric_fields` 미존재). 그 기능은 별도 세션의 **미커밋 작업**에 있으며(245줄), 병합되면 역방향 결손이 상시 검사된다. 본 문서 §2의 수치도 그 미구현 함수의 로직을 빌려 측정한 것이므로, 병합 후 정식 가드로 재측정해야 한다.
 >
-> **후속 과제:** 폴백 치환 검출. 전략 코드에서 `if X == 0.0: X = _safe_get(row, 'Y')` 형태의 대체 경로를 정적으로 찾아, 원본 필드가 결손으로 선언된 경우 **"대체 측정 중"으로 경고**한다. 그래야 §2 신뢰도 등급이 사람 손 없이 유지된다.
+> **후속 과제 (2026-08-30 완료).** 폴백 치환 검출과 기대 상태 차분 가드를 모두 배선했다. 전자는 `check_signal_field_contract.py`(§8 가드 2번 항목 참고), 후자는 `backend/tests/strategy_entry_states.json` 스냅샷과 `test_strategy_entry_states_match_the_snapshot`이다. 스냅샷 갱신은 `python scripts/update_strategy_entry_states.py`. 대상 전략은 DB가 아니라 `strategy_factory.py`에서 열거한다 — `strategies` 테이블은 환경마다 시드가 달라 DB 기준으로 뜨면 같은 커밋이 머신에 따라 통과와 실패를 오간다(이 가드의 첫 판이 그 이유로 CI에서 반려됐다). 2026-08-30 기준 112종이며 진입가능 71 / 미진입-지표누락 20 / 차단-청산결손 13 / 미진입-의도차단 4 / 자율 4다. 청산 경로 결손 33종의 목록도 같은 스냅샷이 소유하며, 그중 진입 가능한 것은 0종이다.
 
 ---
 
@@ -533,5 +535,5 @@ git show <commit>:backend/app/scanner/indicator_metrics.py > /tmp/chk/backend/ap
 - [`strategy_map.md`](strategy_map.md) — 전략 ↔ 소스 구현 맵
 - [`SIGNAL.md`](SIGNAL.md) — 매도·청산 신호 정의 및 **라이브 신호 필드 계약(6장)**
 - [`mistake_note.md`](mistake_note.md) — 재발 방지 원장
-- AI 그래프 단계별 게이트·비용 산정 — `docs/AI_GRAPH_ENGINEERING.md` 및 GitHub Issue #97. **2026-08-23 기준 main 미병합**이므로 이 체크아웃에는 없다. §3.5의 손익분기 산정 원본은 `docs/tasks/2026-08-17.md`에 있다
+- [`AI_GRAPH_ENGINEERING.md`](AI_GRAPH_ENGINEERING.md) — AI 그래프 단계별 게이트·비용 산정 정본(2026-08-30 신설, Issue #97). 해당 문서 §0·§8이 본 판정 §7의 "Phase 2 상시 루프 금지"를 이행한다. §3.5의 손익분기 산정 원본은 [`docs/tasks/2026-08-17.md`](tasks/2026-08-17.md)에 있다
 - `docs/tasks/2026-08-01.md`, `2026-08-02.md`, `2026-08-13.md`, `2026-08-17.md`, `2026-08-23.md` — 일자별 측정 원본
