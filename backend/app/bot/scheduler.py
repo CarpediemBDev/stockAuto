@@ -580,13 +580,6 @@ def prepare_trading_flow_context(
 
 
 async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
-    request_id = str(uuid4())
-    lease = await acquire_user_operation_lock(ctx.user_id, request_id, ttl_seconds=60)
-    if lease is None:
-        with micro_session(ctx) as db:
-            log_action(db, ctx.user_id, "[Sync Guard] Skipped sync due to lock unavailability.", "WARNING")
-        return
-
     try:
         real_holdings = await safe_broker_call(ctx.broker.get_holdings, exchange_rate=ctx.exchange_rate)
 
@@ -684,8 +677,6 @@ async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
     except Exception as sync_err:
         with micro_session(ctx) as db:
             log_action(db, ctx.user_id, f"[Self-Healing] Failed to sync holding discrepancy: {sync_err}", "ERROR")
-    finally:
-        await lease.release()
 
 
 async def calculate_slot_allocations(ctx: TradingFlowContext) -> dict:
