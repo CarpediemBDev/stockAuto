@@ -278,7 +278,7 @@ def login(
     request: Request,
     response: Response,
     db: Session = Depends(get_db),
-    _rate_limit: None = Depends(RateLimiter(max_requests=5, window_seconds=60, key_field="username"))
+    _rate_limit: None = Depends(RateLimiter(max_requests=5, window_seconds=60, key_field="username", peer_max_requests=30))
 ) -> dict:
     """
     사용자 로그인 및 JWT 발급 API (원자적 브루트포스 방어 및 레이스 컨디션 차단)

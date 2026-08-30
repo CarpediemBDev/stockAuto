@@ -33,7 +33,7 @@ export default defineConfig({
     command: "npm run build && npm run start:e2e",
     url: `${baseURL}/login`,
     reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
+    timeout: 300_000,
     env: {
       NEXT_DIST_DIR: ".next-e2e",
       NEXT_PUBLIC_API_BASE: "/api/v1",
