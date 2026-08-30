@@ -727,10 +727,12 @@ def test_entry_block_is_wired_into_the_buy_path_only():
     assert "process_exit_signals" in functions, "청산 경로 함수명이 바뀌었다"
 
     def _guard_lines(func):
+        # 차단 판정은 is_entry_blocked(상위전략, 슬롯) 한 곳으로만 들어간다.
         return [
             node.lineno
             for node in ast.walk(func)
-            if isinstance(node, ast.Name) and node.id == "ENTRY_BLOCKED_STRATEGY_SET"
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) == "is_entry_blocked"
         ]
 
     def _entry_scoring_lines(func):
@@ -748,7 +750,7 @@ def test_entry_block_is_wired_into_the_buy_path_only():
 
     entry_guards = _guard_lines(functions["process_entry_signals"])
     assert entry_guards, (
-        "매수 경로가 ENTRY_BLOCKED_STRATEGY_SET을 보지 않는다. "
+        "매수 경로가 is_entry_blocked를 호출하지 않는다. "
         "선언만 있고 실제 차단은 일어나지 않는 상태다."
     )
 
@@ -759,4 +761,58 @@ def test_entry_block_is_wired_into_the_buy_path_only():
 
     assert not _guard_lines(functions["process_exit_signals"]), (
         "청산 경로에 진입 차단이 걸려 있다. 기존 보유분의 시그널 청산까지 막힌다."
+    )
+
+
+def test_entry_block_exemption_is_scoped_to_its_parent_strategy():
+    """차단 예외는 (상위 전략, 슬롯) 쌍에서만 성립해야 한다.
+
+    core_satellite의 새틀라이트 슬롯(strategy_c, 30%)은 라이브 A/B 관측을 유지하기 위해
+    예외로 풀려 있다. 그러나 단독 strategy_c 계정은 계속 막혀야 한다 - 예외가 전략
+    단위로 새면 청산 불가 매수가 그대로 재개된다.
+    """
+    from app.scanner.signal_contract import (
+        ENTRY_BLOCK_EXEMPTION_SET,
+        is_entry_blocked,
+    )
+
+    assert ("core_satellite", "strategy_c") in ENTRY_BLOCK_EXEMPTION_SET
+
+    # 예외가 성립하는 유일한 조합
+    assert not is_entry_blocked("core_satellite", "strategy_c")
+
+    # 같은 슬롯이라도 상위 전략이 다르면 막힌다
+    assert is_entry_blocked("strategy_c", "strategy_c"), "단독 strategy_c가 뚫렸다"
+    assert is_entry_blocked("multi_slot", "strategy_c")
+
+    # 예외는 별칭으로 번지지 않는다
+    for alias in ("complex", "complex_ep", "strategy_c_ep", "strategy_c_aggressive"):
+        assert is_entry_blocked("core_satellite", alias), f"{alias}로 예외가 샜다"
+
+    # core_satellite의 다른 차단 대상 슬롯에도 번지지 않는다
+    assert is_entry_blocked("core_satellite", "asqs")
+
+    # 차단 목록에 없는 전략은 어디서든 통과한다
+    assert not is_entry_blocked("core_satellite", "leveraged_regime")
+    assert not is_entry_blocked("regime_switching", "regime_switching")
+
+
+def test_exempted_slots_are_declared_in_the_blocked_set():
+    """예외 목록이 차단 목록과 어긋나면 안 된다.
+
+    차단되지도 않는 전략에 예외가 걸려 있으면 사문화된 선언이고, 읽는 사람에게
+    "이건 막혀 있다"는 잘못된 인상을 준다.
+    """
+    from app.scanner.signal_contract import (
+        ENTRY_BLOCK_EXEMPTION_SET,
+        ENTRY_BLOCKED_STRATEGY_SET,
+    )
+
+    orphan = sorted(
+        f"{parent}:{slot}"
+        for parent, slot in ENTRY_BLOCK_EXEMPTION_SET
+        if slot not in ENTRY_BLOCKED_STRATEGY_SET
+    )
+    assert not orphan, (
+        "차단 목록에 없는 전략에 예외가 걸려 있다(선언 제거 필요): " + repr(orphan)
     )
