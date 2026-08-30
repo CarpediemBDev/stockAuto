@@ -487,15 +487,32 @@ def _reachability_signals():
     return tuple(diverse_live_signals() + randomized_live_signals() + narrow_setup_signals())
 
 
-def _catalog_strategy_types():
-    from app.core import models
-    from app.core.database import SessionLocal
+# 슬롯 합성 전략은 팩토리 분기문에 리터럴로 나타나지 않는다.
+# scripts/check_strategy_consistency.py가 쓰는 목록과 같은 값을 유지한다.
+_MULTI_SLOT_KEYS = ("multi_slot", "multi_slot_3", "three_slot", "core_satellite")
 
-    db = SessionLocal()
-    try:
-        return sorted(row[0] for row in db.query(models.Strategy.strategy_type).all())
-    finally:
-        db.close()
+
+@lru_cache(maxsize=1)
+def _catalog_strategy_types():
+    """전략 목록을 코드에서 뽑는다. DB에서 읽으면 안 된다.
+
+    strategies 테이블은 환경마다 시드가 다르다(로컬 개발 DB 100종, CI 시드는 별개).
+    DB를 기준으로 스냅샷을 뜨면 같은 커밋이 머신에 따라 통과와 실패를 오간다.
+    실제로 이 가드의 첫 판이 그 이유로 CI에서 반려됐다. 전략의 존재 여부를 결정하는
+    SSOT는 팩토리이므로 거기서 뽑는다.
+    """
+    import re
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "app" / "strategies" / "strategy_factory.py"
+    ).read_text(encoding="utf-8")
+
+    keys = set(_MULTI_SLOT_KEYS)
+    keys |= set(re.findall(r'strategy_type\s*==\s*"([^"]+)"', source))
+    for block in re.findall(r"strategy_type\s*in\s*\[(.*?)\]", source, re.S):
+        keys |= set(re.findall(r'"([^"]+)"', block))
+    return sorted(keys)
 
 
 def _classify_entry_state(strategy_type):
@@ -584,40 +601,17 @@ def test_strategy_entry_states_match_the_snapshot():
 # 진입 불가 전략은 카탈로그에서 이미 막았지만(is_selectable=0), "진입은 되는데 청산이
 # 죽은" 조합은 그 그물에 걸리지 않는다. 아래 스냅샷이 그 구멍을 감시한다.
 
-# 전략 -> 청산 경로에서 읽지만 라이브가 못 싣는 필드. 2026-08-30 실측.
-# 지표 SSOT 통합(2026-08-23) 이후 11종에서 4종으로 줄었다.
-EXIT_PATH_FIELD_GAPS = {
-    # 이미 카탈로그에서 내려간 외부 데이터 의존 전략(마이그레이션 b7c3d9e14a20).
-    # 진입도 못 하므로 청산 결손이 실제 피해로 이어지지 않는다.
-    "cross_asset": ("cross_asset_ok",),
-    "dark_pool": ("dark_pool_price",),
-    "earn_drift": ("is_earnings_gap_drift",),
-    "gamma_flip": ("gamma_flip",),
-    "gex_pinning": ("net_gex_proxy", "strike_distance"),
-    "insider_buying": ("insider_signal",),
-    "kalman_pairs": ("kalman_zscore",),
-    "max_pain": ("is_expiry_week", "max_pain_price"),
-    "obi_ofa": ("OFI_acceleration", "order_book_imbalance"),
-    "offering_reb": ("is_offering_rebound",),
-    "order_flow": ("order_flow_delta",),
-    "pairs_trading": ("spread_zscore",),
-    "pca_knn": ("knn_up_probability",),
-    "pdufa_calendar": ("days_to_pdufa",),
-    "sentiment_fomo": ("mention_zscore", "sentiment_positive"),
-    "social_buzz": ("social_buzz_surge",),
-    "vix_hedging": ("is_vix_ok",),
-    "volatility_regime": ("vix_term_structure", "vix_vxv_ratio"),
-    "warrant_arb": ("is_warrant_support",),
-    # 지표 결손으로 진입 자체가 안 되는 전략.
-    "opening_range_breakout": ("orb_high_30m", "orb_low_30m"),
-    # 발화는 되는데 청산이 죽은 전략. 가장 위험한 조합이라 2026-08-30에
-    # ENTRY_BLOCKED_STRATEGIES로 신규 진입을 막았다(기존 보유분은 유지).
-    "asqs": ("is_float_rotation",),
-    "exploded_c": ("news_sentiment", "news_sentiment_score"),
-    "macro_momentum": ("inflation_expectation", "yield_curve_spread"),
-    "strategy_b": ("news_sentiment", "news_sentiment_score"),
-    "strategy_c": ("news_sentiment", "news_sentiment_score"),
-}
+# 청산 경로 결손 목록은 스냅샷 JSON이 단독 소유한다. 손으로 옮겨 적으면 전사 오류가
+# 나고, 두 벌이 되면 어느 쪽이 사실인지 알 수 없게 된다.
+# 갱신: python scripts/update_strategy_entry_states.py
+
+
+def _expected_exit_gaps():
+    payload = json.loads(ENTRY_STATE_SNAPSHOT.read_text(encoding="utf-8"))
+    return {
+        name: tuple(fields)
+        for name, fields in payload.get("exit_path_gaps", {}).items()
+    }
 
 
 def _exit_path_gaps():
@@ -655,7 +649,7 @@ def test_exit_path_field_gaps_do_not_grow():
     복구된 것이므로 스냅샷에서 지운다. 어느 쪽이든 사람이 판단해야 한다.
     """
     actual = _exit_path_gaps()
-    expected = {name: tuple(fields) for name, fields in EXIT_PATH_FIELD_GAPS.items()}
+    expected = _expected_exit_gaps()
     assert actual == expected, (
         "청산 경로 결손이 스냅샷과 다르다. 늘었다면 시그널 청산 불가 전략이 생긴 것이다.\n"
         f"  실측: {actual}\n"
@@ -680,7 +674,7 @@ def test_no_strategy_can_enter_while_its_exit_path_is_degraded():
     """
     states = json.loads(ENTRY_STATE_SNAPSHOT.read_text(encoding="utf-8"))["states"]
     enterable = sorted(
-        name for name in EXIT_PATH_FIELD_GAPS
+        name for name in _expected_exit_gaps()
         if states.get(name) == STATE_ENTERABLE
     )
     assert not enterable, (
@@ -697,7 +691,7 @@ def test_entry_blocked_strategies_are_exactly_the_risky_ones():
     """
     states = json.loads(ENTRY_STATE_SNAPSHOT.read_text(encoding="utf-8"))["states"]
     should_block = {
-        name for name in EXIT_PATH_FIELD_GAPS
+        name for name in _expected_exit_gaps()
         if states.get(name) == STATE_ENTRY_BLOCKED
     }
     assert set(ENTRY_BLOCKED_STRATEGY_SET) == should_block, (

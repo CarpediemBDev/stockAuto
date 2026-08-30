@@ -321,7 +321,7 @@ n=40에서 IC 0.068은 표준오차(약 0.158) 안에 완전히 묻힌다. 게�
 
 > **측정 기준 고정:** 위 수치는 **main @ `982bb49` 클린 트리**, `user_settings` 97행 기준이다. 분모가 다르면 종수가 달라지므로 인용 시 반드시 함께 밝힌다.
 >
-> ⚠️ **이 표는 결함 발견 시점의 기록이며 현재 상태가 아니다.** 지표 SSOT 통합과 진입 차단이 반영된 현행 상태는 `backend/tests/strategy_entry_states.json` 스냅샷이 단독으로 소유한다(2026-08-30 기준 진입가능 68 / 미진입-지표누락 20 / 미진입-의도차단 4 / 차단-청산결손 5 / 자율 3). 현황을 인용할 때는 이 표가 아니라 스냅샷을 읽는다.
+> ⚠️ **이 표는 결함 발견 시점의 기록이며 현재 상태가 아니다.** 지표 SSOT 통합과 진입 차단이 반영된 현행 상태는 `backend/tests/strategy_entry_states.json` 스냅샷이 단독으로 소유한다(2026-08-30 기준 112종, 진입가능 71 / 미진입-지표누락 20 / 차단-청산결손 13 / 미진입-의도차단 4 / 자율 4). 현황을 인용할 때는 이 표가 아니라 스냅샷을 읽는다.
 >
 > | 기준 | 분모 | 미진입 | 경계 처리 |
 > | :--- | ---: | ---: | :--- |
@@ -512,7 +512,7 @@ git show <commit>:backend/app/scanner/indicator_metrics.py > /tmp/chk/backend/ap
 >
 > **역방향 결손 검사의 현재 상태:** `origin/main` @ `6e70629`의 `check_signal_field_contract.py`에는 **백테스트 쪽 대조가 없다**(188줄, `_backtest_metric_fields` 미존재). 그 기능은 별도 세션의 **미커밋 작업**에 있으며(245줄), 병합되면 역방향 결손이 상시 검사된다. 본 문서 §2의 수치도 그 미구현 함수의 로직을 빌려 측정한 것이므로, 병합 후 정식 가드로 재측정해야 한다.
 >
-> **후속 과제 (2026-08-30 완료).** 폴백 치환 검출과 기대 상태 차분 가드를 모두 배선했다. 전자는 `check_signal_field_contract.py`(§8 가드 2번 항목 참고), 후자는 `backend/tests/strategy_entry_states.json` 스냅샷과 `test_strategy_entry_states_match_the_snapshot`이다. 스냅샷 갱신은 `python scripts/update_strategy_entry_states.py`. 최초 스냅샷은 진입가능 73 / 미진입-지표누락 20 / 미진입-의도차단 4 / 자율 3이다.
+> **후속 과제 (2026-08-30 완료).** 폴백 치환 검출과 기대 상태 차분 가드를 모두 배선했다. 전자는 `check_signal_field_contract.py`(§8 가드 2번 항목 참고), 후자는 `backend/tests/strategy_entry_states.json` 스냅샷과 `test_strategy_entry_states_match_the_snapshot`이다. 스냅샷 갱신은 `python scripts/update_strategy_entry_states.py`. 대상 전략은 DB가 아니라 `strategy_factory.py`에서 열거한다 — `strategies` 테이블은 환경마다 시드가 달라 DB 기준으로 뜨면 같은 커밋이 머신에 따라 통과와 실패를 오간다(이 가드의 첫 판이 그 이유로 CI에서 반려됐다). 2026-08-30 기준 112종이며 진입가능 71 / 미진입-지표누락 20 / 차단-청산결손 13 / 미진입-의도차단 4 / 자율 4다. 청산 경로 결손 33종의 목록도 같은 스냅샷이 소유하며, 그중 진입 가능한 것은 0종이다.
 
 ---
 

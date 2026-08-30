@@ -125,6 +125,21 @@ ENTRY_BLOCKED_STRATEGIES = {
         "strategy_b",        # news_sentiment, news_sentiment_score
         "exploded_c",        # news_sentiment, news_sentiment_score
     ),
+    # 위 전략과 같은 클래스를 가리키는 팩토리 별칭(app/strategies/strategy_factory.py).
+    # 별칭을 빼두면 같은 결함이 다른 이름으로 그대로 통과한다. strategies 테이블에는
+    # 없어서 카탈로그로는 선택되지 않지만, 차단은 이름이 아니라 결함을 기준으로 건다.
+    "차단 대상의 팩토리 별칭 - 같은 클래스, 같은 결손": (
+        "complex",                 # = strategy_c
+        "complex_ep",              # = strategy_c
+        "complex_aggressive",      # = strategy_c
+        "strategy_c_ep",           # = strategy_c
+        "strategy_c_aggressive",   # = strategy_c
+        "supernova_squeeze",       # = asqs
+    ),
+    "청산 경로 필드 결손 - 수급 데이터 없음(2026-08-30 별도 발견)": (
+        "institutional_follow",    # organ_net_buy 등 수급 4종
+        "smart_money_flow",        # = institutional_follow
+    ),
 }
 
 ENTRY_BLOCKED_STRATEGY_SET = frozenset(

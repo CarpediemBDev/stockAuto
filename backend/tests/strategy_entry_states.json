@@ -8,6 +8,9 @@
     "benchmark_qqq_hold": "자율",
     "bollinger_tr": "진입가능",
     "chaikin_atr": "진입가능",
+    "complex": "차단-청산결손",
+    "complex_aggressive": "차단-청산결손",
+    "complex_ep": "차단-청산결손",
     "connors_rsi": "진입가능",
     "coppock_curve": "진입가능",
     "core_satellite": "미진입-의도차단",
@@ -17,6 +20,7 @@
     "darvas_box": "진입가능",
     "death_rebound": "진입가능",
     "donchian_breakout": "진입가능",
+    "double_bb": "진입가능",
     "double_bb_reversion": "진입가능",
     "double_bot": "진입가능",
     "earn_drift": "미진입-지표누락",
@@ -34,6 +38,7 @@
     "hurst_adaptive": "진입가능",
     "ichimoku_kumo": "진입가능",
     "insider_buying": "미진입-지표누락",
+    "institutional_follow": "차단-청산결손",
     "kalman_pairs": "미진입-지표누락",
     "keltner_reversion": "진입가능",
     "keltner_tr": "진입가능",
@@ -41,6 +46,7 @@
     "lava_volume": "진입가능",
     "leveraged_regime": "자율",
     "leveraged_regime_3x": "자율",
+    "leveraged_regime_tqqq": "자율",
     "macd_diverg": "진입가능",
     "macro_momentum": "차단-청산결손",
     "max_pain": "미진입-지표누락",
@@ -76,13 +82,18 @@
     "senior_simple": "진입가능",
     "sentiment_fomo": "미진입-지표누락",
     "short_squeeze": "진입가능",
+    "smart_money_flow": "차단-청산결손",
     "social_buzz": "미진입-지표누락",
     "sortino_momentum": "진입가능",
     "stoch_extreme": "진입가능",
+    "stockauto_v1": "진입가능",
     "strategy_a": "진입가능",
     "strategy_b": "차단-청산결손",
     "strategy_c": "차단-청산결손",
+    "strategy_c_aggressive": "차단-청산결손",
+    "strategy_c_ep": "차단-청산결손",
     "supernova": "진입가능",
+    "supernova_squeeze": "차단-청산결손",
     "supertrend": "진입가능",
     "sympathy": "미진입-의도차단",
     "td_sequential": "진입가능",
@@ -101,6 +112,129 @@
     "weekend_trend": "진입가능",
     "woodies_cci": "진입가능",
     "wyckoff_spring": "진입가능",
+    "xsec_momentum": "진입가능",
     "zscore_reversion": "진입가능"
+  },
+  "exit_path_gaps": {
+    "asqs": [
+      "is_float_rotation"
+    ],
+    "complex": [
+      "news_sentiment",
+      "news_sentiment_score"
+    ],
+    "complex_aggressive": [
+      "news_sentiment",
+      "news_sentiment_score"
+    ],
+    "complex_ep": [
+      "news_sentiment",
+      "news_sentiment_score"
+    ],
+    "cross_asset": [
+      "cross_asset_ok"
+    ],
+    "dark_pool": [
+      "dark_pool_price"
+    ],
+    "earn_drift": [
+      "is_earnings_gap_drift"
+    ],
+    "exploded_c": [
+      "news_sentiment",
+      "news_sentiment_score"
+    ],
+    "gamma_flip": [
+      "gamma_flip"
+    ],
+    "gex_pinning": [
+      "net_gex_proxy",
+      "strike_distance"
+    ],
+    "insider_buying": [
+      "insider_signal"
+    ],
+    "institutional_follow": [
+      "foreigner_net_buy",
+      "institutional_net_buy_days",
+      "organ_net_buy",
+      "smart_money_score"
+    ],
+    "kalman_pairs": [
+      "kalman_zscore"
+    ],
+    "macro_momentum": [
+      "inflation_expectation",
+      "yield_curve_spread"
+    ],
+    "max_pain": [
+      "is_expiry_week",
+      "max_pain_price"
+    ],
+    "obi_ofa": [
+      "OFI_acceleration",
+      "order_book_imbalance"
+    ],
+    "offering_reb": [
+      "is_offering_rebound"
+    ],
+    "opening_range_breakout": [
+      "orb_high_30m",
+      "orb_low_30m"
+    ],
+    "order_flow": [
+      "order_flow_delta"
+    ],
+    "pairs_trading": [
+      "spread_zscore"
+    ],
+    "pca_knn": [
+      "knn_up_probability"
+    ],
+    "pdufa_calendar": [
+      "days_to_pdufa"
+    ],
+    "sentiment_fomo": [
+      "mention_zscore",
+      "sentiment_positive"
+    ],
+    "smart_money_flow": [
+      "foreigner_net_buy",
+      "institutional_net_buy_days",
+      "organ_net_buy",
+      "smart_money_score"
+    ],
+    "social_buzz": [
+      "social_buzz_surge"
+    ],
+    "strategy_b": [
+      "news_sentiment",
+      "news_sentiment_score"
+    ],
+    "strategy_c": [
+      "news_sentiment",
+      "news_sentiment_score"
+    ],
+    "strategy_c_aggressive": [
+      "news_sentiment",
+      "news_sentiment_score"
+    ],
+    "strategy_c_ep": [
+      "news_sentiment",
+      "news_sentiment_score"
+    ],
+    "supernova_squeeze": [
+      "is_float_rotation"
+    ],
+    "vix_hedging": [
+      "is_vix_ok"
+    ],
+    "volatility_regime": [
+      "vix_term_structure",
+      "vix_vxv_ratio"
+    ],
+    "warrant_arb": [
+      "is_warrant_support"
+    ]
   }
 }
