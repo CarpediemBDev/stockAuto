@@ -544,7 +544,13 @@ def test_brute_force_defense_and_lockout_reset(monkeypatch, integration_app, tes
         from app.core.redis_client import get_redis_client
         rc = get_redis_client()
         if rc:
-            rc.flushall()
+            try:
+                rc.flushall()
+            except Exception:
+                pass
+        import app.core.rate_limiter as rate_limiter_mod
+        with rate_limiter_mod._global_fallback_lock:
+            rate_limiter_mod._global_fallback_windows.clear()
 
         # 1. 회원가입
         signup_response = client.post(

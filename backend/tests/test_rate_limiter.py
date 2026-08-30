@@ -170,3 +170,42 @@ def test_auth_cookie_request_blocked_on_cross_site():
         client.cookies.clear()
     assert response.status_code == 403
 
+
+
+@pytest.mark.real_rate_limiter
+def test_login_ip_limit_is_decoupled_from_the_per_username_limit(monkeypatch):
+    """로그인은 사용자당 5회지만 IP당으로는 그보다 많이 허용해야 한다.
+
+    peer_max_requests를 주지 않으면 IP 한도가 max_requests와 같아진다. 그러면 공용 IP
+    하나(가정, 사무실, NAT) 뒤의 여러 사용자가 서로의 시도를 잠가버린다 - 다섯 번이면
+    그 IP 전체가 1분간 로그인 불가다. 브루트포스 방어는 계정 단위로 성립해야 하고
+    IP 단위 상한은 그보다 넉넉해야 한다.
+
+    이 테스트는 라우터의 배선(peer_max_requests=30)을 고정한다. 값을 빼면 서로 다른
+    사용자명 6명째부터 막히므로 반드시 깨진다.
+    """
+    fake_redis = FakeRedis()
+    monkeypatch.setattr(rate_limiter_module, "get_redis_client", lambda: fake_redis)
+
+    # 서로 다른 사용자명 10명이 같은 IP에서 각 1회씩 시도해도 막히지 않는다.
+    for index in range(10):
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"username": f"peer_user_{index}", "password": "wrongpassword123!"},
+        )
+        assert response.status_code != 429, (
+            f"{index + 1}번째 사용자에서 IP 한도에 걸렸다. "
+            "로그인 라우터의 peer_max_requests 배선을 확인할 것"
+        )
+
+    # 그러나 한 사용자명에 대한 상한은 그대로 5회다.
+    for _ in range(5):
+        client.post(
+            "/api/v1/auth/login",
+            json={"username": "peer_user_0", "password": "wrongpassword123!"},
+        )
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "peer_user_0", "password": "wrongpassword123!"},
+    )
+    assert response.status_code == 429, "사용자당 브루트포스 방어가 느슨해졌다"
