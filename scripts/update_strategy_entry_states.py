@@ -32,9 +32,9 @@ SNAPSHOT = ROOT / "backend" / "tests" / "strategy_entry_states.json"
 _COLLECT = """
 import json, sys
 sys.path.insert(0, "tests")
-from test_live_entry_signal_contract import current_entry_states, _exit_path_gaps
+from test_live_entry_signal_contract import current_entry_states, _exit_unresponsive
 payload = {"states": current_entry_states(),
-           "exit_path_gaps": {k: list(v) for k, v in _exit_path_gaps().items()}}
+           "exit_unresponsive": _exit_unresponsive()}
 print("<<<STATES>>>" + json.dumps(payload, ensure_ascii=False))
 """
 
@@ -73,7 +73,7 @@ def main() -> int:
         return 1
     collected = json.loads(line[len(marker):])
     states = collected["states"]
-    exit_gaps = collected["exit_path_gaps"]
+    exit_stuck = collected["exit_unresponsive"]
 
     previous = {}
     if SNAPSHOT.exists():
@@ -87,7 +87,7 @@ def main() -> int:
         ),
         "updated_at": date.today().isoformat(),
         "states": dict(sorted(states.items())),
-        "exit_path_gaps": dict(sorted(exit_gaps.items())),
+        "exit_unresponsive": sorted(exit_stuck),
     }
     SNAPSHOT.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -105,7 +105,7 @@ def main() -> int:
         counts[state] = counts.get(state, 0) + 1
 
     print(f"[OK] 스냅샷 갱신: {SNAPSHOT.relative_to(ROOT)} ({len(states)}종)")
-    print(f"     청산 경로 결손: {len(exit_gaps)}종")
+    print(f"     시그널 청산 불가: {len(exit_stuck)}종")
     for state, count in sorted(counts.items()):
         print(f"     {state}: {count}")
     if added:
