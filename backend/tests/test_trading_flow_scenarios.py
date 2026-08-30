@@ -580,3 +580,95 @@ async def test_redis_unavailable_fails_closed_before_opening_user_session(monkey
         sentiment="NEUTRAL",
         session="REGULAR_MARKET",
     )
+
+
+@pytest.mark.asyncio
+async def test_run_user_trading_flow_syncs_broker_holdings_without_lock_contention(monkeypatch):
+    """
+    [Self-Healing & Lock Non-Reentrancy Test]
+    실제 Redis와 동일한 비재진입(Non-reentrant) 락 동작 환경에서
+    run_user_trading_flow가 내부 서브루틴(sync_broker_holdings)의 중복 락 충돌 없이
+    증권사-DB 보유 불일치(수량 증가, 유령 주식 복원, DB 고스트 레코드 청소)를 정상 치유하는지 검증합니다.
+    """
+    user_settings = make_user_settings()
+    holding_aapl = Holding(
+        user_id=1,
+        ticker="AAPL",
+        strategy_type="slot",
+        ticker_name="Apple",
+        avg_price=100.0,
+        quantity=5,
+        highest_price=100.0,
+        regime_mode="BULLISH",
+        buy_stage=1,
+    )
+    holding_ghost = Holding(
+        user_id=1,
+        ticker="GHOST",
+        strategy_type="slot",
+        ticker_name="Ghost Inc",
+        avg_price=50.0,
+        quantity=10,
+        highest_price=50.0,
+        regime_mode="BULLISH",
+        buy_stage=1,
+    )
+    fake_db = FakeDb(user_settings=user_settings, holdings=[holding_aapl, holding_ghost])
+    fake_broker = FakeBroker(
+        holdings_payload=[
+            {"ticker": "AAPL", "ticker_name": "Apple", "quantity": 8, "avg_price": 100.0},
+            {"ticker": "MSFT", "ticker_name": "Microsoft", "quantity": 2, "avg_price": 200.0},
+        ]
+    )
+    logs, messages = install_flow_fakes(
+        monkeypatch,
+        fake_db,
+        fake_broker,
+        FakeStrategy(entry_score=0),
+    )
+
+    active_locks = set()
+    acquired_count = 0
+    released_count = 0
+
+    class StrictRedisLease:
+        def __init__(self, uid):
+            self.uid = uid
+
+        async def release(self):
+            nonlocal released_count
+            released_count += 1
+            active_locks.discard(self.uid)
+
+    async def strict_user_lock(uid, req_id, ttl_seconds=60):
+        nonlocal acquired_count
+        if uid in active_locks:
+            return None
+        active_locks.add(uid)
+        acquired_count += 1
+        return StrictRedisLease(uid)
+
+    monkeypatch.setattr(scheduler, "acquire_user_operation_lock", strict_user_lock)
+
+    await scheduler.run_user_trading_flow(
+        user_id=1,
+        signal_map={},
+        all_signals=[],
+        exchange_rate=1500.0,
+        sentiment="NEUTRAL",
+        session="REGULAR_MARKET",
+    )
+
+    assert acquired_count == 1
+    assert released_count == 1
+    assert len(active_locks) == 0
+    assert not any("Skipped sync due to lock unavailability" in msg for _lvl, msg in logs)
+    assert holding_aapl.quantity == 8
+    assert any("Quantity increased for AAPL" in msg for _lvl, msg in logs)
+    added_tickers = [h.ticker for h in fake_db.added if isinstance(h, Holding)]
+    assert "MSFT" in added_tickers
+    assert any("Phantom holding detected in account: MSFT" in msg for _lvl, msg in logs)
+    deleted_tickers = [h.ticker for h in fake_db.deleted if isinstance(h, Holding)]
+    assert "GHOST" in deleted_tickers
+    assert any("does not exist in actual broker account. Sweeping legacy DB record." in msg for _lvl, msg in logs)
+
