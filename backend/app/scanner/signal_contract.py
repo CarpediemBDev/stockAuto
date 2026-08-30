@@ -102,86 +102,19 @@ LIVE_ONLY_FIELDS = frozenset({
     "is_orb_breakout",   # 장초반 30분 레인지 돌파. 5분봉이 있어야 산출된다
 })
 
-# 신규 진입을 막는 전략 (SSOT). 청산 경로가 결손이라 시그널로 못 빠져나오는 전략이다.
+# 2026-08-31 철회: 여기 있던 ENTRY_BLOCKED_STRATEGIES / ENTRY_BLOCK_EXEMPTIONS /
+# is_entry_blocked()를 제거했다.
 #
-# 진입만 되고 청산이 죽은 조합이 가장 위험하다. 청산 조건이 결손 필드를 읽으면
-# `_safe_get`이 0.0을 돌려주고 `close >= 기준선(0.0)`이 항상 참이 되어 **홀딩 판정이
-# 영구히 유지**된다. 포지션은 잡히는데 시그널로는 절대 못 나오고 손절·트레일링으로만
-# 정리된다.
+# 그 차단은 "청산 경로가 결손이면 시그널 청산이 불가능하다"는 전제 위에 세워졌는데,
+# 실측 결과 전제가 거짓이었다. 청산 로그 20,532건 중 91%가 시그널 붕괴였고, 차단 대상
+# 13종 전부 청산 점수가 가격에 정상 반응한다(횡보·하락에서 cutoff 아래로 떨어진다).
+# 보유 나이도 다른 전략과 같은 3.1일이라 묶인 포지션도 없었다.
 #
-# `is_selectable=0`(카탈로그 차단)만으로는 부족하다. 그 플래그는 카탈로그 조회
-# (app/strategy_catalog/router.py)와 전략 변경 검증(app/admin/router.py)에서만 쓰이고
-# 스케줄러는 보지 않는다. 이미 그 전략으로 설정된 계정은 계속 매수한다. 그래서 진입
-# 채점 경로(app/bot/scheduler.py)에서도 함께 막는다.
+# 결손 필드들은 게이트가 아니라 가점·감점이거나 OR 항의 하나였다. 예를 들어 strategy_c의
+# news_sentiment는 기본값이 'NEUTRAL'이라 결손 시 가점도 감점도 없는 의도된 안전 기본값이다.
 #
-# 청산 경로는 건드리지 않는다 - 기존 보유분은 그대로 두고 신규 진입만 막는 것이 의도다.
-ENTRY_BLOCKED_STRATEGIES = {
-    "청산 경로 필드 결손 - 시그널 청산 불가(2026-08-30)": (
-        "asqs",              # is_float_rotation (유통주식수 데이터 없음)
-        "macro_momentum",    # yield_curve_spread, inflation_expectation (매크로 미연동)
-        "strategy_c",        # news_sentiment, news_sentiment_score (뉴스 감성 중첩 누락)
-        # 아래 2종은 이미 is_selectable=0이지만 그 플래그는 스케줄러를 거치지 않는다.
-        # 실측 결과 각각 계정 1개가 붙어 보유분(3건/2건)을 들고 계속 매수 중이었다.
-        "strategy_b",        # news_sentiment, news_sentiment_score
-        "exploded_c",        # news_sentiment, news_sentiment_score
-    ),
-    # 위 전략과 같은 클래스를 가리키는 팩토리 별칭(app/strategies/strategy_factory.py).
-    # 별칭을 빼두면 같은 결함이 다른 이름으로 그대로 통과한다. strategies 테이블에는
-    # 없어서 카탈로그로는 선택되지 않지만, 차단은 이름이 아니라 결함을 기준으로 건다.
-    "차단 대상의 팩토리 별칭 - 같은 클래스, 같은 결손": (
-        "complex",                 # = strategy_c
-        "complex_ep",              # = strategy_c
-        "complex_aggressive",      # = strategy_c
-        "strategy_c_ep",           # = strategy_c
-        "strategy_c_aggressive",   # = strategy_c
-        "supernova_squeeze",       # = asqs
-    ),
-    "청산 경로 필드 결손 - 수급 데이터 없음(2026-08-30 별도 발견)": (
-        "institutional_follow",    # organ_net_buy 등 수급 4종
-        "smart_money_flow",        # = institutional_follow
-    ),
-}
-
-ENTRY_BLOCKED_STRATEGY_SET = frozenset(
-    strategy
-    for strategies in ENTRY_BLOCKED_STRATEGIES.values()
-    for strategy in strategies
-)
-
-# 진입 차단의 예외. (상위 전략, 슬롯) 쌍으로만 푼다.
-#
-# 차단은 전략 단위지만 복합 전략은 하위 슬롯으로 그 전략을 품는다. 슬롯 하나를 막으면
-# 복합 전략의 구성 자체가 바뀐다. core_satellite가 그 경우다 - 코어 70%(leveraged_regime,
-# 자율)와 새틀라이트 30%(strategy_c)로 라이브 A/B를 관측 중인데, strategy_c를 막으면
-# 관측 대상의 한쪽 다리가 사라진다.
-#
-# 전면 해제가 아니라 쌍으로 푸는 이유: 단독 strategy_c 계정은 청산 불가 매수를 재개하면
-# 안 된다. 예외는 상위 전략이 명시된 조합에서만 성립하며, 별칭에는 적용되지 않는다.
-#
-# 이 예외를 쓰는 슬롯은 여전히 시그널 청산이 불가능하다. 손절·트레일링에만 의존하는
-# 상태를 사용자가 알고 받아들인 것이며, 청산 경로가 배선되면 예외째로 제거한다.
-ENTRY_BLOCK_EXEMPTIONS = {
-    "core_satellite 새틀라이트 슬롯 - 라이브 A/B 관측 유지(2026-08-30 사용자 결정)": (
-        ("core_satellite", "strategy_c"),
-    ),
-}
-
-ENTRY_BLOCK_EXEMPTION_SET = frozenset(
-    pair
-    for pairs in ENTRY_BLOCK_EXEMPTIONS.values()
-    for pair in pairs
-)
-
-
-def is_entry_blocked(parent_strategy_type: str, slot_key: str) -> bool:
-    """해당 슬롯의 신규 진입을 막아야 하는지 판정한다.
-
-    `parent_strategy_type`은 계정에 설정된 상위 전략이고 `slot_key`는 실제로 채점할
-    전략이다. 단일 전략 모드에서는 둘이 같다.
-    """
-    if slot_key not in ENTRY_BLOCKED_STRATEGY_SET:
-        return False
-    return (parent_strategy_type, slot_key) not in ENTRY_BLOCK_EXEMPTION_SET
+# 교훈: "필드를 읽는다"와 "그 필드가 없으면 동작이 깨진다"는 다른 명제다. 후자는 로그나
+# 실제 채점으로 확인해야 하며, 전자만 보고 매매 동작을 바꾸면 안 된다.
 
 # 폴백 치환 선언 (SSOT). 원본 필드가 비었을 때 다른 필드로 갈아타는 경로다.
 #

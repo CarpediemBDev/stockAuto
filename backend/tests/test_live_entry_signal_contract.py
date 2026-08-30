@@ -21,7 +21,6 @@ from pathlib import Path
 import pytest
 
 from app.scanner.signal_contract import (
-    ENTRY_BLOCKED_STRATEGY_SET,
     FALLBACK_SUBSTITUTIONS,
     LIVE_SIGNAL_KEYS,
     PENDING_FIELD_SET,
@@ -478,7 +477,6 @@ STATE_ENTERABLE = "진입가능"
 STATE_MISSING_FIELD = "미진입-지표누락"
 STATE_BLOCKED = "미진입-의도차단"
 STATE_AUTONOMOUS = "자율"
-STATE_ENTRY_BLOCKED = "차단-청산결손"
 
 
 @lru_cache(maxsize=1)
@@ -527,11 +525,6 @@ def _classify_entry_state(strategy_type):
     # 자율 전략은 스캐너 채점을 타지 않는다. 0점이 정상이므로 별도 상태로 둔다.
     if getattr(strategy, "is_autonomous", False):
         return STATE_AUTONOMOUS
-
-    # 채점 자체는 발화하지만 스케줄러가 진입을 막는 전략. 채점 결과만 보면
-    # '진입가능'으로 잡히므로, 스냅샷이 거짓말하지 않도록 여기서 먼저 가른다.
-    if strategy_type in ENTRY_BLOCKED_STRATEGY_SET:
-        return STATE_ENTRY_BLOCKED
 
     if any(fires(strategy, signal) for signal in _reachability_signals()):
         return STATE_ENTERABLE
@@ -592,33 +585,30 @@ def test_strategy_entry_states_match_the_snapshot():
     )
 
 
-# --- 청산 경로 결손 -----------------------------------------------------------
+# --- 청산 반응성 -------------------------------------------------------------
 #
-# 진입 경로만 고치면 절반만 고친 것이다. 청산 조건이 결손 필드를 읽으면 _safe_get이
-# 0.0을 돌려주고 `close >= 기준선(0.0)`이 항상 참이 되어 **홀딩 판정이 영구히 유지**된다.
-# 이 상태의 전략은 진입은 하는데 시그널로는 절대 못 나오고, 손절·트레일링으로만 정리된다.
+# 2026-08-31: 이 절은 원래 "청산 경로에서 결손 필드를 읽는가"를 셌다. 그 지표로
+# 13종을 "시그널 청산 불가"로 판정하고 진입까지 막았는데, 실측에서 전제가 거짓임이
+# 드러나 철회했다. 청산 로그 20,532건 중 91%가 시그널 붕괴였고 대상 전략일수록
+# 오히려 그 비중이 높았다(asqs 2,346건 중 2,276건, 손절 0건).
 #
-# 진입 불가 전략은 카탈로그에서 이미 막았지만(is_selectable=0), "진입은 되는데 청산이
-# 죽은" 조합은 그 그물에 걸리지 않는다. 아래 스냅샷이 그 구멍을 감시한다.
-
-# 청산 경로 결손 목록은 스냅샷 JSON이 단독 소유한다. 손으로 옮겨 적으면 전사 오류가
-# 나고, 두 벌이 되면 어느 쪽이 사실인지 알 수 없게 된다.
-# 갱신: python scripts/update_strategy_entry_states.py
-
-
-def _expected_exit_gaps():
-    payload = json.loads(ENTRY_STATE_SNAPSHOT.read_text(encoding="utf-8"))
-    return {
-        name: tuple(fields)
-        for name, fields in payload.get("exit_path_gaps", {}).items()
-    }
+# 지표가 틀린 것을 재고 있었다. "필드를 읽는다"와 "그 필드가 없으면 청산이 깨진다"는
+# 다른 명제다. 읽기는 분기 위에서도 일어나고(asqs의 is_float_rotation은 진입 분기에서만
+# 쓰인다), 결손 필드가 게이트가 아니라 가점·감점이면 아무것도 깨지지 않는다.
+#
+# 그래서 읽기 대신 **결과**를 잰다. 청산 점수가 시장 상태에 반응하는가, 즉 나쁜
+# 조건에서 cutoff 아래로 떨어져 붕괴 판정이 나는가만 본다. 이것이 "시그널로 빠져나올
+# 수 있는가"의 직접적인 측정이며, 위 오판을 재현했다면 즉시 걸렸을 검사다.
 
 
-def _exit_path_gaps():
-    """전략별 청산 경로 결손 필드를 실제 채점으로 관측한다."""
-    declared_absent = PENDING_FIELD_SET | UNSUPPORTED_FIELD_SET
-    signal = strong_live_signal()
-    gaps = {}
+def _exit_unresponsive():
+    """청산 점수가 어떤 시장 조건에서도 cutoff 아래로 내려가지 않는 전략을 찾는다.
+
+    그런 전략은 시그널로는 절대 빠져나오지 못하고 손절·트레일링에만 의존한다.
+    반대로 하나라도 붕괴 조건이 있으면 시그널 청산 능력은 있는 것이다.
+    """
+    signals = _reachability_signals()
+    stuck = []
     for strategy_type in _catalog_strategy_types():
         try:
             strategy = get_strategy(strategy_type)
@@ -626,193 +616,58 @@ def _exit_path_gaps():
             continue
         if strategy is None or getattr(strategy, "is_autonomous", False):
             continue
-        with record_missing_fields() as missing:
+        can_collapse = False
+        for signal in signals:
             for regime in REGIMES:
                 payload = dict(signal)
                 payload["regime_mode"] = regime
                 try:
-                    strategy.calculate_score(payload, regime, is_entry=False)
+                    score = strategy.calculate_score(payload, regime, is_entry=False)
                 except TypeError:
-                    strategy.calculate_score(
+                    score = strategy.calculate_score(
                         payload, regime, is_entry=False, score_card=None
                     )
-        found = tuple(sorted({key for _, key in missing if key in declared_absent}))
-        if found:
-            gaps[strategy_type] = found
-    return gaps
+                if float(score) < strategy.get_cutoff_score(regime):
+                    can_collapse = True
+                    break
+            if can_collapse:
+                break
+        if not can_collapse:
+            stuck.append(strategy_type)
+    return sorted(stuck)
 
 
-def test_exit_path_field_gaps_do_not_grow():
-    """청산 경로 결손 목록이 스냅샷과 정확히 일치해야 한다.
+def test_no_enterable_strategy_is_stuck_without_a_signal_exit():
+    """진입할 수 있는 전략은 반드시 시그널로 빠져나올 수도 있어야 한다.
 
-    늘어났다면 시그널로 못 빠져나오는 전략이 새로 생긴 것이다. 줄었다면 배선이
-    복구된 것이므로 스냅샷에서 지운다. 어느 쪽이든 사람이 판단해야 한다.
-    """
-    actual = _exit_path_gaps()
-    expected = _expected_exit_gaps()
-    assert actual == expected, (
-        "청산 경로 결손이 스냅샷과 다르다. 늘었다면 시그널 청산 불가 전략이 생긴 것이다.\n"
-        f"  실측: {actual}\n"
-        f"  기대: {expected}"
-    )
+    위험한 것은 "청산 불가" 자체가 아니라 **진입 가능 + 청산 불가**의 조합이다.
+    진입하지 못하는 전략은 포지션이 생기지 않으므로 묶일 것도 없다. 실제로 현재
+    청산 반응이 없는 5종(cross_asset, obi_ofa, pairs_trading, pca_knn,
+    pdufa_calendar)은 전부 지표 결손으로 진입 자체가 막혀 있어 무해하다.
 
-
-def test_no_strategy_can_enter_while_its_exit_path_is_degraded():
-    """청산이 죽은 전략은 진입도 할 수 없어야 한다.
-
-    진입 가능 + 청산 결손이 가장 위험한 조합이다. 포지션은 잡히는데 시그널로는
-    못 나오고 손절·트레일링에만 의존하게 된다. 안전한 상태는 셋 중 하나다.
-
-      - 미진입-지표누락 : 진입 조건이 결손이라 애초에 포지션이 안 생긴다
-      - 미진입-의도차단 : 조건이 닫혀 있다
-      - 차단-청산결손   : 채점은 되지만 스케줄러가 신규 진입을 막는다
-
-    카탈로그 차단(is_selectable=0)은 이 검사의 안전 근거가 되지 못한다. 그 플래그는
-    카탈로그 조회와 전략 변경 검증에서만 쓰이고 스케줄러는 보지 않으므로, 이미 그
-    전략으로 설정된 계정은 계속 매수한다. 실제로 strategy_b와 exploded_c가 그 상태로
-    각각 계정 1개와 보유분을 들고 매수 중이었다.
+    이 검사는 2026-08-31 오판을 그대로 재현했다면 즉시 통과했을 것이고(차단한 13종은
+    모두 청산 반응이 정상이었다), 따라서 그 차단이 불필요함을 알려줬을 검사다.
+    조합이 아니라 한쪽만 보면 같은 실수를 반복한다.
     """
     states = json.loads(ENTRY_STATE_SNAPSHOT.read_text(encoding="utf-8"))["states"]
-    enterable = sorted(
-        name for name in _expected_exit_gaps()
-        if states.get(name) == STATE_ENTERABLE
-    )
-    assert not enterable, (
-        "청산 경로가 죽었는데 진입은 가능한 전략이 있다. "
-        "ENTRY_BLOCKED_STRATEGIES에 추가하거나 청산 경로를 배선할 것: "
-        + repr(enterable)
+    stuck = set(_exit_unresponsive())
+    risky = sorted(name for name in stuck if states.get(name) == STATE_ENTERABLE)
+    assert not risky, (
+        "진입은 되는데 시그널로는 빠져나올 수 없는 전략이 있다. 포지션이 손절·트레일링에만 "
+        "의존하게 되므로 청산 조건을 배선하거나 진입을 막을 것: " + repr(risky)
     )
 
 
-def test_entry_blocked_strategies_are_exactly_the_risky_ones():
-    """진입 차단 목록이 '발화하는데 청산이 죽은' 전략과 정확히 일치해야 한다.
+def test_exit_unresponsive_list_matches_the_snapshot():
+    """시그널 청산이 불가능한 전략 목록이 스냅샷과 일치해야 한다.
 
-    과잉 차단(멀쩡한 전략을 막음)과 과소 차단(위험한 전략을 놓침)을 모두 잡는다.
+    목록이 늘면 그 전략이 진입 가능해지는 순간 위 불변식이 깨진다. 줄면 청산 조건이
+    배선된 것이므로 스냅샷에서 지운다. 어느 쪽이든 사람이 사유를 판단해야 한다.
     """
-    states = json.loads(ENTRY_STATE_SNAPSHOT.read_text(encoding="utf-8"))["states"]
-    should_block = {
-        name for name in _expected_exit_gaps()
-        if states.get(name) == STATE_ENTRY_BLOCKED
-    }
-    assert set(ENTRY_BLOCKED_STRATEGY_SET) == should_block, (
-        "진입 차단 목록과 위험 전략 목록이 어긋났다. "
-        f"차단됐지만 청산 결손이 아님={sorted(set(ENTRY_BLOCKED_STRATEGY_SET) - should_block)}, "
-        f"청산 결손인데 차단 안 됨={sorted(should_block - set(ENTRY_BLOCKED_STRATEGY_SET))}"
-    )
-
-
-def test_entry_block_is_wired_into_the_buy_path_only():
-    """진입 차단이 매수 경로에만, 그리고 채점 전에 걸려 있어야 한다.
-
-    선언만 있고 배선이 없으면 이 파일의 다른 테스트는 전부 통과하면서 실제로는
-    아무것도 막지 못한다. 반대로 청산 경로에 잘못 걸리면 기존 보유분이 시그널
-    청산까지 잃어 "신규 진입만 막는다"는 의도가 깨진다.
-
-    is_selectable=0으로는 이 검사를 대신할 수 없다. 그 플래그는 카탈로그 조회와
-    전략 변경 검증에서만 쓰이고 스케줄러는 보지 않는다.
-    """
-    import ast
-
-    source = (
-        Path(__file__).resolve().parents[1] / "app" / "bot" / "scheduler.py"
-    ).read_text(encoding="utf-8")
-    tree = ast.parse(source)
-
-    functions = {
-        node.name: node
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
-    assert "process_entry_signals" in functions, "매수 경로 함수명이 바뀌었다"
-    assert "process_exit_signals" in functions, "청산 경로 함수명이 바뀌었다"
-
-    def _guard_lines(func):
-        # 차단 판정은 is_entry_blocked(상위전략, 슬롯) 한 곳으로만 들어간다.
-        return [
-            node.lineno
-            for node in ast.walk(func)
-            if isinstance(node, ast.Call)
-            and getattr(node.func, "id", None) == "is_entry_blocked"
-        ]
-
-    def _entry_scoring_lines(func):
-        return [
-            node.lineno
-            for node in ast.walk(func)
-            if isinstance(node, ast.Call)
-            and getattr(node.func, "attr", None) == "calculate_score"
-            and any(
-                keyword.arg == "is_entry"
-                and getattr(keyword.value, "value", None) is True
-                for keyword in node.keywords
-            )
-        ]
-
-    entry_guards = _guard_lines(functions["process_entry_signals"])
-    assert entry_guards, (
-        "매수 경로가 is_entry_blocked를 호출하지 않는다. "
-        "선언만 있고 실제 차단은 일어나지 않는 상태다."
-    )
-
-    scoring = _entry_scoring_lines(functions["process_entry_signals"])
-    assert scoring and min(entry_guards) < min(scoring), (
-        "차단이 진입 채점보다 뒤에 있다. 채점 전에 걸러야 한다."
-    )
-
-    assert not _guard_lines(functions["process_exit_signals"]), (
-        "청산 경로에 진입 차단이 걸려 있다. 기존 보유분의 시그널 청산까지 막힌다."
-    )
-
-
-def test_entry_block_exemption_is_scoped_to_its_parent_strategy():
-    """차단 예외는 (상위 전략, 슬롯) 쌍에서만 성립해야 한다.
-
-    core_satellite의 새틀라이트 슬롯(strategy_c, 30%)은 라이브 A/B 관측을 유지하기 위해
-    예외로 풀려 있다. 그러나 단독 strategy_c 계정은 계속 막혀야 한다 - 예외가 전략
-    단위로 새면 청산 불가 매수가 그대로 재개된다.
-    """
-    from app.scanner.signal_contract import (
-        ENTRY_BLOCK_EXEMPTION_SET,
-        is_entry_blocked,
-    )
-
-    assert ("core_satellite", "strategy_c") in ENTRY_BLOCK_EXEMPTION_SET
-
-    # 예외가 성립하는 유일한 조합
-    assert not is_entry_blocked("core_satellite", "strategy_c")
-
-    # 같은 슬롯이라도 상위 전략이 다르면 막힌다
-    assert is_entry_blocked("strategy_c", "strategy_c"), "단독 strategy_c가 뚫렸다"
-    assert is_entry_blocked("multi_slot", "strategy_c")
-
-    # 예외는 별칭으로 번지지 않는다
-    for alias in ("complex", "complex_ep", "strategy_c_ep", "strategy_c_aggressive"):
-        assert is_entry_blocked("core_satellite", alias), f"{alias}로 예외가 샜다"
-
-    # core_satellite의 다른 차단 대상 슬롯에도 번지지 않는다
-    assert is_entry_blocked("core_satellite", "asqs")
-
-    # 차단 목록에 없는 전략은 어디서든 통과한다
-    assert not is_entry_blocked("core_satellite", "leveraged_regime")
-    assert not is_entry_blocked("regime_switching", "regime_switching")
-
-
-def test_exempted_slots_are_declared_in_the_blocked_set():
-    """예외 목록이 차단 목록과 어긋나면 안 된다.
-
-    차단되지도 않는 전략에 예외가 걸려 있으면 사문화된 선언이고, 읽는 사람에게
-    "이건 막혀 있다"는 잘못된 인상을 준다.
-    """
-    from app.scanner.signal_contract import (
-        ENTRY_BLOCK_EXEMPTION_SET,
-        ENTRY_BLOCKED_STRATEGY_SET,
-    )
-
-    orphan = sorted(
-        f"{parent}:{slot}"
-        for parent, slot in ENTRY_BLOCK_EXEMPTION_SET
-        if slot not in ENTRY_BLOCKED_STRATEGY_SET
-    )
-    assert not orphan, (
-        "차단 목록에 없는 전략에 예외가 걸려 있다(선언 제거 필요): " + repr(orphan)
+    expected = json.loads(
+        ENTRY_STATE_SNAPSHOT.read_text(encoding="utf-8")
+    ).get("exit_unresponsive", [])
+    assert _exit_unresponsive() == sorted(expected), (
+        "시그널 청산 불가 목록이 스냅샷과 다르다. "
+        "python scripts/update_strategy_entry_states.py 로 갱신하고 사유를 현황판에 남길 것."
     )
