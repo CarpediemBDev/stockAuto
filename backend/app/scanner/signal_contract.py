@@ -148,6 +148,41 @@ ENTRY_BLOCKED_STRATEGY_SET = frozenset(
     for strategy in strategies
 )
 
+# 진입 차단의 예외. (상위 전략, 슬롯) 쌍으로만 푼다.
+#
+# 차단은 전략 단위지만 복합 전략은 하위 슬롯으로 그 전략을 품는다. 슬롯 하나를 막으면
+# 복합 전략의 구성 자체가 바뀐다. core_satellite가 그 경우다 - 코어 70%(leveraged_regime,
+# 자율)와 새틀라이트 30%(strategy_c)로 라이브 A/B를 관측 중인데, strategy_c를 막으면
+# 관측 대상의 한쪽 다리가 사라진다.
+#
+# 전면 해제가 아니라 쌍으로 푸는 이유: 단독 strategy_c 계정은 청산 불가 매수를 재개하면
+# 안 된다. 예외는 상위 전략이 명시된 조합에서만 성립하며, 별칭에는 적용되지 않는다.
+#
+# 이 예외를 쓰는 슬롯은 여전히 시그널 청산이 불가능하다. 손절·트레일링에만 의존하는
+# 상태를 사용자가 알고 받아들인 것이며, 청산 경로가 배선되면 예외째로 제거한다.
+ENTRY_BLOCK_EXEMPTIONS = {
+    "core_satellite 새틀라이트 슬롯 - 라이브 A/B 관측 유지(2026-08-30 사용자 결정)": (
+        ("core_satellite", "strategy_c"),
+    ),
+}
+
+ENTRY_BLOCK_EXEMPTION_SET = frozenset(
+    pair
+    for pairs in ENTRY_BLOCK_EXEMPTIONS.values()
+    for pair in pairs
+)
+
+
+def is_entry_blocked(parent_strategy_type: str, slot_key: str) -> bool:
+    """해당 슬롯의 신규 진입을 막아야 하는지 판정한다.
+
+    `parent_strategy_type`은 계정에 설정된 상위 전략이고 `slot_key`는 실제로 채점할
+    전략이다. 단일 전략 모드에서는 둘이 같다.
+    """
+    if slot_key not in ENTRY_BLOCKED_STRATEGY_SET:
+        return False
+    return (parent_strategy_type, slot_key) not in ENTRY_BLOCK_EXEMPTION_SET
+
 # 폴백 치환 선언 (SSOT). 원본 필드가 비었을 때 다른 필드로 갈아타는 경로다.
 #
 # 이 목록이 따로 있어야 하는 이유: 위의 결손 검사들은 "필드에 값이 있는가"를 본다.

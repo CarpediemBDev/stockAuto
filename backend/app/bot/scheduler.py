@@ -21,7 +21,7 @@ from requests.exceptions import RequestException as RequestsRequestException
 from app.core.logging import logger
 from app.core.config import settings
 from app.scanner.data_provider import fetch_ohlcv
-from app.scanner.signal_contract import ENTRY_BLOCKED_STRATEGY_SET
+from app.scanner.signal_contract import is_entry_blocked
 from app.core.telegram import send_message_async, send_daily_report_to_all_users_sync
 from app.core.i18n import I18n, resolve_user_language
 from app.bot.fx_cache import FXRateCache
@@ -1602,10 +1602,12 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
         if getattr(strategy_instance, "is_autonomous", False):
             # 자율 슬롯은 스캐너 시그널 기반 신규 진입 대상이 아님 — process_autonomous_slots 전담
             continue
-        if slot_key in ENTRY_BLOCKED_STRATEGY_SET:
+        parent_strategy_type = getattr(ctx.db_settings, "strategy_type", "") or ""
+        if is_entry_blocked(parent_strategy_type, slot_key):
             # 청산 경로가 결손이라 시그널로 못 빠져나오는 전략. 신규 진입만 막고
             # 기존 보유분의 청산 경로는 그대로 둔다(손절·트레일링·시그널 전부 유지).
             # 카탈로그의 is_selectable=0은 스케줄러를 거치지 않으므로 여기서 함께 막는다.
+            # 복합 전략의 하위 슬롯은 (상위 전략, 슬롯) 예외로 풀 수 있다.
             _log(
                 f"[Entry Block] {strategy_instance.name} slot BLOCKED for new entries "
                 "(exit path has missing fields - positions cannot be closed by signal). "
