@@ -1,0 +1,70 @@
+groups:
+  - name: redis
+    rules:
+      # 주문 락이 Redis에 걸려 있어 Redis가 죽으면 신규 주문이 fail-closed로 전량 차단된다.
+      # (app/core/locks.py의 RedisLockUnavailable → 각 매매 경로에서 skip)
+      # for 2m은 순간 끊김으로 알림이 튀는 것을 막는다. scrape_interval 15s 기준 약 8회 연속 실패.
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis 다운 (env={{ $labels.env }})"
+          description: "신규 주문이 fail-closed로 전량 차단 중입니다. 락 획득이 불가능해 매매 루프가 매 주기 skip합니다."
+
+      # exporter 자체가 죽으면 redis_up 시계열이 사라져 위 RedisDown이 발화하지 못한다.
+      # 이 규칙이 없으면 '조용한 실명' 상태가 된다 - 감시가 죽었는데 아무 알림도 없는 상태.
+      - alert: RedisExporterDown
+        expr: up{job="redis"} == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "redis_exporter 응답 없음 (env={{ $labels.env }})"
+          description: "Redis 자체의 상태를 알 수 없는 구간입니다. RedisDown 알림도 함께 무력화됩니다."
+
+      # Redis가 조용히 재시작하면 주문 락이 전부 사라진다. 로컬 Memurai는 start_dev.bat에서
+      # --save "" --appendonly no로 뜨므로 재시작 시 키가 남지 않는다.
+      # 진행 중이던 주문이 락 없이 노출되는 구간이 생기므로 중복 체결 위험 신호로 다룬다.
+      - alert: RedisRestarted
+        expr: redis_uptime_in_seconds < 300
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis 재시작 감지 (uptime {{ $value | humanizeDuration }}, env={{ $labels.env }})"
+          description: "모든 주문 락이 소실된 상태입니다. 재시작 직전에 진행 중이던 주문이 있었는지 확인하십시오."
+
+      # maxmemory를 설정하지 않으면 redis_memory_max_bytes가 0이라 나눗셈이 +Inf가 되고
+      # 이 알림이 영구 발화한다. 반드시 분모를 먼저 걸러낼 것.
+      - alert: RedisMemoryPressure
+        expr: redis_memory_max_bytes > 0 and (redis_memory_used_bytes / redis_memory_max_bytes) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis 메모리 90% 초과 (env={{ $labels.env }})"
+          description: "maxmemory 정책에 따라 키가 축출되기 시작하면 주문 락이 만료 전에 사라질 수 있습니다."
+
+      - alert: RedisRejectedConnections
+        expr: increase(redis_rejected_connections_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis 연결 거부 발생 (env={{ $labels.env }})"
+          description: "maxclients 한도에 도달했습니다. 락 획득이 간헐적으로 실패할 수 있습니다."
+
+  - name: meta
+    rules:
+      # 항상 발화하는 더미 알림. 외부 데드맨 스위치(Healthchecks.io 등)에 연결하면
+      # 이 신호가 끊긴 것으로 'PC 또는 Prometheus 자체가 죽었음'을 밖에서 알 수 있다.
+      # 현재는 alertmanager.yml에서 null 수신자로 흘려보내며, 외부 연결은 아직 하지 않았다.
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: "관측 파이프라인 생존 신호"
+          description: "이 알림은 항상 발화합니다. 멈췄다면 Prometheus 또는 호스트가 죽은 것입니다."
