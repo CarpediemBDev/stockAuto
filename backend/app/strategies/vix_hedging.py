@@ -29,8 +29,10 @@ class VixHedging(BaseStrategy):
                 return 95.0
             return 0.0
         else:
-            # 청산 시그널
+            # 엔진은 is_signal_collapsed로 "낮은 점수 = 청산"을 읽는다(BaseStrategy).
+            # 20일선 이탈이 청산 사유이므로 그때 낮은 점수를 낸다. 2026-09-01 이전에는
+            # 반대로 돌려주고 있어, is_vix_ok가 배선되는 순간 사자마자 파는 상태였다.
             ema20 = self._safe_get(row, 'EMA20')
             if close < ema20:
-                return 100.0
-            return 30.0
+                return 0.0
+            return 100.0

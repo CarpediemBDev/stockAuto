@@ -10,7 +10,11 @@ from app.scanner.indicators import (
 )
 from app.core.logging import logger
 from app.backtests.backtest_metrics import calculate_performance_metrics
-from app.scanner.indicator_metrics import build_indicator_metrics
+from app.scanner.indicator_metrics import (
+    build_indicator_metrics,
+    build_qqq_regime_metrics,
+)
+from app.scanner.macro_data import fetch_macro_series
 from app.bot.trade_calculations import (
     DEFAULT_ROLLING_BOX_MINUTES,
     bar_minutes_for_interval,
@@ -296,27 +300,14 @@ class BacktestSimulator:
         if self.qqq_data.empty:
             raise Exception("Failed to fetch QQQ index data. Backtesting cannot proceed without regime guide.")
 
-        # QQQ 지표 계산 (MA20, MA50)
-        qqq_metrics = pd.DataFrame(index=self.qqq_data.index)
-        qqq_metrics['Close'] = self.qqq_data['Close']
-        qqq_metrics['MA20'] = calculate_ema(self.qqq_data['Close'], 20)
-        qqq_metrics['MA50'] = calculate_ema(self.qqq_data['Close'], 50)
-        
-        # QQQ 레짐 모드 판단 열 추가
-        regimes = []
-        for i in range(len(qqq_metrics)):
-            close = qqq_metrics['Close'].iloc[i]
-            ma20 = qqq_metrics['MA20'].iloc[i]
-            ma50 = qqq_metrics['MA50'].iloc[i]
-            if pd.isna(ma20) or pd.isna(ma50):
-                regimes.append("NEUTRAL")
-            elif close > ma20 and ma20 > ma50:
-                regimes.append("BULLISH")
-            elif close < ma20:
-                regimes.append("BEARISH")
-            else:
-                regimes.append("NEUTRAL")
-        qqq_metrics['regime'] = regimes
+        # QQQ 지표·레짐 계산. 계산식의 단일 지점은 indicator_metrics다 -
+        # 라이브 신호(signal_contract.daily_indicator_snapshot)도 같은 함수를 쓴다.
+        qqq_metrics = build_qqq_regime_metrics(self.qqq_data)
+
+        # 매크로 시계열(FRED)은 종목과 무관한 공통 값이라 한 번만 받는다.
+        # 수집 실패 시 None이며, 그러면 매크로 열이 만들어지지 않아 해당 전략은
+        # 진입하지 않는다(틀린 값으로 매매하는 것보다 안전하다).
+        self.macro_data = fetch_macro_series()
         self.qqq_metrics = self._slice_requested_range(
             qqq_metrics,
             self.start_date,
@@ -388,6 +379,7 @@ class BacktestSimulator:
                     df,
                     qqq_data=self.qqq_data,
                     qqq_metrics=self.qqq_metrics,
+                    macro_data=getattr(self, 'macro_data', None),
                     interval=self.interval,
                     rolling_box_minutes=getattr(
                         self.strategy, 'rolling_box_minutes', DEFAULT_ROLLING_BOX_MINUTES

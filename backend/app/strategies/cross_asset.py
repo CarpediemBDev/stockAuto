@@ -28,7 +28,10 @@ class CrossAsset(BaseStrategy):
                 return 100.0
             return 0.0
         else:
-            # 매크로 약세장 전환 또는 20일선 이탈 시 청산
+            # 엔진은 is_signal_collapsed로 "낮은 점수 = 청산"을 읽는다(BaseStrategy).
+            # 매크로 약세 전환이나 20일선 이탈이 청산 사유이므로 그때 낮은 점수를 낸다.
+            # 2026-09-01 이전에는 반대로 돌려주고 있어, 필드가 배선되는 순간
+            # 정상 구간에서 즉시 매도하고 악화 구간에서 버티는 전략이 될 상태였다.
             if macro_ok == 0.0 or close < ema20:
-                return 100.0
-            return 30.0
+                return 0.0
+            return 100.0

@@ -1,6 +1,6 @@
 {
   "_comment": "전략별 라이브 진입 상태 스냅샷. 손으로 고치지 말고 python scripts/update_strategy_entry_states.py 로 갱신할 것. 차분이 생기면 사유를 당일 현황판 변경 영향 기록에 남긴다.",
-  "updated_at": "2026-08-31",
+  "updated_at": "2026-09-01",
   "states": {
     "antigravity_surge": "진입가능",
     "asqs": "진입가능",
@@ -14,7 +14,7 @@
     "connors_rsi": "진입가능",
     "coppock_curve": "진입가능",
     "core_satellite": "미진입-의도차단",
-    "cross_asset": "미진입-지표누락",
+    "cross_asset": "진입가능",
     "cross_sectional_momentum": "진입가능",
     "dark_pool": "미진입-지표누락",
     "darvas_box": "진입가능",
@@ -102,7 +102,7 @@
     "triple_ema": "진입가능",
     "turn_of_month": "진입가능",
     "vcp_breakout": "진입가능",
-    "vix_hedging": "미진입-지표누락",
+    "vix_hedging": "진입가능",
     "vol_spike_brk": "진입가능",
     "volatility_regime": "미진입-지표누락",
     "volume_filtered_cross": "진입가능",
@@ -116,7 +116,6 @@
     "zscore_reversion": "진입가능"
   },
   "exit_unresponsive": [
-    "cross_asset",
     "obi_ofa",
     "pairs_trading",
     "pca_knn",
