@@ -111,6 +111,30 @@ def _base_signal():
     }
 
 
+def _synthetic_macro_frame():
+    """FRED 대신 쓰는 합성 매크로 프레임.
+
+    테스트가 외부 HTTP에 묶이면 안 되므로 값을 직접 만든다. 열 이름과 계산식은
+    macro_data 모듈의 것을 그대로 쓰므로, 실제 배선이 바뀌면 이 테스트도 함께 깨진다.
+    """
+    import pandas as pd
+    from app.scanner.macro_data import (
+        SERIES_BREAKEVEN,
+        SERIES_TEN_YEAR,
+        SERIES_TWO_YEAR,
+    )
+
+    index = pd.date_range("2024-01-01", periods=300, freq="D")
+    return pd.DataFrame(
+        {
+            SERIES_TWO_YEAR: [4.20] * 300,
+            SERIES_TEN_YEAR: [4.67] * 300,
+            SERIES_BREAKEVEN: [2.31] * 300,
+        },
+        index=index,
+    )
+
+
 @lru_cache(maxsize=None)
 def _cached_snapshot(drift_pct_per_bar, seed):
     """같은 (추세, 시드)의 지표 스냅샷을 재사용한다.
@@ -118,9 +142,17 @@ def _cached_snapshot(drift_pct_per_bar, seed):
     스냅샷 한 번이 300봉 기준 1초 가까이 걸려서, 캐시 없이는 이 파일 하나로 테스트
     실행이 수 분 늘어난다. 반환값은 호출부가 수정하므로 항상 사본을 준다.
     """
+    from app.scanner.macro_data import macro_snapshot
     from app.scanner.signal_contract import daily_indicator_snapshot
 
-    return daily_indicator_snapshot(_synthetic_daily_frame(drift_pct_per_bar, seed))
+    # 라이브와 같은 입력 구성으로 만든다 - 종목 일봉 + QQQ 일봉 + 매크로 프레임.
+    # QQQ를 빼면 지수 파생 지표가 상수 1.0으로 떨어져 테스트가 라이브를 흉내내지 못한다.
+    snapshot = daily_indicator_snapshot(
+        _synthetic_daily_frame(drift_pct_per_bar, seed),
+        _synthetic_daily_frame(0.02, seed + 9_000),
+    )
+    snapshot.update(macro_snapshot(_synthetic_macro_frame()))
+    return snapshot
 
 
 def live_signal(drift_pct_per_bar=-0.05, seed=101):
@@ -602,7 +634,7 @@ def test_strategy_entry_states_match_the_snapshot():
 
 
 def _exit_unresponsive():
-    """청산 점수가 어떤 시장 조건에서도 cutoff 아래로 내려가지 않는 전략을 찾는다.
+    """청산 점수가 어떤 시장 조건에서도 붕괴 판정을 받지 않는 전략을 찾는다.
 
     그런 전략은 시그널로는 절대 빠져나오지 못하고 손절·트레일링에만 의존한다.
     반대로 하나라도 붕괴 조건이 있으면 시그널 청산 능력은 있는 것이다.
@@ -627,7 +659,10 @@ def _exit_unresponsive():
                     score = strategy.calculate_score(
                         payload, regime, is_entry=False, score_card=None
                     )
-                if float(score) < strategy.get_cutoff_score(regime):
+                # 붕괴 판정은 진입 커트라인(85/95)이 아니라 엔진이 실제로 쓰는
+                # is_signal_collapsed(BULLISH 40 / 그 외 50)다. 커트라인으로 재면
+                # 40~95 구간 점수를 청산으로 오판해 결함을 놓친다.
+                if strategy.is_signal_collapsed(float(score), regime):
                     can_collapse = True
                     break
             if can_collapse:

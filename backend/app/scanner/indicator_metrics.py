@@ -17,6 +17,7 @@ from app.bot.trade_calculations import (
     bar_minutes_for_interval,
     resolve_rolling_box_bars,
 )
+from app.scanner.macro_data import macro_columns_for_index
 from app.scanner.indicators import (
     calculate_atr,
     detect_cup_and_handle,
@@ -53,10 +54,51 @@ def _rolling_pattern_flag(df, detector, min_bars, window_bars):
     return pd.Series(values, index=df.index)
 
 
+def build_qqq_regime_metrics(qqq_daily):
+    """QQQ 일봉에서 레짐 판정 프레임을 만든다(SSOT).
+
+    `cross_asset_ok`가 이 프레임의 `regime` 컬럼을 읽는다. 원래 이 계산은
+    backtest_engine.py 안에만 있어서 라이브가 같은 판정을 재현할 수 없었고, 그 결과
+    `cross_asset_ok`는 라이브에서 산출 불가로 분류돼 `cross_asset` 전략이 영구
+    미진입 상태였다. 두 경로가 같은 함수를 쓰도록 여기로 옮긴다.
+
+    판정 규칙은 옮기기 전과 동일하다.
+      - 종가 > MA20 이고 MA20 > MA50 -> BULLISH
+      - 종가 < MA20                  -> BEARISH
+      - 그 외                        -> NEUTRAL
+
+    이동평균은 단순평균이 아니라 EMA다(`calculate_ema`). 이름이 MA인 것은 기존
+    컬럼명을 유지한 것이며, 정의를 바꾸면 백테스트 성적이 소급 변경된다.
+    """
+    if qqq_daily is None or qqq_daily.empty or "Close" not in qqq_daily:
+        return None
+
+    metrics = pd.DataFrame(index=qqq_daily.index)
+    metrics["Close"] = qqq_daily["Close"]
+    metrics["MA20"] = calculate_ema(qqq_daily["Close"], 20)
+    metrics["MA50"] = calculate_ema(qqq_daily["Close"], 50)
+
+    close = metrics["Close"]
+    ma20 = metrics["MA20"]
+    ma50 = metrics["MA50"]
+    regime = np.where(
+        ma20.isna() | ma50.isna(),
+        "NEUTRAL",
+        np.where(
+            (close > ma20) & (ma20 > ma50),
+            "BULLISH",
+            np.where(close < ma20, "BEARISH", "NEUTRAL"),
+        ),
+    )
+    metrics["regime"] = regime
+    return metrics
+
+
 def build_indicator_metrics(
     df: pd.DataFrame,
     qqq_data: pd.DataFrame = None,
     qqq_metrics: pd.DataFrame = None,
+    macro_data: pd.DataFrame = None,
     interval: str = "1d",
     rolling_box_minutes: float = DEFAULT_ROLLING_BOX_MINUTES,
     include_pattern_flags: bool = True,
@@ -425,6 +467,17 @@ def build_indicator_metrics(
         metrics['cross_asset_ok'] = np.where(aligned_regime != "BEARISH", 1.0, 0.0)
     else:
         metrics['cross_asset_ok'] = 1.0
+
+    # [2-10b] 매크로 시계열 (FRED). 없으면 열 자체를 만들지 않는다 -
+    # 기본값으로 채우면 `is_recession_alert`가 상수로 굳어 매크로 판단이 사문화된다.
+    # 이름을 리터럴로 대입한다. 루프로 동적 대입하면 정적 가드
+    # (scripts/check_signal_field_contract.py)가 생산자를 보지 못해
+    # "백테스트가 만들지 않는 필드"로 반려한다.
+    macro_columns = macro_columns_for_index(macro_data, df.index)
+    if "yield_curve_spread" in macro_columns:
+        metrics['yield_curve_spread'] = macro_columns["yield_curve_spread"]
+    if "inflation_expectation" in macro_columns:
+        metrics['inflation_expectation'] = macro_columns["inflation_expectation"]
 
     # [2-11] 볼륨 델타 체결 불균형 (양봉 volume 매수 우위 vs 음봉 volume 매도 우위 프록시)
     body_ratio = (df['Close'] - df['Low']) / (df['High'] - df['Low']).replace(0, 1)

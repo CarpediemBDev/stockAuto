@@ -20,8 +20,12 @@ import numpy as np
 import pandas as pd
 
 from app.core.logging import logger
-from app.scanner.indicator_metrics import build_indicator_metrics
+from app.scanner.indicator_metrics import (
+    build_indicator_metrics,
+    build_qqq_regime_metrics,
+)
 from app.scanner.indicators import calculate_ema
+from app.scanner.macro_data import macro_snapshot
 
 # 백테스트 엔진과 이름·의미를 맞춘 표준 필드 목록.
 # 스캐너 신호에 이 이름들이 빠지면 전략이 조용히 미진입으로 퇴화한다.
@@ -52,6 +56,10 @@ CANONICAL_FIELDS = (
     "senkou_span_a", "senkou_span_b", "sma20", "sma50", "sortino_rank", "sortino_ratio_60d",
     "supertrend_direction", "td_buy_setup_count", "td_sell_setup_count", "trendline_support",
     "vol_sma20", "volume", "volume_ma20", "volume_poc", "williams_r", "zscore",
+    # QQQ 파생 지수 지표. VIX가 아니라 QQQ 가격에서 산출한다(2026-09-01 배선).
+    "is_vix_ok", "cross_asset_ok",
+    # 매크로 시계열(FRED). 종목 무관 공통 값이며 하루 단위로 갱신된다.
+    "yield_curve_spread", "inflation_expectation",
 )
 
 # 라이브 진입/청산 신호(details)가 실제로 싣는 전체 키.
@@ -88,6 +96,10 @@ LIVE_SIGNAL_KEYS = frozenset({
     "senkou_span_a", "senkou_span_b", "sma20", "sma50", "sortino_rank", "sortino_ratio_60d",
     "supertrend_direction", "td_buy_setup_count", "td_sell_setup_count", "trendline_support",
     "vol_sma20", "volume", "volume_ma20", "volume_poc", "williams_r", "zscore",
+    # QQQ 파생 지수 지표. VIX가 아니라 QQQ 가격에서 산출한다(2026-09-01 배선).
+    "is_vix_ok", "cross_asset_ok",
+    # 매크로 시계열(FRED). 종목 무관 공통 값이며 하루 단위로 갱신된다.
+    "yield_curve_spread", "inflation_expectation",
 })
 
 # 라이브 신호에는 실리지만 백테스트 지표(app/scanner/indicator_metrics.py)가 만들지
@@ -156,7 +168,6 @@ FALLBACK_SUBSTITUTIONS = {
 # 전략은 라이브에서 진입하지 못한다. 카탈로그에서 선택 불가로 막는 것이 정답이며,
 # 데이터를 조달하기 전까지 이 목록에 남는다.
 UNSUPPORTED_LIVE_FIELDS = {
-    "매크로 시계열 미연동": ("yield_curve_spread", "inflation_expectation"),
     "수급·내부자 공시 데이터 없음": (
         "insider_signal", "institutional_net_buy_days", "foreigner_net_buy",
         "organ_net_buy", "smart_money_score",
@@ -174,8 +185,11 @@ UNSUPPORTED_LIVE_FIELDS = {
         "days_to_pdufa",
     ),
     "SNS 버즈 데이터 없음": ("mention_zscore", "social_buzz_surge", "sentiment_positive"),
-    "타 자산·변동성 지수 미연동": (
-        "cross_asset_ok", "is_vix_ok", "vix_term_structure", "vix_vxv_ratio",
+    # is_vix_ok와 cross_asset_ok는 2026-09-01에 라이브로 옮겼다. 둘 다 VIX가 아니라
+    # QQQ 가격에서 산출되며(indicator_metrics), 재료가 이미 있는데 배선만 없던 상태였다.
+    # 남은 둘은 VIX 선물 곡선이 있어야 해서 여전히 불가다.
+    "VIX 선물 곡선 미연동": (
+        "vix_term_structure", "vix_vxv_ratio",
     ),
     "타 종목 동시 시계열(페어) 미지원": ("spread_zscore", "kalman_zscore"),
     "사전 학습 모델 미탑재": ("knn_up_probability",),
@@ -310,7 +324,7 @@ _DAILY_SNAPSHOT_FIELDS = tuple(CANONICAL_FIELDS[8:])
 MIN_DAILY_BARS_FOR_SNAPSHOT = 60
 
 
-def daily_indicator_snapshot(df_daily) -> dict:
+def daily_indicator_snapshot(df_daily, qqq_daily=None) -> dict:
     """일봉에서 전략 지표를 계산해 마지막 봉의 값만 뽑아 돌려준다.
 
     백테스트와 동일한 build_indicator_metrics를 호출하므로 두 경로의 지표가 정의상
@@ -329,7 +343,16 @@ def daily_indicator_snapshot(df_daily) -> dict:
     try:
         # 패턴 플래그(is_vcp/is_cup)는 스캐너가 같은 감지기로 이미 계산해 신호에 싣는다.
         # 여기서 봉마다 다시 돌리면 스캔 한 사이클이 종목당 수 초씩 느려진다.
-        metrics = build_indicator_metrics(df_daily, interval="1d", include_pattern_flags=False)
+        # QQQ를 넘기면 지수 파생 지표(is_vix_ok, cross_asset_ok)까지 산출된다.
+        # 넘기지 않으면 두 값이 상수 1.0으로 떨어져 전략이 "항상 양호"로 오판한다.
+        qqq_metrics = build_qqq_regime_metrics(qqq_daily)
+        metrics = build_indicator_metrics(
+            df_daily,
+            qqq_data=qqq_daily,
+            qqq_metrics=qqq_metrics,
+            interval="1d",
+            include_pattern_flags=False,
+        )
     except Exception:
         # 지표 계산 실패가 스캔 전체를 멈추게 해서는 안 된다. 값을 싣지 않으면
         # 전략은 진입하지 않을 뿐이고, 이는 잘못된 값으로 매매하는 것보다 안전하다.
@@ -349,7 +372,8 @@ def daily_indicator_snapshot(df_daily) -> dict:
 
 
 def build_canonical_metrics(cand: dict, last_close: float, wick_ratio: float,
-                            df_5m=None, df_daily=None) -> dict:
+                            df_5m=None, df_daily=None, qqq_daily=None,
+                            macro_frame=None) -> dict:
     """백테스트 표준 이름으로 라이브 지표를 구성해 돌려준다.
 
     이미 `cand`에 있는 값은 그대로 통과시키고(스캐너가 계산해 두고 신호에 싣지 않던
@@ -381,7 +405,10 @@ def build_canonical_metrics(cand: dict, last_close: float, wick_ratio: float,
     # 일봉 지표 스냅샷을 먼저 깔고, 아래 값들로 덮어쓴다. 겹치는 이름(Open, gap_pct,
     # relative_strength, dist_to_high 등)은 라이브 관측 구간에 맞춰 따로 계산한 쪽이
     # 정확하므로 그쪽이 이긴다.
-    snapshot = daily_indicator_snapshot(df_daily)
+    snapshot = daily_indicator_snapshot(df_daily, qqq_daily)
+    # 매크로는 종목과 무관한 공통 값이라 스캐너가 스캔당 한 번 받아 넘긴다.
+    # 여기서 직접 받으면 종목 수만큼 네트워크를 타고, 테스트도 외부 호출에 묶인다.
+    snapshot.update(macro_snapshot(macro_frame))
 
     return {
         **snapshot,

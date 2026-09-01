@@ -46,6 +46,7 @@ from app.scanner.data_provider import (
     fetch_ticker_news
 )
 from app.scanner.news_analyzer import analyze_news_sentiment
+from app.scanner.macro_data import fetch_macro_series
 from app.scanner.signal_contract import (
     build_canonical_metrics,
     canonical_dist_to_high,
@@ -251,6 +252,8 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
     # 전략 채점용 상대강도는 백테스트와 시간축을 맞춰야 하므로 지수 일봉을 따로 받는다.
     # (위 qqq_perf는 15분봉 10일 기준이라 종목 5일 수익률과 구간이 어긋난다)
     df_qqq_daily = await fetch_index_daily(MARKET_INDEX)
+    # 매크로는 종목 무관 공통 값이라 스캔당 1회만 받는다(모듈이 6시간 캐시).
+    macro_frame = await asyncio.to_thread(fetch_macro_series)
     
     # 1.5. 최소 거래대금 기준 설정 (설정된 한국 돈 기준 환산)
     from app.bot.fx_cache import FXRateCache
@@ -606,7 +609,7 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                         "is_double_bb_sell": is_double_bb_sell,
                         # 백테스트 표준 이름 필드(signal_contract가 단독 소유). 이 병합이 빠지면
                         # 전략이 값을 못 찾아 조용히 미진입으로 퇴화한다.
-                        **build_canonical_metrics(cand, last_close, wick_ratio, df_5m, df_daily),
+                        **build_canonical_metrics(cand, last_close, wick_ratio, df_5m, df_daily, df_qqq_daily, macro_frame),
                     }
                 })
             except Exception as item_err:
@@ -631,6 +634,7 @@ async def analyze_single_ticker(ticker: str, bypass_fundamental: bool = False) -
         qqq_perf = (df_qqq['Close'].iloc[-1] / df_qqq['Close'].iloc[0] - 1) if not df_qqq.empty else 0
         # 전략 채점용 상대강도는 일봉 기준(백테스트와 동일 시간축)으로 별도 산출한다.
         df_qqq_daily = await fetch_index_daily(MARKET_INDEX)
+        macro_frame = await asyncio.to_thread(fetch_macro_series)
 
         # 데이터 수집 (데이터 프로바이더 연동으로 강결합 제거)
         df_15m, df_5m, df_daily = await asyncio.gather(
@@ -775,7 +779,7 @@ async def analyze_single_ticker(ticker: str, bypass_fundamental: bool = False) -
                 "is_double_bb_buy": is_double_bb_buy,
                 "is_double_bb_sell": is_double_bb_sell,
                 # 청산 채점 경로도 같은 계약을 따른다(scheduler.py의 보유 종목 재채점).
-                **build_canonical_metrics(cand, last_close, wick_ratio, df_5m, df_daily),
+                **build_canonical_metrics(cand, last_close, wick_ratio, df_5m, df_daily, df_qqq_daily, macro_frame),
             }
         }
     except Exception as e:
