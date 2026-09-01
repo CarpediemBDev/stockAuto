@@ -29,8 +29,8 @@ def normalize_naver_rankings_payload(payload) -> dict[str, list[str]]:
 
 
 async def fetch_naver_us_rankings() -> dict[str, list[str]]:
-    """Run the Naver Node/Puppeteer scraper and return normalized scanner results."""
-    logger.info("[NaverScraperRunner] Fetching Top ranking data from Naver via Node.js Puppeteer...")
+    """Run the Naver Node scraper and return normalized scanner results."""
+    logger.info("[NaverScraperRunner] Fetching Top ranking data from Naver front-api via Node.js...")
     script_path = os.path.join(os.path.dirname(__file__), "naver_scraper.js")
 
     try:
