@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    # 알림 메시지에 그대로 실려 나간다. dev/prod로 띄울 때 값을 바꿀 것.
+    env: local
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # Prometheus 자기 자신. Watchdog 규칙의 평가 근거가 된다.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  # 백엔드 애플리케이션 지표. 아직 /metrics 엔드포인트가 없으므로 주석 상태로 둔다.
+  # 이걸 미리 열면 up == 0이 상시 발화해 알림이 오히려 무의미해진다.
+  # 다음 슬라이스에서 prometheus_client로 아래 지표를 노출한 뒤 주석을 푼다.
+  #   - RedisLockUnavailable / CRITICAL_LOST 카운터 (app/core/locks.py)
+  #   - 레이트리미터 폴백 전환 카운터 (app/core/rate_limiter.py)
+  #   - SSE publish 실패 카운터 (app/core/sse.py)
+  #   - 매매 루프 마지막 성공 시각 게이지 (app/bot/scheduler.py)
+  # - job_name: stockauto-backend
+  #   metrics_path: /metrics
+  #   static_configs:
+  #     - targets: ["host.docker.internal:8000"]
