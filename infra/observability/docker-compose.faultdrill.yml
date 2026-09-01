@@ -1,0 +1,21 @@
+# 장애 주입 오버레이 - RedisDown 알림 경로를 실제 Redis를 죽이지 않고 훈련한다.
+#
+# 왜 필요한가: 백엔드가 떠 있는 동안 Memurai를 죽이면 그 시간 동안 신규 주문이
+# fail-closed로 전량 차단된다(app/core/locks.py). 장중이면 실제 매매 기회를 잃는다.
+# 이 오버레이는 exporter가 바라보는 주소만 죽은 포트로 바꾸므로, Prometheus 입장에서는
+# 진짜 장애와 완전히 동일한 redis_up == 0 이 되지만 Redis 자체는 건드리지 않는다.
+#
+# 훈련 시작:
+#   docker compose -f infra/observability/docker-compose.yml \
+#                  -f infra/observability/docker-compose.faultdrill.yml up -d redis-exporter
+#
+# 원상 복구 (오버레이를 빼고 다시 올리면 컨테이너가 재생성된다):
+#   docker compose -f infra/observability/docker-compose.yml up -d redis-exporter
+#
+# RedisDown은 for: 2m이므로 알림까지 약 2분 30초(그룹 대기 30초 포함) 걸린다.
+
+services:
+  redis-exporter:
+    environment:
+      # 컨테이너 자기 자신의 루프백. 아무것도 듣고 있지 않아 연결 거부된다.
+      REDIS_ADDR: "redis://127.0.0.1:6399"

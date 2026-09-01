@@ -47,6 +47,7 @@
 | [PRODUCTION_DEPLOYMENT_PLAN.md](PRODUCTION_DEPLOYMENT_PLAN.md) | 운영 배포 절차 |
 | [PRODUCTION_DEPLOYMENT_STRATEGY.md](PRODUCTION_DEPLOYMENT_STRATEGY.md) | 운영 배포 전략(인프라·롤아웃) |
 | [OFF_MARKET_AUTOMATION_PLAN.md](OFF_MARKET_AUTOMATION_PLAN.md) | 장외시간 자동화 스케줄러 설계 |
+| [../infra/observability/README.md](../infra/observability/README.md) | Redis 장애 텔레그램 알림용 관측 스택(Prometheus·Alertmanager·redis_exporter) 설치·기동·검증 절차 |
 
 ## 🧱 계획 문서 묶음 (`docs/plans/`)
 

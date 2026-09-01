@@ -64,3 +64,8 @@ docs/private_*
 
 
 
+
+# 관측 스택 (infra/observability)
+infra/observability/alertmanager/alertmanager.yml
+infra/observability/alertmanager/secrets/*
+!infra/observability/alertmanager/secrets/.gitkeep

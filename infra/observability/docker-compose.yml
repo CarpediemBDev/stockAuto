@@ -1,0 +1,87 @@
+# StockAuto 관측 스택 - Redis 장애를 텔레그램으로 통보하기 위한 최소 구성.
+#
+# 상시 구동 전제가 아니다. 이 스택은 백엔드와 같은 PC에서 돌기 때문에 PC가 죽으면
+# 감시자도 함께 죽는다. 기동 절차와 자원 제약은 README.md를 먼저 읽을 것.
+#
+#   docker compose -f infra/observability/docker-compose.yml up -d
+#
+# 모든 포트를 127.0.0.1에만 바인딩한다. /metrics와 Prometheus UI에는 인증이 없어
+# 외부에 열면 계정 수·주문 건수 같은 운영 정보가 그대로 노출된다.
+
+services:
+  # 감시 대상 Redis의 INFO를 읽어 Prometheus 지표로 변환한다. 읽기 전용이다.
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.67.0
+    container_name: stockauto-redis-exporter
+    environment:
+      # 로컬 개발은 호스트 프로세스로 뜬 Memurai(start_dev.bat)를 본다.
+      # backend/docker-compose.yml의 redis 컨테이너를 쓴다면 그 네트워크에 붙이고
+      # redis://stockauto-redis:6379로 바꿀 것.
+      REDIS_ADDR: "redis://host.docker.internal:6379"
+    ports:
+      - "127.0.0.1:9121:9121"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: stockauto-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      # 로컬 실습용이라 보존 기간을 짧게 잡는다. 스크레이프 대상이 2개뿐이라 이 기간이면
+      # TSDB가 수십 MB 수준에 머문다.
+      - "--storage.tsdb.retention.time=15d"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis-exporter
+    restart: unless-stopped
+
+  # alertmanager.yml은 chat_id 같은 환경별 값을 담으므로 저장소에 커밋하지 않는다.
+  # alertmanager.yml.example을 복사해 만들 것(README 참조).
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    container_name: stockauto-alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/secrets:/etc/alertmanager/secrets:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    restart: unless-stopped
+
+  # 대시보드는 선택이다. 메모리를 아끼려면 이 서비스만 빼고 Prometheus 내장 UI(:9090)를 써도 된다.
+  #   docker compose up -d prometheus alertmanager redis-exporter
+  grafana:
+    image: grafana/grafana:11.5.1
+    container_name: stockauto-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      # 3000은 Next.js 프론트가 점유하므로 3001로 민다.
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
