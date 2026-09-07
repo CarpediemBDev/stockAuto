@@ -80,7 +80,12 @@ worktree는 **파일과 브랜치**를 분리할 뿐, 아래 자원은 여전히
 
 *   **포트**: 백엔드 `8000`은 `backend/run.py`에 하드코딩되어 env로 바꿀 수 없다. 프론트는 `launch.json`의 `autoPort: true`로 자동 회피된다.
     → **앱(백엔드) 구동은 한 번에 한 worktree만.**
-*   **`python scripts/verify_harness.py` 동시 실행 금지.** 포트(3000/3100)·DB 경합으로 서로의 E2E를 깨뜨린다. 반드시 **순차 실행**한다.
+*   **`python scripts/verify_harness.py` 동시 실행 금지.** E2E 포트(`3510`)·DB 경합으로 서로의 E2E를 깨뜨린다. 반드시 **순차 실행**한다.
+    → 2026-09-07부터 하네스가 이를 **강제**한다. E2E 단계는 기동 전에 포트를 점검해 이미 점유돼 있으면 아무것도 죽이지 않고 즉시 실패하며(점유 PID와 커맨드라인을 출력한다), 실행이 끝나면 자기가 띄운 서버를 회수한다. `playwright.config.ts`의 `webServer.reuseExistingServer`도 `false`로 고정했다.
+    → **왜 재사용을 막았나(2026-09-06 사고):** 당시 E2E 포트였던 `:3100`을 다른 프로젝트(`D:/dev/workspace/stock-auto-mobile`, `next.config.ts`에 `trailingSlash: true`)의 `next dev` 서버가 잡고 있었고, `reuseExistingServer: !CI`가 그 서버를 재사용했다. 하네스가 **프론트를 빌드조차 하지 않은 채 남의 앱을 검사**해 `auth-smoke`의 "localhost visits remain on the localhost host" 1건이 실패했다. 실패는 그나마 눈에 띄지만, 재사용된 서버가 우연히 통과하면 **옛 빌드로 조용히 통과**해 회귀를 통째로 놓친다.
+    → **그래서 2026-09-07에 E2E 포트를 `3100` → `3510`으로 옮겼다.** `3100`은 저 모바일 프로젝트가 상시 쓰므로 비워둔다. 이 저장소가 쓰는 포트는 `8000`(백엔드)·`3000`(프론트 로컬)·`6379`(Redis)·`3510`(E2E)이다.
+    → 포트 정의의 단일 출처는 **`frontend/e2e/constants.ts`의 `E2E_PORT`**다. `playwright.config.ts`·e2e 스펙은 이 상수를 import 하고, 파이썬은 import 할 수 없어 `scripts/verify_harness.py`의 `E2E_PORT`가 값을 복제한다. 두 값이 어긋나면 `check_e2e_port_alignment`가 E2E 시작 전에 막는다. **옮길 때는 두 곳을 함께 고친다.**
+    → `이미 점유돼 있습니다` 실패를 만나면 먼저 **누구의 프로세스인지 확인**한다. 다른 세션이 E2E를 도는 중일 수 있으므로 무턱대고 죽이지 말고, 잔존물이 확실할 때만 `taskkill /PID <PID> /T /F`(POSIX는 `kill`)로 정리한다.
 *   **Redis/Memurai(6379) 공유**: 주문 락(`acquire_symbol_order_lock` 등)을 공유하므로 두 세션이 동시에 매매 봇을 돌리면 락이 간섭한다. **봇 동시 구동 금지**(또는 Redis DB 인덱스 분리).
 *   **DB 파일은 폴더별로 분리**되므로 데이터가 서로 다르게 흘러간다. 실DB를 읽는 검사(`scripts/check_strategy_consistency.py` 등)의 결과가 폴더마다 다를 수 있음을 감안한다.
 

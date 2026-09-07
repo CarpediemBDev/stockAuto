@@ -2,7 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-process.env.PORT ||= "3100";
+// 기본값은 e2e/constants.ts의 E2E_PORT/E2E_HOST와 같아야 한다. 하네스 경로에서는
+// playwright.config.ts의 webServer.env가 PORT/HOSTNAME을 명시로 넘기므로 이 값은
+// 이 스크립트를 단독으로 띄울 때만 쓰인다.
+process.env.PORT ||= "3510";
 process.env.HOSTNAME ||= "127.0.0.1";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));

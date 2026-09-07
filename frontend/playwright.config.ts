@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = "http://127.0.0.1:3100";
+import { E2E_BASE_URL, E2E_HOST, E2E_PORT } from "./e2e/constants";
+
+const baseURL = E2E_BASE_URL;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -32,9 +34,19 @@ export default defineConfig({
   webServer: {
     command: "npm run build && npm run start:e2e",
     url: `${baseURL}/login`,
-    reuseExistingServer: !process.env.CI,
+    // 2026-09-06 사고: 당시 E2E 포트였던 :3100에 다른 프로젝트(stock-auto-mobile)의 next dev 서버가
+    // 떠 있었고, reuseExistingServer가 그 서버를 재사용해 빌드조차 하지 않은 채
+    // 남의 앱을 검사했다(trailingSlash 차이로 auth-smoke 1건 실패). 재사용은
+    // '옛 빌드로 조용히 통과'하는 경로도 함께 열어주므로 로컬에서도 금지한다.
+    // 포트가 이미 점유돼 있으면 Playwright가 명시적으로 실패한다
+    // (선점 정리는 scripts/verify_harness.py의 sweep_e2e_port가 먼저 수행한다).
+    reuseExistingServer: false,
     timeout: 300_000,
     env: {
+      // 서버가 붙는 주소는 baseURL과 반드시 같아야 한다. start-e2e-server.mjs의
+      // 기본값에 기대지 않고 여기서 명시해 한 곳(e2e/constants.ts)만 보게 만든다.
+      PORT: String(E2E_PORT),
+      HOSTNAME: E2E_HOST,
       NEXT_DIST_DIR: ".next-e2e",
       NEXT_PUBLIC_API_BASE: "/api/v1",
       BACKEND_API_ORIGIN: "http://127.0.0.1:8000",

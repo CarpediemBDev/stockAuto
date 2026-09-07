@@ -1,5 +1,7 @@
 import { expect, test, type Route } from "@playwright/test";
 
+import { E2E_LOCALHOST_BASE_URL } from "./constants";
+
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/auth/refresh", async (route) => {
     await route.fulfill({
@@ -10,9 +12,11 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("localhost visits remain on the localhost host", async ({ page }) => {
-  await page.goto("http://localhost:3100/login");
+  // baseURL은 127.0.0.1이다. 같은 서버를 localhost 이름으로 열었을 때 앱이 다른
+  // 호스트로 튕기지 않는지 보는 테스트라 주소를 상수에서 파생한다(포트 하드코딩 금지).
+  await page.goto(`${E2E_LOCALHOST_BASE_URL}/login`);
 
-  await expect(page).toHaveURL("http://localhost:3100/login");
+  await expect(page).toHaveURL(`${E2E_LOCALHOST_BASE_URL}/login`);
 });
 
 test("anonymous root visits are redirected to the login screen", async ({ page }) => {

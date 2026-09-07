@@ -12,7 +12,7 @@
     "start-dev": "env-cmd -f .env.dev next start",
     "build-prod": "env-cmd -f .env.prod next build",
     "start-prod": "env-cmd -f .env.prod next start",
-    "dev:e2e": "next dev --webpack -H 127.0.0.1 -p 3100",
+    "dev:e2e": "next dev --webpack -H 127.0.0.1 -p 3510",
     "start:e2e": "node scripts/start-e2e-server.mjs",
     "build": "next build",
     "start": "next start",
