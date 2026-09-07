@@ -41,6 +41,8 @@ HTTP 상태 코드: `4xx` 또는 `5xx`
 | `SCHEDULER_NOT_READY` | 배경 엔진이 아직 시작되지 않음 | 서버 시작 직후 발생 가능 |
 | `WATCHLIST_DUPLICATE` | 이미 관심종목에 등록된 티커 | 등록 요청 시 발생 |
 | `SCANNER_ERROR` | 마켓 스캔 엔진 내부 오류 | 500 에러 |
+| `MCP_COMMAND_NOT_ALLOWED` | 화이트리스트 밖 `command_type` | 400 에러 |
+| `MCP_EXECUTION_NOT_IMPLEMENTED` | MCP 명령 실행 워커 미구현 | 501 에러. 명령은 접수·적재되지 않는다 |
 
 ---
 

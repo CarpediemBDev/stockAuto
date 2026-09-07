@@ -214,9 +214,13 @@ def _schedule_background_task(coro, task_name: str):
         loop = asyncio.get_event_loop()
 
     def _log_task_result(done) -> None:
+        # 취소 예외는 어느 쪽 Future냐에 따라 클래스가 다르다. run_coroutine_threadsafe가 주는
+        # concurrent.futures.Future는 concurrent.futures.CancelledError를, asyncio Task는
+        # asyncio.CancelledError를 던지며 이 둘은 서로 다른 클래스다(전자만 Exception 하위).
+        # asyncio 쪽만 잡으면 스레드세이프 경로의 취소가 전부 ERROR+스택트레이스로 둔갑한다.
         try:
             done.result()
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, concurrent.futures.CancelledError):
             logger.info("[Scheduler] Background task %s was cancelled.", task_name)
         except Exception:
             logger.exception("[Scheduler] Background task %s failed.", task_name)
@@ -2096,9 +2100,48 @@ async def async_trading_loop():
                 pass
         is_processing = False
 
+CYCLE_DRAIN_TIMEOUT_SECONDS = 10.0
+
+
+async def _run_cycle_with_drain(coro, label: str):
+    """전용 루프에서 한 사이클을 돌린 뒤, 그 사이클이 띄운 후속 태스크를 마저 흘려보낸다.
+
+    asyncio.run은 본문 코루틴이 끝나는 즉시 남아 있는 태스크를 전부 취소하고 루프를 닫는다.
+    체결 직후 띄우는 잔고 스냅샷 갱신처럼 사이클보다 오래 걸리는 작업은 그대로 CancelledError로
+    죽어서(로그의 equity-snapshot-refresh 실패가 이 경우다) 대시보드 잔고가 낡은 채로 남는다.
+    루프를 닫기 전에 짧은 상한을 두고 완료를 기다린다.
+
+    all_tasks()를 그대로 훑어도 되는 이유는 이 루프가 asyncio.run이 이 호출만을 위해 새로 만든
+    것이기 때문이다. 다른 주체의 태스크가 섞여 들어올 수 없다. 이미 돌고 있는 루프에 얹는
+    경로(아래 except RuntimeError 분기)에는 절대 쓰면 안 된다.
+    """
+    try:
+        return await coro
+    finally:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + CYCLE_DRAIN_TIMEOUT_SECONDS
+        while True:
+            # run_coroutine_threadsafe는 call_soon_threadsafe로 태스크 생성을 예약만 한다.
+            # 한 번 양보해 줘야 그 태스크들이 all_tasks()에 잡힌다.
+            await asyncio.sleep(0)
+            pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+            if not pending:
+                return
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                logger.warning(
+                    "[Scheduler] %s: %d background task(s) unfinished after %.0fs drain; loop teardown will cancel them.",
+                    label,
+                    len(pending),
+                    CYCLE_DRAIN_TIMEOUT_SECONDS,
+                )
+                return
+            await asyncio.wait(pending, timeout=remaining)
+
+
 def trading_loop_wrapper():
     try:
-        asyncio.run(async_trading_loop())
+        asyncio.run(_run_cycle_with_drain(async_trading_loop(), "trading_loop"))
     except RuntimeError:
         # 💡 이미 실행 중인 이벤트 루프가 있는 경우 (FastAPI/uvicorn 내부 등)
         loop = asyncio.get_event_loop()
