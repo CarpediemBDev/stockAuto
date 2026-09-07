@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -58,6 +60,18 @@ CONTRACT_EXACT_PATHS = {
     "frontend/lib/api.ts",
     "frontend/store/authStore.ts",
 }
+
+# Playwright E2E가 쓰는 포트. TS 쪽 단일 정의는 frontend/e2e/constants.ts의 E2E_PORT이고
+# 파이썬이 그 파일을 import 할 수 없어 값을 복제한다. 어긋나면 관문이 엉뚱한 포트를 보게
+# 되므로 check_e2e_port_alignment가 매 실행마다 두 값을 대조한다.
+E2E_PORT = 3510
+E2E_PORT_SOURCE = "frontend/e2e/constants.ts"
+E2E_PORT_SOURCE_RE = re.compile(r"E2E_PORT\s*=\s*(\d{2,5})\b")
+
+# E2E 포트 점유 프로세스가 '이 저장소가 띄운 E2E 서버'인지 가리는 커맨드라인 지문.
+# frontend/package.json의 start:e2e 진입점(scripts/start-e2e-server.mjs)이 바뀌면 함께 고친다.
+# 지문이 맞지 않는 점유는 남의 서버로 간주해 절대 죽이지 않고 실패로 보고한다.
+E2E_SERVER_MARKERS = ("start-e2e-server",)
 
 
 def safe_print(text: str = "") -> None:
@@ -584,6 +598,297 @@ def check_frontend_static(root: Path) -> bool:
     return success
 
 
+class _CompletedLike:
+    """subprocess.CompletedProcess 대체 shim (print_result_output이 쓰는 3개 속성만)."""
+
+    def __init__(self, returncode: int, stdout: bytes, stderr: bytes):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def kill_process_tree(pid: int) -> None:
+    """자식까지 포함해 프로세스 트리를 강제 종료한다(실패해도 예외를 던지지 않는다)."""
+    # pid 0은 bind_probe_listeners가 '점유는 확인했으나 소유자를 모른다'는 뜻으로 쓰는
+    # 표식이다. 실제 프로세스가 아니고 POSIX에서 0은 프로세스 그룹 전체를 뜻하므로
+    # 반드시 걸러낸다.
+    if pid <= 0:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(os.getpgid(pid), sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                return
+        time.sleep(0.5)
+
+
+def check_e2e_port_alignment(root: Path) -> tuple[bool, str]:
+    """E2E_PORT가 TS 단일 정의(frontend/e2e/constants.ts)와 같은지 대조한다.
+
+    포트는 파이썬(관문·회수)과 TypeScript(Playwright baseURL·서버 기동) 양쪽에
+    존재할 수밖에 없다. 두 값이 어긋나면 하네스가 '비어 있는 엉뚱한 포트'를 보고
+    통과시킨 뒤 실제 서버는 회수되지 않는 최악의 조합이 되므로, 대조에 실패하거나
+    대조 자체가 불가능하면(파일 없음·파싱 불가) E2E를 시작하지 않는다.
+    """
+    source = root / E2E_PORT_SOURCE
+    if not source.exists():
+        return False, f"{E2E_PORT_SOURCE}가 없어 E2E 포트 정의를 대조할 수 없습니다."
+
+    match = E2E_PORT_SOURCE_RE.search(source.read_text(encoding="utf-8"))
+    if not match:
+        return False, f"{E2E_PORT_SOURCE}에서 E2E_PORT 선언을 찾지 못했습니다."
+
+    declared = int(match.group(1))
+    if declared != E2E_PORT:
+        return False, (
+            f"E2E 포트 정의가 어긋났습니다. {E2E_PORT_SOURCE}={declared}, "
+            f"verify_harness.E2E_PORT={E2E_PORT}. 두 값을 같게 맞추세요."
+        )
+    return True, ""
+
+
+def bind_probe_listeners(port: int) -> list[tuple[int, str]]:
+    """조회 도구가 없을 때의 폴백. 직접 bind 해보고 점유 여부만 판정한다.
+
+    소유자를 알 수 없으므로 점유가 확인되면 (0, "")를 돌려준다. 커맨드라인이 비면
+    is_our_e2e_server가 False라 관문은 막히고 회수 단계는 손대지 않는다(fail-closed).
+    Windows에서는 다른 프로세스가 0.0.0.0을 잡고 있어도 127.0.0.1 bind가 성공할 수
+    있어 판정이 약하므로, 어디까지나 조회 도구가 없을 때의 최후 수단이다.
+    """
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("127.0.0.1", port))
+    except OSError:
+        return [(0, "")]
+    finally:
+        probe.close()
+    return []
+
+
+def port_listeners(port: int) -> list[tuple[int, str]]:
+    """해당 TCP 포트를 LISTEN 중인 (pid, 커맨드라인) 목록을 돌려준다.
+
+    netstat의 상태 문자열은 로캘 영향을 받으므로 Windows에서는 구조화된
+    Get-NetTCPConnection을 쓴다. 조회 자체가 실패하면 빈 목록을 돌려주지 않고
+    예외를 올린다 - '점유 없음'으로 오인해 그대로 통과시키면 안 되기 때문이다.
+    조회 도구 자체가 없는 환경(lsof 미설치 등)은 bind 폴백으로 내려간다.
+    """
+    if os.name == "nt":
+        script = (
+            "$ErrorActionPreference='SilentlyContinue';"
+            "$ids=@(Get-NetTCPConnection -LocalPort " + str(port) + " -State Listen |"
+            " Select-Object -ExpandProperty OwningProcess -Unique);"
+            "foreach($i in $ids){"
+            "$c=(Get-CimInstance Win32_Process -Filter \"ProcessId=$i\").CommandLine;"
+            "Write-Output \"$i`t$c\"}"
+        )
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            return bind_probe_listeners(port)
+        if result.returncode != 0:
+            raise OSError(
+                "Get-NetTCPConnection 조회 실패: "
+                + result.stderr.decode("utf-8", errors="ignore").strip()
+            )
+        raw_lines = result.stdout.decode("utf-8", errors="ignore").splitlines()
+    else:
+        # lsof는 일치하는 프로세스가 없으면 종료코드 1을 낸다. 오류가 아니라 '점유 없음'이다.
+        try:
+            result = subprocess.run(
+                ["lsof", "-nP", "-iTCP:" + str(port), "-sTCP:LISTEN", "-t"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=120,
+            )
+        except FileNotFoundError:
+            return bind_probe_listeners(port)
+        raw_lines = []
+        for token in result.stdout.decode("utf-8", errors="ignore").split():
+            if not token.isdigit():
+                continue
+            try:
+                args = subprocess.run(
+                    ["ps", "-p", token, "-o", "args="],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=30,
+                )
+                cmdline = args.stdout.decode("utf-8", errors="ignore").strip()
+            except FileNotFoundError:
+                cmdline = ""
+            raw_lines.append(token + "\t" + cmdline)
+
+    listeners: list[tuple[int, str]] = []
+    for line in raw_lines:
+        pid_text, _, cmdline = line.partition("\t")
+        pid_text = pid_text.strip()
+        if not pid_text.isdigit():
+            continue
+        listeners.append((int(pid_text), cmdline.strip()))
+    return listeners
+
+
+def is_our_e2e_server(cmdline: str) -> bool:
+    """커맨드라인이 이 저장소의 E2E 서버 지문과 일치하는지 판정한다."""
+    normalized = cmdline.replace("\\", "/").lower()
+    return any(marker in normalized for marker in E2E_SERVER_MARKERS)
+
+
+def describe_port_listeners(listeners: list[tuple[int, str]]) -> list[str]:
+    lines = []
+    for pid, cmdline in listeners:
+        owner = "이 저장소의 E2E 서버로 보임" if is_our_e2e_server(cmdline) else "이 저장소 소유가 아님"
+        lines.append(f"PID {pid} ({owner}): {cmdline or '커맨드라인 미상'}")
+    return lines
+
+
+def require_free_e2e_port() -> tuple[bool, list[str]]:
+    """E2E 기동 전 관문. E2E 포트가 비어 있지 않으면 아무것도 죽이지 않고 실패시킨다.
+
+    2026-09-06 사고: 다른 프로젝트(stock-auto-mobile, trailingSlash=true)의 next dev
+    서버가 당시 E2E 포트였던 :3100을 잡고 있었고 playwright.config.ts의 reuseExistingServer가 그 서버를
+    재사용했다. 빌드조차 돌지 않은 채 '남의 앱'을 검사해 auth-smoke 1건이 실패했다.
+    실패는 그나마 눈에 띄지만, 재사용된 서버가 우연히 통과하면 옛 빌드로 조용히
+    통과해 회귀를 통째로 놓친다. 그래서 점유 자체를 사고로 취급한다.
+
+    여기서 점유 프로세스를 자동으로 죽이지 않는 이유는 두 가지다. 첫째, 남의
+    프로젝트 개발 서버를 임의로 종료해선 안 된다. 둘째, 지문이 우리 것과 일치해도
+    그것이 '이전 실행의 잔존물'인지 '지금 같은 저장소에서 병행 실행 중인 다른
+    세션의 서버'인지 구분할 수 없다(이 저장소는 세션이 병행되는 환경이다).
+    잔존물 회수는 각 실행이 자기 실행 끝에서 책임진다(reclaim_e2e_port).
+
+    반환: (진행 가능 여부, 사람이 읽을 메시지 목록)
+    """
+    try:
+        listeners = port_listeners(E2E_PORT)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, [
+            f":{E2E_PORT} 점유 조회에 실패했습니다({exc}). "
+            "점유 여부를 확인하지 못한 채로는 E2E를 진행하지 않습니다."
+        ]
+
+    if not listeners:
+        return True, []
+
+    messages = [f":{E2E_PORT}가 이미 점유돼 있습니다. 재사용은 다른 앱/옛 빌드를 검사하는 경로이므로 실행하지 않습니다."]
+    messages.extend(describe_port_listeners(listeners))
+    messages.append(
+        "점유 프로세스를 확인해 종료한 뒤(Windows: taskkill /PID <PID> /T /F) 다시 실행하세요. "
+        "같은 저장소의 다른 세션이 E2E를 돌리는 중일 수도 있으니 죽이기 전에 확인이 필요합니다."
+    )
+    return False, messages
+
+
+def reclaim_e2e_port() -> tuple[bool, list[str]]:
+    """E2E 실행이 끝난 뒤 '우리가 띄운' 서버를 회수한다.
+
+    기동 전 관문이 E2E 포트가 비어 있음을 보장하므로, 실행 후에 지문이 일치하는
+    리스너가 남아 있으면 이번 실행이 띄운 서버다. Playwright가 정상 종료하면
+    남지 않지만, Windows에서 shell 경유 npm이 타임아웃으로 죽으면 손자 프로세스인
+    node 서버가 고아로 남는다. 그 잔존물이 다음 실행에 재사용되는 것이
+    2026-09-06 오탐의 성립 조건이었으므로 여기서 반드시 끊는다.
+
+    지문이 다른 점유(누군가 실행 도중에 띄운 서버)는 이번 검사 결과를 오염시킬 수
+    없으므로 경고만 남기고 건드리지 않는다.
+
+    반환: (회수 성공 여부, 사람이 읽을 메시지 목록)
+    """
+    messages: list[str] = []
+    try:
+        listeners = port_listeners(E2E_PORT)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, [f"종료 후 :{E2E_PORT} 점유 조회에 실패했습니다({exc}). 잔존 프로세스를 직접 확인하세요."]
+
+    ours = [(pid, cmd) for pid, cmd in listeners if is_our_e2e_server(cmd)]
+    foreign = [(pid, cmd) for pid, cmd in listeners if not is_our_e2e_server(cmd)]
+
+    for pid, cmdline in foreign:
+        messages.append(f"종료 후 :{E2E_PORT}에 이 저장소 소유가 아닌 프로세스가 있습니다(건드리지 않음). PID {pid}: {cmdline}")
+
+    if not ours:
+        return True, messages
+
+    for pid, cmdline in ours:
+        messages.append(f"이번 실행이 남긴 E2E 서버를 종료합니다. PID {pid}: {cmdline or '커맨드라인 미상'}")
+        kill_process_tree(pid)
+
+    killed_pids = {pid for pid, _ in ours}
+    deadline = time.monotonic() + 20
+    while True:
+        try:
+            remaining = {pid for pid, _ in port_listeners(E2E_PORT)}
+        except (OSError, subprocess.SubprocessError):
+            remaining = set(killed_pids)
+        if not (remaining & killed_pids):
+            return True, messages
+        if time.monotonic() >= deadline:
+            messages.append(
+                f"종료를 시도했으나 :{E2E_PORT}가 여전히 점유돼 있습니다. 남은 PID: "
+                + ", ".join(str(pid) for pid in sorted(remaining & killed_pids))
+            )
+            return False, messages
+        time.sleep(1)
+
+
+def run_command_owned(command, *, cwd: Path, timeout: int, env=None, shell: bool = False):
+    """타임아웃/중단 시 자식 프로세스 '트리'까지 확실히 죽이는 run_command.
+
+    subprocess.run(timeout=)은 직계 자식만 죽인다. Windows에서 shell=True로 npm을
+    부르면 cmd.exe만 죽고 그 아래 node(E2E 서버)는 고아로 남아 E2E 포트를 계속 잡는다.
+    다음 실행이 그 서버를 재사용하는 것이 2026-09-06 오탐의 성립 조건이었다.
+    """
+    popen_kwargs = {}
+    if os.name != "nt":
+        popen_kwargs["start_new_session"] = True
+
+    process = subprocess.Popen(
+        command,
+        cwd=str(cwd),
+        env=env,
+        shell=shell,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        **popen_kwargs,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+        return _CompletedLike(process.returncode, stdout, stderr)
+    except subprocess.TimeoutExpired:
+        kill_process_tree(process.pid)
+        try:
+            stdout, stderr = process.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = b"", b""
+        note = "[TIMEOUT] " + str(timeout) + "초 예산을 초과해 프로세스 트리를 강제 종료했습니다.\n"
+        return _CompletedLike(124, stdout or b"", note.encode("utf-8") + (stderr or b""))
+    except BaseException:
+        kill_process_tree(process.pid)
+        raise
+
+
 def check_frontend_e2e(root: Path) -> bool:
     safe_print(f"{BOLD}[8/8] [FRONTEND] Playwright E2E smoke checks...{RESET}")
     frontend_dir = root / "frontend"
@@ -597,13 +902,44 @@ def check_frontend_e2e(root: Path) -> bool:
         safe_print(f"  {YELLOW}[WARN] Playwright config not found. Skipping E2E checks.{RESET}\n")
         return True
 
+    aligned, alignment_error = check_e2e_port_alignment(root)
+    if not aligned:
+        safe_print(f"  {RED}[FAIL] {alignment_error}{RESET}\n")
+        return False
+
+    # 기동 전 관문: E2E 포트가 비어 있어야만 진행한다(자세한 사유는 require_free_e2e_port 참조).
+    ready, messages = require_free_e2e_port()
+    for message in messages:
+        safe_print(f"  {YELLOW}[PORT] {message}{RESET}")
+    if not ready:
+        safe_print(f"  {RED}[FAIL] :{E2E_PORT} 선점 문제로 E2E를 실행하지 않았습니다.{RESET}\n")
+        return False
+
     # 2026-08-30 실측: 8건 통과에 2.7분(약 162초)이 걸려 종전 예산 180초에 아슬아슬하게
     # 걸쳐 있었다. 프론트 빌드와 dev 서버 기동 시간이 포함된 값이라 머신 부하에 따라
     # 쉽게 넘어가며, 실제로 같은 커밋에서 통과와 실패가 번갈아 나왔다. pytest 예산과
     # 같은 종류의 문제이므로 함께 올린다(테스트 실패와 타임아웃은 구분돼야 한다).
-    result = run_command("npm run test:e2e", cwd=frontend_dir, timeout=420, shell=True)
+    cleanup_ok = True
+    try:
+        result = run_command_owned(
+            "npm run test:e2e", cwd=frontend_dir, timeout=420, shell=True
+        )
+    finally:
+        # 성공·실패·예외 어느 경로로 나가든 우리가 띄운 서버는 반드시 회수한다.
+        cleanup_ok, cleanup_messages = reclaim_e2e_port()
+        for message in cleanup_messages:
+            safe_print(f"  {YELLOW}[PORT] {message}{RESET}")
+
     if result.returncode != 0:
         safe_print(f"  {RED}[FAIL] Playwright E2E failed.{RESET}")
+        print_result_output(result)
+        return False
+
+    if not cleanup_ok:
+        safe_print(
+            f"  {RED}[FAIL] 테스트는 통과했으나 :{E2E_PORT}에 우리 E2E 서버가 남았습니다. "
+            f"다음 실행이 그 서버를 재사용하면 옛 빌드로 검사하게 되므로 실패로 처리합니다.{RESET}"
+        )
         print_result_output(result)
         return False
 
