@@ -27,6 +27,24 @@ def utc_now_aware():
     """Timezone-aware datetime을 반환합니다."""
     return datetime.now(UTC)
 
+
+# Holding.management 값 정본. 문자열 리터럴을 각 소비자에 흩뿌리면 오타 한 글자가
+# 조용히 "봇이 안 건드림"을 "봇이 건드림"으로 뒤집으므로 여기서만 정의한다.
+MANAGEMENT_BOT_OWNED = "BOT_OWNED"   # 봇이 매수한 포지션
+MANAGEMENT_EXTERNAL = "EXTERNAL"     # 봇이 사지 않은 외부 유입 포지션 (봇 관할 밖)
+
+# EXTERNAL 보유분이 갖는 strategy_type. 어떤 전략 슬롯 키와도 겹치지 않아야 한다 -
+# 슬롯 키와 겹치면 매도 판정 루프와 슬롯 자본 계산이 이 보유분을 봇 포지션으로 오인한다.
+# (user_id, ticker, strategy_type) 유니크 제약 덕에 같은 티커를 봇 슬롯과 동시에 보유할 수 있다.
+EXTERNAL_STRATEGY_TYPE = "external"
+
+# Holding.guard_action 값 정본. 기본값이 ALERT_ONLY인 것이 계약의 핵심이다 -
+# 되돌릴 수 없는 손실 확정은 사용자가 명시적으로 켜야 한다.
+GUARD_ACTION_ALERT_ONLY = "ALERT_ONLY"   # 알림만. 주문 없음
+GUARD_ACTION_SHADOW = "SHADOW"           # "팔았다면 이랬을 것"만 기록. 주문 없음
+GUARD_ACTION_LIQUIDATE = "LIQUIDATE"     # 부분 청산 실행
+GUARD_ACTIONS = (GUARD_ACTION_ALERT_ONLY, GUARD_ACTION_SHADOW, GUARD_ACTION_LIQUIDATE)
+
 class Strategy(Base):
     __tablename__ = "strategies"
 
@@ -196,6 +214,38 @@ class Holding(Base):
     regime_mode = Column(String, nullable=True)     # ⭐ v2.0 진입 당시 장세 레짐
     buy_stage = Column(Integer, default=1)          # ⭐ v2.0 후지모토 시게루식 피라미딩 단계 (1, 2, 3단계)
     strategy_type = Column(String, default="regime_switching", nullable=False)
+    # 관리 관할권: 이 보유분을 봇이 다룰 수 있는지의 단일 기준.
+    #   BOT_OWNED - 봇이 매수한 포지션. 기존 동작 그대로(손절·트레일링·시그널 붕괴·피라미딩).
+    #   EXTERNAL  - 봇이 사지 않은 외부 유입 포지션. 매도·추가매수 대상이 아니고 슬롯 자본에서도 제외한다.
+    # 값 후보를 String으로 여는 이유는 DELEGATED(위임)를 뒤에 붙일 때 마이그레이션을 두 번 하지 않기 위함이다.
+    # 상세 설계는 docs/plans/holding_management_modes.md가 소유한다.
+    management = Column(String, nullable=False, server_default=MANAGEMENT_BOT_OWNED, default=MANAGEMENT_BOT_OWNED)
+    # 수확 모드 (EXTERNAL 보유분의 opt-in 하위 옵션). 급등 후 꺾일 때만 판다.
+    # observed_base_price - 봇이 이 종목을 처음 관측한 가격. 무장 판정과 매도 하한의 앵커이며
+    #   avg_price(사용자의 실제 매수가)와 분리해야 한다. 반토막 종목은 본전 기준으로는
+    #   영원히 무장되지 않고, 본전 기준 손절은 관측 시작 즉시 발동한다.
+    # harvest_armed - 급등 임계를 넘겨 추적이 시작됐는지. 무장 전에는 고점도 세지 않는다.
+    observed_base_price = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)
+    harvest_enabled = Column(Boolean, nullable=False, server_default="0", default=False)
+    harvest_armed = Column(Boolean, nullable=False, server_default="0", default=False)
+    harvest_breach_started_at = Column(AwareDateTime, nullable=True)  # 트레일링 이탈이 시작된 시각
+    # 방어 경보 (EXTERNAL 보유분의 opt-in 하위 옵션). 경보만 보내고 주문은 내지 않는다.
+    # 판정은 상태가 아니라 전이를 본다 - 이미 물린 종목은 절대 점수선을 상시 만족하므로,
+    # 켠 시점의 점수·저가를 기준선으로 박고 거기서 추가로 악화될 때만 울린다.
+    guard_enabled = Column(Boolean, nullable=False, server_default="0", default=False)
+    guard_baseline_score = Column(Float, nullable=True)
+    guard_baseline_low = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)
+    guard_enabled_at = Column(AwareDateTime, nullable=True)   # 유예기간 기준 시각
+    guard_last_alert_at = Column(AwareDateTime, nullable=True)  # 경보 쿨다운 기준 시각
+    # 방어 조건 충족 시 무엇을 할지. 기본값은 알림만이며, 실제 청산은 사용자가 명시적으로 켜야 한다.
+    #   ALERT_ONLY - 알림만 (기본)
+    #   SHADOW     - "팔았다면 이랬을 것"을 기록만 한다. 주문 없음. 신호 품질 실측용
+    #   LIQUIDATE  - guard_sell_ratio 만큼 실제 부분 청산
+    guard_action = Column(String, nullable=False, server_default=GUARD_ACTION_ALERT_ONLY, default=GUARD_ACTION_ALERT_ONLY)
+    guard_sell_ratio = Column(Float, nullable=False, server_default="0.5", default=0.5)
+    guard_streak = Column(Integer, nullable=False, server_default="0", default=0)  # 연속 충족 사이클
+    guard_streak_started_at = Column(AwareDateTime, nullable=True)  # 연속 충족이 시작된 시각(벽시계 게이트 기준)
+    guard_last_action_at = Column(AwareDateTime, nullable=True)  # 일일 1회 캡 기준 시각
     updated_at = Column(AwareDateTime, default=utc_now_aware, onupdate=utc_now_aware)
     version_id = Column(Integer, default=1, nullable=False)
 

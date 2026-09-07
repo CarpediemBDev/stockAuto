@@ -1,3 +1,4 @@
+import concurrent.futures
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.brokers.broker_factory import get_broker_client
 from app.core.database import SessionLocal
@@ -8,7 +9,12 @@ from app.core.locks import (
     acquire_symbol_order_lock,
     acquire_user_operation_lock,
 )
-from app.core.models import TradeLog, Holding, ActionLog, UserSettings, WatchList, User, AccountEquitySnapshot, UnfilledOrder
+from app.core.holding_audit import delete_holding
+from app.core.models import (
+    TradeLog, Holding, ActionLog, UserSettings, WatchList, User, AccountEquitySnapshot, UnfilledOrder,
+    MANAGEMENT_BOT_OWNED, MANAGEMENT_EXTERNAL, EXTERNAL_STRATEGY_TYPE,
+    GUARD_ACTION_ALERT_ONLY, GUARD_ACTION_SHADOW, GUARD_ACTION_LIQUIDATE,
+)
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from dataclasses import dataclass
@@ -42,6 +48,7 @@ from app.bot.order_reconciler import (
     create_order_intent,
     finalize_order_submission,
     has_unresolved_orders,
+    has_unresolved_orders_for_ticker,
     reconcile_open_orders_once,
 )
 from app.bot.trade_calculations import (
@@ -56,6 +63,20 @@ from app.bot.trade_calculations import (
     check_trailing_stop_breach,
     compute_box_low,
     compute_rolling_box_stop,
+    check_harvest_arm,
+    check_harvest_breach,
+    check_guard_breach,
+    compute_guard_low,
+    resolve_guard_sell_qty,
+    GUARD_ACTION_COOLDOWN_HOURS,
+    GUARD_SUSTAIN_CYCLES,
+    GUARD_SUSTAIN_MINUTES,
+    get_harvest_arm_pct,
+    get_harvest_trailing_pct,
+    HARVEST_SUSTAIN_CYCLES,
+    HARVEST_SUSTAIN_MINUTES,
+    GUARD_ALERT_COOLDOWN_HOURS,
+    GUARD_GRACE_MINUTES,
     resolve_rolling_box_bars,
     fee_rate_for_trade_mode,
     to_decimal,
@@ -586,6 +607,29 @@ async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
     try:
         real_holdings = await safe_broker_call(ctx.broker.get_holdings, exchange_rate=ctx.exchange_rate)
 
+        # ⚠️ 브로커 응답을 티커 단위로 먼저 합산한다. 아래 비교는 db_total_qty(그 티커의 모든
+        #    슬라이스 합계)를 상대로 하므로, 브로커가 슬라이스·로트별로 여러 행을 주면 한 행의
+        #    수량이 전체 합계와 대조되어 없는 차분을 만들어낸다. 실제로 시뮬레이터의
+        #    get_holdings는 Holding 행마다 1개씩 내보내며, 같은 티커를 봇 슬롯과 EXTERNAL로
+        #    나눠 든 상태에서 40주(25+15)가 15주로 줄고 EXTERNAL 행이 체결 로그 없이 사라졌다
+        #    (2026-09-06 stock-auto-mobile 세션 실환경 보고). 차감이 EXTERNAL부터 이뤄지므로
+        #    하필 이 기능이 보호하려는 행이 먼저 파괴된다.
+        #    브로커 어댑터마다 응답 형태가 다를 수 있으므로 소비 측에서 정규화한다.
+        aggregated: dict[str, dict] = {}
+        for rh in real_holdings or []:
+            t = rh.get("ticker", "")
+            q = int(rh.get("quantity", 0) or 0)
+            if not t or q <= 0:
+                continue
+            entry = aggregated.setdefault(
+                t, {"ticker": t, "quantity": 0, "cost": 0.0, "ticker_name": rh.get("ticker_name", t)}
+            )
+            entry["quantity"] += q
+            entry["cost"] += float(rh.get("avg_price", 0.0) or 0.0) * q
+        for entry in aggregated.values():
+            # 평단은 수량 가중평균으로 되돌린다. 유령 보유 복원 시 avg_price로 쓰인다.
+            entry["avg_price"] = entry["cost"] / entry["quantity"] if entry["quantity"] else 0.0
+
         with micro_session(ctx) as db:
             db_holdings_by_ticker = {}
             for db_h in ctx.holdings:
@@ -593,10 +637,10 @@ async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
 
             real_ticker_set = set()
 
-            for rh in real_holdings:
-                r_ticker = rh.get("ticker", "")
-                r_qty = int(rh.get("quantity", 0))
-                r_price = float(rh.get("avg_price", 0.0))
+            for rh in aggregated.values():
+                r_ticker = rh["ticker"]
+                r_qty = int(rh["quantity"])
+                r_price = float(rh["avg_price"])
                 r_name = rh.get("ticker_name", r_ticker)
 
                 if r_qty <= 0:
@@ -612,20 +656,56 @@ async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
 
                 if db_total_qty > 0:
                     diff = r_qty - db_total_qty
+                    # 차분을 어느 슬라이스에 배분할지는 임의로 정하면 안 된다. 봇 주문이 아직
+                    # 원장에 반영되지 않은 상태에서 EXTERNAL부터 건드리면 사용자의 외부 보유분이
+                    # 봇 주문 때문에 늘거나 줄어든다. 미해결 주문 유무로 원인을 갈라 우선순위를 뒤집는다.
+                    bot_order_pending = has_unresolved_orders_for_ticker(db, ctx.user_id, r_ticker)
                     if diff > 0:
-                        target_db_h = db_hs[0]
-                        old_qty = target_db_h.quantity
-                        target_db_h.quantity += diff
+                        # 증가분의 기본 해석은 "사용자가 앱 밖에서 추가 매수했다"이므로 EXTERNAL이 받는다.
+                        # 봇 주문이 미해결이면 체결 반영 지연일 수 있어 기존처럼 봇 슬라이스가 받는다.
+                        target_db_h = None
+                        if not bot_order_pending:
+                            target_db_h = next(
+                                (h for h in db_hs if h.management == MANAGEMENT_EXTERNAL), None
+                            )
+                        if target_db_h is None and not bot_order_pending:
+                            target_db_h = Holding(
+                                user_id=ctx.user_id,
+                                ticker=r_ticker,
+                                strategy_type=EXTERNAL_STRATEGY_TYPE,
+                                management=MANAGEMENT_EXTERNAL,
+                                ticker_name=r_name,
+                                avg_price=r_price,
+                                quantity=0,
+                                highest_price=r_price,
+                                regime_mode=ctx.sentiment,
+                                buy_stage=1,
+                            )
+                            db.add(target_db_h)
+                        if target_db_h is None:
+                            target_db_h = db_hs[0]
+                        old_qty = target_db_h.quantity or 0
+                        target_db_h.quantity = old_qty + diff
                         db.commit()
                         log_action(
                             db,
                             ctx.user_id,
-                            f"[Sync Guard] Quantity increased for {r_ticker} ({target_db_h.strategy_type}): {old_qty} -> {target_db_h.quantity} (Total: {r_qty})",
+                            f"[Sync Guard] Quantity increased for {r_ticker} "
+                            f"({target_db_h.strategy_type}/{target_db_h.management}): "
+                            f"{old_qty} -> {target_db_h.quantity} (Total: {r_qty})",
                             "WARNING"
                         )
                     elif diff < 0:
+                        # 감소분의 기본 해석은 "사용자가 앱 밖에서 매도했다"이므로 EXTERNAL부터 깎는다.
+                        # 봇 주문이 미해결이면 봇 매도의 반영 지연이므로 봇 슬라이스부터 깎는다.
+                        deduction_order = sorted(
+                            db_hs,
+                            key=lambda h: (h.management != MANAGEMENT_EXTERNAL)
+                            if not bot_order_pending
+                            else (h.management == MANAGEMENT_EXTERNAL),
+                        )
                         remaining_deduction = abs(diff)
-                        for h in db_hs:
+                        for h in deduction_order:
                             if remaining_deduction <= 0:
                                 break
                             deduct = min(h.quantity, remaining_deduction)
@@ -636,11 +716,14 @@ async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
                                 log_action(
                                     db,
                                     ctx.user_id,
-                                    f"[Sync Guard] Quantity deducted for {r_ticker} ({h.strategy_type}): {old_qty} -> {h.quantity} (Deducted: {deduct})",
+                                    f"[Sync Guard] Quantity deducted for {r_ticker} "
+                                    f"({h.strategy_type}/{h.management}): "
+                                    f"{old_qty} -> {h.quantity} (Deducted: {deduct})",
                                     "WARNING"
                                 )
                                 if h.quantity == 0:
-                                    db.delete(h)
+                                    delete_holding(db, h, actor="scheduler.sync_broker_holdings",
+                                                   reason="quantity deducted to zero by sync guard")
                         db.commit()
                 else:
                     last_buy = db.query(TradeLog).filter(
@@ -649,18 +732,35 @@ async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
                         TradeLog.trade_type == "BUY"
                     ).order_by(TradeLog.executed_at.desc()).first()
 
-                    target_strategy = last_buy.strategy_type if last_buy else ctx.first_slot_key
-                    log_action(
-                        db,
-                        ctx.user_id,
-                        f"[Self-Healing] Phantom holding detected in account: {r_ticker} (Qty: {r_qty}). Restoring DB record under strategy {target_strategy}!",
-                        "ERROR"
-                    )
+                    # 기본값은 EXTERNAL이다. 봇 매수 이력이 없는 계좌 보유분은 사용자가 직접 산
+                    # 종목이며, 이것을 첫 번째 전략 슬롯에 꽂으면 다음 사이클에 손절·시그널 붕괴
+                    # 판정 대상이 되어 그대로 청산된다(2026-09-05 HCTI 실측). 봇 관할 밖으로 둔다.
+                    if last_buy is not None:
+                        target_strategy = last_buy.strategy_type
+                        target_management = MANAGEMENT_BOT_OWNED
+                        log_action(
+                            db,
+                            ctx.user_id,
+                            f"[Self-Healing] Phantom holding detected in account: {r_ticker} (Qty: {r_qty}). "
+                            f"Restoring DB record under strategy {target_strategy}!",
+                            "ERROR"
+                        )
+                    else:
+                        target_strategy = EXTERNAL_STRATEGY_TYPE
+                        target_management = MANAGEMENT_EXTERNAL
+                        log_action(
+                            db,
+                            ctx.user_id,
+                            f"[External Holding] Registered broker position without bot buy history: "
+                            f"{r_ticker} (Qty: {r_qty}). Bot will not trade this position.",
+                            "INFO"
+                        )
 
                     db.add(Holding(
                         user_id=ctx.user_id,
                         ticker=r_ticker,
                         strategy_type=target_strategy,
+                        management=target_management,
                         ticker_name=r_name,
                         avg_price=r_price,
                         quantity=r_qty,
@@ -672,8 +772,8 @@ async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
 
             for db_h in ctx.holdings:
                 if db_h.ticker not in real_ticker_set:
-                    log_action(db, ctx.user_id, f"[Self-Healing] DB Holding {db_h.ticker} ({db_h.strategy_type}) does not exist in actual broker account. Sweeping legacy DB record.", "ERROR")
-                    db.delete(db_h)
+                    delete_holding(db, db_h, actor="scheduler.sync_broker_holdings",
+                                   reason="sweep: ticker absent from broker account")
                     db.commit()
 
             ctx.holdings = db.query(Holding).filter(Holding.user_id == ctx.user_id).all()
@@ -902,7 +1002,8 @@ async def process_autonomous_slots(ctx: TradingFlowContext, slot_allocations: di
                         ))
                         if h_db is not None:
                             if filled_qty >= (h_db.quantity or 0):
-                                db.delete(h_db)
+                                delete_holding(db, h_db, actor="scheduler.process_autonomous_slots",
+                                               reason="regime exit fully filled")
                             else:
                                 h_db.quantity -= filled_qty
                         db.commit()
@@ -937,6 +1038,461 @@ async def process_autonomous_slots(ctx: TradingFlowContext, slot_allocations: di
             await symbol_lease.release()
 
 
+class _HarvestPseudoStrategy:
+    """수확 모드 매도가 Part B의 공통 실행부를 그대로 타기 위한 최소 스텁.
+
+    EXTERNAL 보유분에는 전략 인스턴스가 없다(strategy_type이 'external'이라 슬롯 조회가
+    비어 있다). Part B가 strategy_instance에서 쓰는 것은 표시용 name 하나뿐이므로,
+    매도 경로를 복제하는 대신 이름만 갖는 스텁을 넘긴다.
+    """
+    name = "수확 모드"
+    is_autonomous = False
+
+
+HARVEST_PSEUDO_STRATEGY = _HarvestPseudoStrategy()
+
+
+# 방어 경보의 고정 평가자. 사용자가 어떤 전략을 쓰든 외부 보유 경보는 같은 잣대로 판정한다.
+# 전략별 평가자를 쓰면 (1) 외부 보유는 어떤 전략으로도 진입한 적이 없어 그 잣대를 들이댈
+# 근거가 없고, (2) 사용자가 전략을 바꿨다고 기존 보유 종목의 경보 기준이 흔들린다.
+# 점수는 절대값이 아니라 켠 시점 대비 변화량으로만 쓰이므로 평가자 선택이 판정을 좌우하지는
+# 않지만, 기준이 사이에서 바뀌면 변화량 자체가 무의미해지므로 고정이 필요하다.
+GUARD_EVALUATOR_STRATEGY = "regime_switching"
+_guard_evaluator = None
+
+
+def _get_guard_evaluator():
+    global _guard_evaluator
+    if _guard_evaluator is None:
+        from app.strategies.strategy_factory import get_strategy
+        _guard_evaluator = get_strategy(GUARD_EVALUATOR_STRATEGY)
+    return _guard_evaluator
+
+
+class _GuardPseudoStrategy:
+    """방어 청산이 Part B의 공통 실행부를 타기 위한 최소 스텁(수확과 같은 사유)."""
+    name = "방어 청산"
+    is_autonomous = False
+
+
+GUARD_PSEUDO_STRATEGY = _GuardPseudoStrategy()
+
+
+async def _evaluate_guard(
+    ctx: TradingFlowContext,
+    h,
+    current_data: dict,
+    current_price_dec: Decimal,
+    _log,
+):
+    """EXTERNAL 보유분의 방어 판정. 조치가 필요하면 Part B 인자 튜플을, 아니면 None을 반환한다.
+
+    판정은 상태가 아니라 전이를 본다. -50% 물린 종목은 십중팔구 이미 점수가 붕괴선
+    아래이므로, 절대선으로 판정하면 켜는 순간 즉시 경보가 되어 이 프로젝트가 처음에
+    문제 삼았던 '관측 시작 즉시 청산'이 이름만 바꿔 재현된다.
+
+    이 함수는 직접 주문을 내지 않는다. 청산이 필요하다고 판단해도 Part B가 집행하도록
+    인자만 돌려준다 - 판정과 집행을 섞으면 되돌릴 수 없는 주문이 판정 로직 안에 숨는다.
+    """
+    if not getattr(h, "guard_enabled", False):
+        return None
+    if not isinstance(h, Holding) or h.id is None:
+        return None
+
+    clean_ticker = h.ticker
+    try:
+        evaluator = _get_guard_evaluator()
+        current_score = float(
+            evaluator.calculate_score(
+                current_data.get("details") or current_data, ctx.sentiment, is_entry=False
+            )
+        )
+    except Exception as score_err:
+        _log(f"[Guard] Score evaluation failed for {clean_ticker}: {score_err}", "WARNING")
+        return None
+
+    now = utc_now_aware()
+
+    with micro_session(ctx) as db:
+        row = db.query(
+            Holding.guard_baseline_score,
+            Holding.guard_baseline_low,
+            Holding.guard_enabled_at,
+            Holding.guard_last_alert_at,
+            Holding.guard_action,
+            Holding.guard_sell_ratio,
+            Holding.guard_streak,
+            Holding.guard_last_action_at,
+            Holding.guard_streak_started_at,
+        ).filter(Holding.id == h.id).first()
+        if row is None:
+            return None
+        (
+            baseline_score, baseline_low, enabled_at, last_alert_at,
+            guard_action, sell_ratio, streak, last_action_at, streak_started_at,
+        ) = row
+
+        # 켠 직후 첫 사이클에 기준선을 박는다. API가 켤 때는 시세를 모르므로 여기서 채운다.
+        if baseline_score is None or baseline_low is None:
+            db.query(Holding).filter(Holding.id == h.id).update(
+                {
+                    Holding.guard_baseline_score: current_score,
+                    Holding.guard_baseline_low: current_price_dec,
+                    Holding.guard_enabled_at: enabled_at or now,
+                    Holding.guard_streak: 0,
+                },
+                synchronize_session=False,
+            )
+            db.commit()
+            _log(
+                f"[Guard] Baseline set for {clean_ticker}: score {current_score:.1f}, "
+                f"low ${float(current_price_dec):.2f}. mode={(guard_action or 'ALERT_ONLY').lower()}.",
+                "INFO",
+            )
+            return None
+
+        # 저가 래칫은 매 사이클 갱신한다(단조 감소). 반등해도 기준선은 따라 올라가지 않는다.
+        new_low = compute_guard_low(baseline_low, current_price_dec)
+        if new_low < to_decimal(baseline_low):
+            db.query(Holding).filter(Holding.id == h.id).update(
+                {Holding.guard_baseline_low: new_low}, synchronize_session=False,
+            )
+            db.commit()
+
+    # 유예기간 - 켜자마자 울리는 오발동을 막는다.
+    if enabled_at is not None:
+        elapsed_min = (now - enabled_at).total_seconds() / 60.0
+        if elapsed_min < GUARD_GRACE_MINUTES:
+            return None
+
+    # 판정에는 갱신 전 기준선을 쓴다. 방금 내린 저가로 자기 자신을 비교하면 영원히 거짓이다.
+    breached = check_guard_breach(
+        current_score, baseline_score, current_price_dec, baseline_low
+    )
+
+    # 연속 충족 카운터. 조치(청산)는 경보보다 훨씬 엄격한 지속성을 요구하므로 DB에 누적한다.
+    # 인메모리 캐시로 두면 재기동이 카운터를 리셋해 조치가 영영 안 나거나, 반대로 조건이
+    # 끊겼다가 이어진 것을 연속으로 오인한다.
+    new_streak = (streak or 0) + 1 if breached else 0
+    # 연속이 처음 시작되는 순간의 시각을 박아둔다. 사이클 주기가 흔들려도 이 값 덕에
+    # 실제 지속 시간을 알 수 있고, 알림에도 참값을 적을 수 있다.
+    new_started_at = None if not breached else (streak_started_at or now)
+    if new_streak != (streak or 0):
+        with micro_session(ctx) as db:
+            db.query(Holding).filter(Holding.id == h.id).update(
+                {
+                    Holding.guard_streak: new_streak,
+                    Holding.guard_streak_started_at: new_started_at,
+                },
+                synchronize_session=False,
+            )
+            db.commit()
+
+    if not breached:
+        return None
+
+    action = (guard_action or GUARD_ACTION_ALERT_ONLY).upper()
+
+    # --- 경보: 조치 모드와 무관하게 동일한 쿨다운으로 보낸다 ---
+    alert_due = (
+        last_alert_at is None
+        or (now - last_alert_at).total_seconds() / 3600.0 >= GUARD_ALERT_COOLDOWN_HOURS
+    )
+    if alert_due:
+        with micro_session(ctx) as db:
+            db.query(Holding).filter(Holding.id == h.id).update(
+                {Holding.guard_last_alert_at: now}, synchronize_session=False,
+            )
+            db.commit()
+        _log(
+            f"[Guard] ALERT {clean_ticker}: score {baseline_score:.1f} -> {current_score:.1f}, "
+            f"new low ${float(current_price_dec):.2f} (was ${float(baseline_low):.2f}). "
+            f"mode={action.lower()}.",
+            "WARNING",
+        )
+        send_message_async(
+            ctx.user_id,
+            I18n.get_msg(
+                _resolve_lang(ctx.user_id),
+                "telegram.guard_alert",
+                ticker=clean_ticker,
+                ticker_name=h.ticker_name or clean_ticker,
+                baseline_score=float(baseline_score),
+                current_score=current_score,
+                baseline_low=float(baseline_low),
+                current_price=float(current_price_dec),
+            ),
+        )
+
+    # --- 조치: 알림만 모드는 여기서 끝난다 ---
+    if action == GUARD_ACTION_ALERT_ONLY:
+        return None
+
+    # 지속 요구 - 수확의 2사이클보다 훨씬 엄격하다. 조치의 최악은 되돌릴 수 없는 손실 확정이다.
+    # 사이클 수와 실제 경과 시간을 모두 요구한다. 사이클만 쓰면 주기 변동(실측 104~846초)에
+    # 따라 같은 10사이클이 20분일 수도 두 시간일 수도 있고, 시간만 쓰면 관측이 성긴 구간에서
+    # 한두 번의 판정으로 조치가 나간다.
+    if new_streak < GUARD_SUSTAIN_CYCLES:
+        return None
+    sustained_minutes = (
+        (now - new_started_at).total_seconds() / 60.0 if new_started_at else 0.0
+    )
+    if sustained_minutes < GUARD_SUSTAIN_MINUTES:
+        return None
+
+    # 일일 캡 - 무너지는 날 같은 보유분을 반복 청산하지 않는다.
+    if last_action_at is not None:
+        if (now - last_action_at).total_seconds() / 3600.0 < GUARD_ACTION_COOLDOWN_HOURS:
+            return None
+
+    sell_qty = resolve_guard_sell_qty(h.quantity or 0, sell_ratio)
+    if sell_qty <= 0:
+        return None
+
+    with micro_session(ctx) as db:
+        db.query(Holding).filter(Holding.id == h.id).update(
+            {
+                Holding.guard_last_action_at: now,
+                Holding.guard_streak: 0,
+                Holding.guard_streak_started_at: None,
+            },
+            synchronize_session=False,
+        )
+        db.commit()
+
+    # --- 섀도: 팔았다면 어땠을지만 남기고 주문은 내지 않는다 ---
+    # 이 로그가 5단계 착수 근거를 만드는 측정 원천이다. 사람이 경보 로그를 눈으로
+    # 상관분석하는 대신, 조치 시점의 가격·점수·수량을 기계 판독 가능한 형식으로 남긴다.
+    if action == GUARD_ACTION_SHADOW:
+        _log(
+            f"[Guard][SHADOW] {clean_ticker} would_sell_qty={sell_qty} "
+            f"price={float(current_price_dec):.4f} score={current_score:.1f} "
+            f"baseline_score={baseline_score:.1f} baseline_low={float(baseline_low):.4f} "
+            f"streak={new_streak} sustained_min={sustained_minutes:.1f} | no order placed",
+            "WARNING",
+        )
+        # 기록을 로그에만 남기면 사용자가 볼 방법이 없다 - 이 모드를 볼 수 있는 화면이
+        # 저장소에 없기 때문이다(ActionLog는 관리자 패널에만 노출된다). 측정 결과가
+        # 손에 들어와야 모드가 쓸모를 갖는다. 조치 시점은 10사이클 지속 + 일일 1회로
+        # 이미 좁혀져 있으므로 알림이 잦아지지 않는다.
+        send_message_async(
+            ctx.user_id,
+            I18n.get_msg(
+                _resolve_lang(ctx.user_id),
+                "telegram.guard_shadow",
+                ticker=clean_ticker,
+                ticker_name=h.ticker_name or clean_ticker,
+                # 사이클 수가 아니라 실제 경과 시간을 적는다. 주기가 흔들리므로
+                # 사이클을 분으로 환산하면 거짓이 된다(실측 104~846초).
+                minutes=int(sustained_minutes),
+                current_price=float(current_price_dec),
+                sell_qty=sell_qty,
+                total_qty=int(h.quantity or 0),
+                proceeds=float(current_price_dec) * sell_qty,
+            ),
+        )
+        return None
+
+    # --- 실제 부분 청산 ---
+    sell_reason_obj = SellReason(
+        "guard_liquidate",
+        {
+            "baseline_score": float(baseline_score),
+            "current_score": float(current_score),
+            "baseline_low": float(baseline_low),
+            "sell_qty": sell_qty,
+        },
+    )
+    sell_reason = "방어 청산 (추가 악화 + 신저가 지속)"
+    _log(
+        f"[Guard] LIQUIDATE {clean_ticker}: selling {sell_qty}/{h.quantity} shares "
+        f"(streak {new_streak}, score {baseline_score:.1f} -> {current_score:.1f})",
+        "WARNING",
+    )
+
+    is_kis_order = (ctx.trade_mode or "").upper() in {"MOCK", "REAL"}
+    metadata = None
+    if is_kis_order:
+        metadata = await safe_broker_call(ctx.broker.get_order_metadata, clean_ticker, ctx.session)
+
+    return (
+        h,
+        float(current_price_dec),
+        sell_reason,
+        sell_reason_obj,
+        clean_ticker,
+        GUARD_PSEUDO_STRATEGY,
+        int(current_score),
+        h.strategy_type,
+        metadata,
+        sell_qty,
+    )
+
+
+async def _evaluate_harvest(
+    ctx: TradingFlowContext,
+    h,
+    current_data: dict,
+    current_price_dec: Decimal,
+    dec_highest_price: Decimal,
+    _log,
+):
+    """EXTERNAL 보유분의 수확 판정. 매도해야 하면 Part B 인자 튜플을, 아니면 None을 반환한다.
+
+    이 함수는 급등 후 꺾임만 본다. 손절도 시그널 붕괴 청산도 하지 않는다 - 그것들은
+    봇이 진입 근거를 가진 포지션에만 적용되는 규칙이고, 사용자가 산 종목에 적용하면
+    관측 시작 즉시 청산이 된다(2026-09-05 HCTI 실측).
+    """
+    if not getattr(h, "harvest_enabled", False):
+        return None
+
+    # 스냅샷 우선. 매핑 컬럼은 detached 상태에서 Core UPDATE 결과를 반영하지 않는다.
+    observed_base = to_decimal(
+        getattr(h, "observed_base_snapshot", None)
+        or getattr(h, "observed_base_price", None)
+    )
+    if observed_base <= 0:
+        return None
+
+    armed = getattr(h, "harvest_armed_snapshot", None)
+    if armed is None:
+        armed = bool(getattr(h, "harvest_armed", False))
+
+    clean_ticker = h.ticker
+    atr = current_data.get("details", {}).get("atr", 0.0)
+    current_price = float(current_price_dec)
+
+    # --- 무장: 급등해야 감시가 시작된다. 그 전에는 아무것도 하지 않는다 ---
+    if not armed:
+        arm_pct = get_harvest_arm_pct(atr, current_price)
+        if not check_harvest_arm(current_price_dec, observed_base, arm_pct):
+            return None
+
+        gain_pct = float(
+            (current_price_dec - observed_base) / observed_base * Decimal("100")
+        )
+        trailing_pct = get_harvest_trailing_pct(atr, current_price)
+        stop_price = float(current_price_dec * (Decimal("1") - to_decimal(trailing_pct) / Decimal("100")))
+        # 무장 시점부터 새로 추적한다. 무장 전 고점을 물려받으면 무장 직후 이미 이탈 상태일 수 있다.
+        if isinstance(h, Holding) and h.id is not None:
+            with micro_session(ctx) as db:
+                db.query(Holding).filter(Holding.id == h.id).update(
+                    {Holding.harvest_armed: True, Holding.highest_price: current_price_dec},
+                    synchronize_session=False,
+                )
+                db.commit()
+        h.harvest_armed_snapshot = True
+        _log(
+            f"[Harvest] ARMED {clean_ticker}: +{gain_pct:.1f}% from observed base "
+            f"${float(observed_base):.2f}. Trailing {trailing_pct:.1f}% (stop ~${stop_price:.2f}).",
+            "SIGNAL",
+        )
+        send_message_async(
+            ctx.user_id,
+            I18n.get_msg(
+                _resolve_lang(ctx.user_id),
+                "telegram.harvest_armed",
+                ticker=clean_ticker,
+                ticker_name=h.ticker_name or clean_ticker,
+                gain_pct=gain_pct,
+                base_price=float(observed_base),
+                current_price=current_price,
+                trailing_pct=trailing_pct,
+                stop_price=stop_price,
+            ),
+        )
+        return None
+
+    # --- 추적: 무장 뒤에는 고점 대비 이탈만 본다 ---
+    trailing_pct = get_harvest_trailing_pct(atr, current_price)
+    now = utc_now_aware()
+    cache_key = (ctx.user_id, h.ticker, h.strategy_type)
+
+    def _clear_breach_clock() -> None:
+        if getattr(h, "harvest_breach_started_at", None) is None:
+            return
+        with micro_session(ctx) as db:
+            db.query(Holding).filter(Holding.id == h.id).update(
+                {Holding.harvest_breach_started_at: None}, synchronize_session=False,
+            )
+            db.commit()
+        h.harvest_breach_started_at = None
+
+    if not check_harvest_breach(current_price_dec, dec_highest_price, trailing_pct, observed_base):
+        # 회복하면 관측 횟수와 시각을 함께 되돌린다. 둘 중 하나만 지우면 다음 이탈에서
+        # 남은 축이 이미 충족된 상태로 시작한다(방어 게이트에서 실제로 겪은 결함이다).
+        with _breach_count_lock:
+            BREACH_COUNT_CACHE.pop(cache_key, None)
+        _clear_breach_clock()
+        return None
+
+    # 노이즈 버퍼 - 순간적으로 찔렀다 돌아오는 꼬리에 털리지 않는다.
+    #
+    # 관측 횟수와 실제 경과 시간을 모두 요구한다. 사이클 수만 쓰면 주기 변동(실측 104~846초)에
+    # 따라 같은 2사이클이 3분일 수도 30분일 수도 있다. 횟수는 표본이 성긴 구간에서 한 번에
+    # 파는 것을 막고, 시간은 주기가 빨라졌을 때의 하한을 준다.
+    #
+    # 횟수는 인메모리로 센다 - 재기동하면 두 번을 다시 관측해야 하지만 그것은 무해하다.
+    # 반면 시각은 DB에 둔다. 재기동이 대기를 0으로 되돌리면 급등이 꺾인 뒤에도 매도가 계속 미뤄진다.
+    breach_started_at = getattr(h, "harvest_breach_started_at", None) or now
+    if getattr(h, "harvest_breach_started_at", None) is None:
+        with micro_session(ctx) as db:
+            db.query(Holding).filter(Holding.id == h.id).update(
+                {Holding.harvest_breach_started_at: breach_started_at}, synchronize_session=False,
+            )
+            db.commit()
+        h.harvest_breach_started_at = breach_started_at
+
+    with _breach_count_lock:
+        BREACH_COUNT_CACHE[cache_key] = BREACH_COUNT_CACHE.get(cache_key, 0) + 1
+        count = BREACH_COUNT_CACHE[cache_key]
+    breach_minutes = (now - breach_started_at).total_seconds() / 60.0
+
+    if count < HARVEST_SUSTAIN_CYCLES or breach_minutes < HARVEST_SUSTAIN_MINUTES:
+        _log(
+            f"[Harvest] {clean_ticker} breach below trailing stop "
+            f"(peak ${float(dec_highest_price):.2f}, -{trailing_pct:.1f}%). "
+            f"Delaying sell ({count}/{HARVEST_SUSTAIN_CYCLES} checks, "
+            f"{breach_minutes:.1f}/{HARVEST_SUSTAIN_MINUTES}min).",
+            "INFO",
+        )
+        return None
+
+    _clear_breach_clock()
+
+    sell_reason_obj = SellReason(
+        "harvest",
+        {
+            "highest_price": float(dec_highest_price),
+            "trailing_stop_pct": trailing_pct,
+            "observed_base_price": float(observed_base),
+        },
+    )
+    sell_reason = "수확 (급등 후 고점 이탈)"
+    _log(
+        f"[Harvest] EXIT SIGNAL: {clean_ticker} | peak ${float(dec_highest_price):.2f} "
+        f"-> ${current_price:.2f} (-{trailing_pct:.1f}% trailing)",
+        "SIGNAL",
+    )
+
+    is_kis_order = (ctx.trade_mode or "").upper() in {"MOCK", "REAL"}
+    metadata = None
+    if is_kis_order:
+        metadata = await safe_broker_call(ctx.broker.get_order_metadata, clean_ticker, ctx.session)
+
+    return (
+        h,
+        current_price,
+        sell_reason,
+        sell_reason_obj,
+        clean_ticker,
+        HARVEST_PSEUDO_STRATEGY,
+        0,
+        h.strategy_type,
+        metadata,
+    )
+
+
 async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict) -> None:
     user_id = ctx.user_id
     broker = ctx.broker
@@ -964,12 +1520,18 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
         try:
             slot_key = h.strategy_type
             clean_ticker = h.ticker
-            if slot_key not in ms_manager.strategies:
-                continue
-            strategy_instance = ms_manager.strategies[slot_key]
-            if getattr(strategy_instance, "is_autonomous", False):
-                # 자율 슬롯 보유분은 손절/트레일링 대상이 아님 — 레짐 이탈 시에만 process_autonomous_slots가 청산
-                continue
+            # 봇이 사지 않은 외부 보유분은 매도 판정 대상이 아니다. 다만 루프 상단에서 통째로
+            # 건너뛰면 관측(last_price·highest_price 갱신)까지 멈춰 잔고 평가금이 낡고, 3단계
+            # 수확 모드가 붙을 때 고점 기록이 비어 눈이 먼다. 배제가 아니라 분기로 처리한다 —
+            # 아래 공통 관측 구간까지는 함께 돌고 전략 판정 직전에 빠진다.
+            is_external = getattr(h, "management", MANAGEMENT_BOT_OWNED) == MANAGEMENT_EXTERNAL
+            strategy_instance = ms_manager.strategies.get(slot_key)
+            if not is_external:
+                if strategy_instance is None:
+                    continue
+                if getattr(strategy_instance, "is_autonomous", False):
+                    # 자율 슬롯 보유분은 손절/트레일링 대상이 아님 — 레짐 이탈 시에만 process_autonomous_slots가 청산
+                    continue
 
             current_data = target_signal_map.get(clean_ticker) or ctx.signal_map.get(clean_ticker)
             if not current_data:
@@ -1005,15 +1567,42 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                         synchronize_session=False,
                     )
                     db.commit()
-            profit_rate = calculate_profit_rate(current_price_dec, h.avg_price)
 
-            current_score = strategy_instance.calculate_score(current_data['details'] or current_data, sentiment, is_entry=False)
-            is_smart_exit = current_data.get('details', {}).get('is_smart_exit', False)
+            # 봇이 이 종목을 처음 본 가격을 한 번만 기록한다. 수확 모드의 무장 판정과 매도
+            # 하한이 모두 이 값을 앵커로 쓴다. 등록 시점의 브로커 평단(사용자 매수가)이 아니라
+            # 실제 관측가여야 한다 - 반토막 종목에서 본전을 앵커로 쓰면 무장이 영원히 안 된다.
+            # ⚠️ h는 사이클 간 공유되는 detached 객체이고, 매핑 컬럼을 세팅하면 dirty가 되어
+            #    auto-merge가 version_id를 올리고 Part B의 db.merge(h)가 StaleDataError로 죽는다
+            #    (last_price·highest_price와 동일한 사유). 따라서 수확 상태도 매핑 컬럼을 직접
+            #    건드리지 않고 version 비간섭 Core UPDATE + 비영속 스냅샷으로만 다룬다.
+            #    스냅샷은 DB에서 되읽어 채운다 - 로컬 값으로 덮어쓰면 다음 사이클에 관측 시작가가
+            #    현재가로 갱신되어 무장이 영원히 안 된다.
+            if is_external and getattr(h, "observed_base_snapshot", None) is None:
+                base_value = getattr(h, "observed_base_price", None)
+                if isinstance(h, Holding) and h.id is not None:
+                    with micro_session(ctx) as db:
+                        db.query(Holding).filter(
+                            Holding.id == h.id, Holding.observed_base_price.is_(None)
+                        ).update(
+                            {Holding.observed_base_price: current_price_dec},
+                            synchronize_session=False,
+                        )
+                        db.commit()
+                        row = db.query(
+                            Holding.observed_base_price, Holding.harvest_armed
+                        ).filter(Holding.id == h.id).first()
+                        if row is not None:
+                            base_value = row[0]
+                            h.harvest_armed_snapshot = bool(row[1])
+                h.observed_base_snapshot = to_decimal(base_value or current_price_dec)
 
+            # 고점 갱신은 전략과 무관한 순수 관측이므로 판정 구간보다 앞에 둔다. 외부 보유분도
+            # 이 지점까지는 함께 돌아 고점이 기록된다(수확 모드의 추적 기준점).
             dec_highest_price = to_decimal(h.highest_price or current_price_dec)
             if current_price_dec > dec_highest_price:
                 dec_highest_price = current_price_dec
-                _log(f"[{strategy_instance.name}] New Peak for {clean_ticker}: ${current_price}", "SIGNAL")
+                peak_owner = strategy_instance.name if strategy_instance is not None else "External"
+                _log(f"[{peak_owner}] New Peak for {clean_ticker}: ${current_price}", "SIGNAL")
                 # last_price와 동일 사유(위 주석 참조): 공유 detached holding에 highest_price(매핑 컬럼)를
                 # 세팅해 merge로 영속화하면 version_id가 올라 Part B 매도의 db.merge(h)가 StaleData로 실패한다.
                 # 트레일링 기준점은 로컬 dec_highest_price로만 계산하고, DB에는 version 비간섭 컬럼 UPDATE로 반영.
@@ -1025,6 +1614,28 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                             synchronize_session=False,
                         )
                         db.commit()
+
+            # ---- 공통 관측 구간 끝. 아래부터는 전략 판정이므로 봇 관할 보유분만 진입한다 ----
+            if is_external:
+                # 두 스위치는 독립이다. 같이 켜면 위로 갔다 꺾이면 수확, 아래로 무너지면 방어다.
+                # 방어가 먼저인 이유는 하락 국면에서 수확 조건이 성립할 수 없어 순서가 무해하고,
+                # 반대로 상승 국면에서는 방어 조건이 성립할 수 없기 때문이다(둘은 배타적으로 발동한다).
+                guard_args = await _evaluate_guard(
+                    ctx, h, current_data, current_price_dec, _log,
+                )
+                if guard_args is not None:
+                    sell_tasks_args.append(guard_args)
+                    continue
+                harvest_args = await _evaluate_harvest(
+                    ctx, h, current_data, current_price_dec, dec_highest_price, _log,
+                )
+                if harvest_args is not None:
+                    sell_tasks_args.append(harvest_args)
+                continue
+
+            profit_rate = calculate_profit_rate(current_price_dec, h.avg_price)
+            current_score = strategy_instance.calculate_score(current_data['details'] or current_data, sentiment, is_entry=False)
+            is_smart_exit = current_data.get('details', {}).get('is_smart_exit', False)
 
             atr = current_data.get('details', {}).get('atr', 0.0)
             stop_loss_pct = strategy_instance.get_stop_loss_pct(atr, current_price)
@@ -1131,7 +1742,11 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
         current_score,
         slot_key,
         metadata,
+        sell_qty=None,
     ):
+        # sell_qty가 None이면 전량 매도(기존 모든 경로). 방어 청산만 부분 수량을 넘긴다 -
+        # 신호 품질이 검증되지 않은 판정으로 포지션 전체를 확정하지 않기 위해서다.
+        sell_qty = int(sell_qty) if sell_qty else int(h.quantity or 0)
         request_id = str(uuid4())
         try:
             symbol_lease = await acquire_symbol_order_lock(user_id, clean_ticker, request_id)
@@ -1155,7 +1770,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                         prefixed_ticker=clean_ticker,
                         strategy_type=slot_key,
                         ticker_name=h.ticker_name,
-                        requested_qty=h.quantity,
+                        requested_qty=sell_qty,
                         submitted_price=current_price,
                         exchange_code=metadata.get("exchange_code"),
                         order_division=metadata.get("order_division"),
@@ -1169,14 +1784,14 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             try:
                 if is_kis_order:
                     res = await execute_and_poll_order(
-                        broker, broker.sell_order, clean_ticker, h.quantity,
+                        broker, broker.sell_order, clean_ticker, sell_qty,
                         price=current_price, session=ctx.session,
                         lease=symbol_lease,
                         **({"client_order_id": order_intent.intent_id} if order_intent else {}),
                     )
                 else:
                     res = await safe_broker_call(
-                        broker.sell_order, clean_ticker, h.quantity,
+                        broker.sell_order, clean_ticker, sell_qty,
                         price=current_price, session=ctx.session,
                         strategy_type=slot_key,
                         regime_mode=sentiment, signal_score=current_score,
@@ -1245,7 +1860,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             if res["success"]:
                 filled_price = res["filled_price"]
                 filled_qty = res["filled_qty"]
-                if filled_qty <= 0 or filled_qty > h.quantity:
+                if filled_qty <= 0 or filled_qty > sell_qty:
                     with micro_session(ctx) as db:
                         log_action(db, user_id, f"SELL INVALID FILL: {h.ticker} | {res}", "ERROR")
                     halt_trading_for_order_review(ctx, "SELL", clean_ticker, res)
@@ -1268,13 +1883,14 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                         order_no=res["order_no"], regime_mode=sentiment, signal_score=current_score,
                         realized_pnl=round(realized_pnl, 2), return_rate=round(calc_return_rate, 2)
                     ))
-                    is_full_fill = filled_qty >= h.quantity
+                    is_full_fill = filled_qty >= (h.quantity or 0)
                     if is_full_fill:
-                        db.delete(h_db)
+                        delete_holding(db, h_db, actor="scheduler.process_exit_signals",
+                                       reason=f"sell fully filled via {sell_reason}")
                     else:
                         h_db.quantity -= filled_qty
                     db.commit()
-                    fill_label = "sold" if is_full_fill else f"partially sold ({filled_qty} filled, {h.quantity} remaining)"
+                    fill_label = "sold" if is_full_fill else f"partially sold ({filled_qty} filled, {(h.quantity or 0) - filled_qty} remaining)"
                     log_action(db, user_id, f"SUCCESS: {h.ticker} ({h.strategy_type}) {fill_label} via {sell_reason} | Order: {res['order_no']}", "INFO")
 
                 # 전량 매도된 holding을 ctx.holdings에서 제거한다. 같은 사이클에서 다른 종목이 이어서 매도될 때,
@@ -1626,6 +2242,23 @@ async def process_entry_signals(ctx: TradingFlowContext, target_signals: list, s
                 continue
 
             if slot_holdings_count >= 3:
+                continue
+
+            # 사용자가 이미 갖고 있는(봇 관할 밖) 종목은 봇이 새로 사지 않는다. 중복 조회가
+            # strategy_type 단위라서 이 가드가 없으면 EXTERNAL로 보유 중인 티커를 다른 슬롯에서
+            # 그대로 또 매수한다 — 사용자 입장에선 "안 건드린다더니 물량이 늘었다"가 되고,
+            # 브로커 계좌에서 두 슬라이스가 한 덩어리로 섞여 청산 회계도 모호해진다.
+            with micro_session(ctx) as db:
+                external_holding_exists = db.query(Holding.id).filter(
+                    Holding.user_id == user_id,
+                    Holding.ticker == clean_ticker,
+                    Holding.management == MANAGEMENT_EXTERNAL,
+                ).first() is not None
+            if external_holding_exists:
+                _log(
+                    f"[{strategy_instance.name}] BUY SKIPPED: {clean_ticker} is held outside bot management (EXTERNAL).",
+                    "INFO",
+                )
                 continue
 
             with micro_session(ctx) as db:

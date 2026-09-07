@@ -51,7 +51,9 @@
       "rolling_box": "Rolling-box stop breach (box floor ${rolling_stop:.2f} broken | current return: {profit_rate:.2f}%)",
       "breach_confirmed_suffix": " [2nd consecutive breach confirmed]",
       "smart_exit": "Smart early take-profit (RSI-MACD condition met | return: {profit_rate:.2f}%)",
-      "signal_collapse": "Bullish signal collapse (reached {current_score} pts)"
+      "signal_collapse": "Bullish signal collapse (reached {current_score} pts)",
+      "harvest": "Harvest (down {trailing_stop_pct:.2f}% from peak ${highest_price:.2f} | observed base ${observed_base_price:.2f})",
+      "guard_liquidate": "Defense liquidation (signal {baseline_score:.0f}→{current_score:.0f} and sustained new lows | partial sell of {sell_qty} shares)"
     },
     "buy_skip_reason": {
       "budget_exceeded": {
@@ -62,7 +64,10 @@
         "title": "Insufficient cash",
         "desc": "Slot cash is not enough for this order."
       }
-    }
+    },
+    "harvest_armed": "🌾 <b>Harvest mode armed</b>\n\n<b>{ticker_name}</b> ({ticker})\nObserved base ${base_price:.2f} → now ${current_price:.2f} (<b>+{gain_pct:.1f}%</b>)\n\nTracking the peak from here; sells if it falls <b>{trailing_pct:.1f}%</b> from the peak.\nCurrent stop: about ${stop_price:.2f}\n\n<i>It will not sell below the observed base.</i>",
+    "guard_alert": "🛡️ <b>{ticker_name} ({ticker}) — keeps getting worse</b>\n\nCompared with when you turned these alerts on\n· The price has fallen further   ${baseline_low:.2f} → <b>${current_price:.2f}</b>\n· The health score dropped too   {baseline_score:.0f} → <b>{current_score:.0f}</b>\n  <i>(the bot's 0-100 score for how sound the stock looks)</i>\n\n<b>The bot did not sell. Selling is your call.</b>\n\n<i>Whether it falls further or rebounds cannot be known. This is context, not a recommendation.</i>",
+    "guard_shadow": "📝 <b>{ticker_name} ({ticker}) — this was a sell point</b>\n<b>Nothing was actually sold.</b>\n\nThe weakness held for more than {minutes} minutes.\nYou set this to 'Sell-point alerts', so the bot only tells you instead of selling.\n\n<b>Had it sold here</b>\n· <b>{sell_qty:,}</b> of {total_qty:,} shares\n· ${current_price:.2f} per share\n· about <b>${proceeds:,.0f}</b>\n\n<i>Compare this moment's price with today's later on, and you can judge for yourself whether the alert was useful.</i>"
   },
   "ui": {
     "order_resolved": "The order has been fully confirmed. Bot status remains normal."
@@ -517,7 +522,44 @@
       "drop_tip_plus_desc": " : breaking above the previous peak!",
       "peak": "Peak",
       "peak_tip": "Initialized at the average entry price and updated automatically as the price rises. The trailing-stop emergency exit activates only once the peak has exceeded the average entry price.",
-      "dynamic_exit": "Dynamic exit watch"
+      "dynamic_exit": "Dynamic exit watch",
+      "external_badge": "Not bot-managed",
+      "external_badge_tip": "This position was not bought by the bot. The bot will neither sell it nor buy more.",
+      "sell_action": "Sell",
+      "sell_confirm_title": "Confirm sell",
+      "sell_confirm_body": "Sell {quantity} share(s) of {ticker} at market price.",
+      "sell_est_price": "Est. price",
+      "sell_est_proceeds": "Est. proceeds",
+      "sell_est_pnl": "Est. realized P&L",
+      "sell_irreversible": "Selling cannot be undone. Realized P&L and taxes are locked in.",
+      "sell_cancel": "Cancel",
+      "sell_confirm_action": "Sell now",
+      "sell_pending": "Working...",
+      "sell_done": "The sell order was processed.",
+      "sell_failed": "The sell order failed.",
+      "harvest_on": "Harvest on",
+      "harvest_off": "Harvest off",
+      "harvest_armed_label": "Harvest armed",
+      "harvest_tip": "Sells automatically when the price surges and then rolls over from its peak. It does nothing on a plain decline, and never sells below the price the bot first observed.",
+      "harvest_armed_tip": "A surge was confirmed and the peak is being tracked. It sells once the price falls the set amount from that peak.",
+      "harvest_toggle_failed": "Could not change the harvest setting.",
+      "guard_on": "Alerts on",
+      "guard_off": "Alerts off",
+      "guard_tip": "Sends an alert when the position clearly worsens from where you turned this on and makes a new low. The bot does not sell — that stays your call.",
+      "guard_toggle_failed": "Could not change the alert setting.",
+      "guard_action_label": "On alert",
+      "guard_action_alert_only": "Notify only",
+      "guard_action_shadow": "Sell-point alerts",
+      "guard_action_liquidate": "Sell a portion",
+      "guard_action_tip": "All three modes alert you when the position worsens. They differ in what comes next — 'Notify only' stops there, 'Sell-point alerts' tells you when auto-selling would have sold (without selling), and only 'Sell a portion' actually sells. Try 'Sell-point alerts' first before turning on an irreversible sale.",
+      "guard_action_warning": "There is no evidence yet that this signal predicts a real collapse. Enabling selling can lock in an irreversible loss.",
+      "delegation_settings": "Bot access",
+      "delegation_title": "Bot access settings",
+      "delegation_intro": "{ticker} was not bought by the bot. By default the bot does nothing; it only acts as far as you allow below.",
+      "harvest_title": "Harvest on surge",
+      "guard_title": "Alert on breakdown",
+      "guard_sell_ratio_label": "Sell portion",
+      "guard_streak_notice": "An action requires the weakness to hold for more than 20 minutes across several checks, and fires at most once per day per position. Changing the mode or the portion restarts that clock from zero."
     },
     "balance": {
       "load_failed": "Could not load account information",

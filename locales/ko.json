@@ -51,7 +51,9 @@
       "rolling_box": "롤링 박스 스탑 이탈 (박스 하단 ${rolling_stop:.2f} 붕괴 | 현재 수익률: {profit_rate:.2f}%)",
       "breach_confirmed_suffix": " [2회 연속 이탈 확정]",
       "smart_exit": "스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)",
-      "signal_collapse": "강세 시그널 붕괴 ({current_score}점 도달)"
+      "signal_collapse": "강세 시그널 붕괴 ({current_score}점 도달)",
+      "harvest": "수확 (고점 ${highest_price:.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 관측 시작가 ${observed_base_price:.2f})",
+      "guard_liquidate": "방어 청산 (설정 시점 대비 시그널 {baseline_score:.0f}→{current_score:.0f} 악화 + 신저가 지속 | {sell_qty}주 부분 청산)"
     },
     "buy_skip_reason": {
       "budget_exceeded": {
@@ -62,7 +64,10 @@
         "title": "현금 부족",
         "desc": "이 주문을 체결하기에 슬롯 예수금이 부족합니다."
       }
-    }
+    },
+    "harvest_armed": "🌾 <b>수확 모드 무장</b>\n\n<b>{ticker_name}</b> ({ticker})\n관측 시작가 ${base_price:.2f} → 현재 ${current_price:.2f} (<b>+{gain_pct:.1f}%</b>)\n\n지금부터 고점을 따라가다가 고점 대비 <b>{trailing_pct:.1f}%</b> 내려오면 매도합니다.\n현재 기준 스탑: 약 ${stop_price:.2f}\n\n<i>관측 시작가 아래에서는 팔지 않습니다.</i>",
+    "guard_alert": "🛡️ <b>{ticker_name} ({ticker}) — 계속 나빠지고 있습니다</b>\n\n방어 알림을 켜신 시점과 비교하면\n· 주가가 그때보다 더 내려갔습니다   ${baseline_low:.2f} → <b>${current_price:.2f}</b>\n· 종목 상태 점수도 크게 떨어졌습니다  {baseline_score:.0f}점 → <b>{current_score:.0f}점</b>\n  <i>(봇이 종목의 튼튼함을 100점 만점으로 매긴 점수입니다)</i>\n\n<b>봇은 팔지 않았습니다. 팔지 말지는 직접 정하세요.</b>\n\n<i>앞으로 더 빠질지 오를지는 알 수 없습니다. 이 알림은 참고용이지 매도 권유가 아닙니다.</i>",
+    "guard_shadow": "📝 <b>{ticker_name} ({ticker}) — 팔 만한 시점이었습니다</b>\n<b>실제로 팔지는 않았습니다.</b>\n\n나빠진 상태가 {minutes}분 넘게 이어졌습니다.\n'매도 시점 알림'으로 설정해두셔서, 봇은 팔지 않고 알려만 드립니다.\n\n<b>만약 이때 팔았다면</b>\n· {total_qty:,}주 중 <b>{sell_qty:,}주</b>\n· 주당 ${current_price:.2f}\n· 약 <b>${proceeds:,.0f}</b>\n\n<i>나중에 이 시점의 주가와 지금을 비교해보시면, 이 알림이 쓸모 있었는지 직접 판단하실 수 있습니다.</i>"
   },
   "ui": {
     "order_resolved": "주문이 최종 확인되었습니다. 봇 상태 정상 유지."
@@ -517,7 +522,44 @@
       "drop_tip_plus_desc": " : 이전 최고가를 돌파하며 상승 중입니다!",
       "peak": "최고가(Peak)",
       "peak_tip": "매수 평단가로 최초 시작(초기화)되며, 주가가 상승하면 최고가로 자동 갱신됩니다. 최고가가 평단가를 초과한 이력이 있어야만 익절(트레일링 스탑) 비상탈출 시스템이 활성화됩니다.",
-      "dynamic_exit": "동적 탈출 감시중"
+      "dynamic_exit": "동적 탈출 감시중",
+      "external_badge": "봇 관리 안 함",
+      "external_badge_tip": "봇이 매수하지 않은 보유 종목입니다. 봇은 이 종목을 팔지도, 더 사지도 않습니다.",
+      "sell_action": "매도",
+      "sell_confirm_title": "매도 확인",
+      "sell_confirm_body": "{ticker} {quantity}주를 시장가로 매도합니다.",
+      "sell_est_price": "예상 체결가",
+      "sell_est_proceeds": "예상 매도금액",
+      "sell_est_pnl": "예상 실현손익",
+      "sell_irreversible": "매도는 되돌릴 수 없습니다. 실현 손익과 세금이 확정됩니다.",
+      "sell_cancel": "취소",
+      "sell_confirm_action": "매도 실행",
+      "sell_pending": "처리 중...",
+      "sell_done": "매도가 처리되었습니다.",
+      "sell_failed": "매도에 실패했습니다.",
+      "harvest_on": "수확 켜짐",
+      "harvest_off": "수확 꺼짐",
+      "harvest_armed_label": "수확 무장",
+      "harvest_tip": "급등한 뒤 고점에서 꺾이면 자동으로 매도합니다. 그냥 내려가기만 하는 경우에는 아무것도 하지 않고, 봇이 처음 본 가격 아래로는 절대 팔지 않습니다.",
+      "harvest_armed_tip": "급등이 확인되어 고점을 추적 중입니다. 고점 대비 정해진 폭만큼 내려오면 매도합니다.",
+      "harvest_toggle_failed": "수확 설정을 변경하지 못했습니다.",
+      "guard_on": "방어 켜짐",
+      "guard_off": "방어 꺼짐",
+      "guard_tip": "설정 시점보다 뚜렷하게 악화되고 신저가를 갱신하면 알림을 보냅니다. 봇이 팔지는 않습니다 — 매도 여부는 직접 결정하십니다.",
+      "guard_toggle_failed": "방어 설정을 변경하지 못했습니다.",
+      "guard_action_label": "경보 시 동작",
+      "guard_action_alert_only": "알림만",
+      "guard_action_shadow": "매도 시점 알림",
+      "guard_action_liquidate": "부분 매도",
+      "guard_action_tip": "세 모드 모두 나빠지면 알림을 보냅니다. 차이는 그 다음입니다 — '알림만'은 거기서 끝나고, '매도 시점 알림'은 자동매도를 켰다면 언제 팔렸을지를 알려줍니다(실제로 팔지는 않습니다). '부분 매도'만 실제로 매도합니다. 되돌릴 수 없는 매도를 켜기 전에 '매도 시점 알림'으로 먼저 겪어보실 수 있습니다.",
+      "guard_action_warning": "이 신호가 실제 붕괴를 예측한다는 근거는 아직 없습니다. 매도를 켜면 되돌릴 수 없는 손실이 확정될 수 있습니다.",
+      "delegation_settings": "봇 위임",
+      "delegation_title": "봇 위임 설정",
+      "delegation_intro": "{ticker}는 봇이 매수하지 않은 종목입니다. 기본적으로 봇은 아무것도 하지 않으며, 아래에서 켠 만큼만 관여합니다.",
+      "harvest_title": "급등하면 수확",
+      "guard_title": "무너지면 알림",
+      "guard_sell_ratio_label": "매도 비율",
+      "guard_streak_notice": "조치는 나빠진 상태가 20분 넘게 이어지고 여러 차례 확인돼야 나가며, 한 종목당 하루 1번까지만 나갑니다. 모드나 비율을 바꾸면 이어진 시간은 0부터 다시 셉니다."
     },
     "balance": {
       "load_failed": "계좌 정보를 불러올 수 없습니다",

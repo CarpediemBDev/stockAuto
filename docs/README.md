@@ -62,6 +62,7 @@
 | [plans/design_guidelines.md](plans/design_guidelines.md) | 프론트 UX/UI 디자인 가이드라인 |
 | [plans/strategy_catalog_screen_and_subscription.md](plans/strategy_catalog_screen_and_subscription.md) | 전략 카탈로그 화면화·구독 티어 게이팅 설계안 |
 | [plans/strategy_catalog_antigravity_handoff.md](plans/strategy_catalog_antigravity_handoff.md) | 위 설계의 Antigravity 개발 실행 지시서(S0~S3, 구독 제외) |
+| [plans/holding_management_modes.md](plans/holding_management_modes.md) | 봇이 매수하지 않은 보유 종목의 관리 모드(격리·수확·방어·위임) 설계 정본 + 고점 판단 방법론 백로그 |
 
 ## 🗂️ 진행 중 계획 문서 (Living Plan)
 
