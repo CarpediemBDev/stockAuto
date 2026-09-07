@@ -4,7 +4,10 @@ import pytest
 
 import app.bot.multi_strategy_manager as strategy_module
 import app.bot.scheduler as scheduler
-from app.core.models import Holding, TradeLog, UserSettings
+from app.core.models import (
+    Holding, TradeLog, UserSettings,
+    EXTERNAL_STRATEGY_TYPE, MANAGEMENT_EXTERNAL,
+)
 
 
 class FakeQuery:
@@ -663,12 +666,37 @@ async def test_run_user_trading_flow_syncs_broker_holdings_without_lock_contenti
     assert released_count == 1
     assert len(active_locks) == 0
     assert not any("Skipped sync due to lock unavailability" in msg for _lvl, msg in logs)
-    assert holding_aapl.quantity == 8
+    # 수량 증가분은 봇 슬라이스를 부풀리지 않는다. 미해결 봇 주문이 없으면 "사용자가 앱 밖에서
+    # 추가 매수했다"로 해석해 EXTERNAL 슬라이스가 받는다 - 봇이 사지 않은 물량을 봇 포지션에
+    # 합치면 다음 사이클에 손절·시그널 붕괴로 함께 청산된다.
+    added_holdings = [h for h in fake_db.added if isinstance(h, Holding)]
+    assert holding_aapl.quantity == 5
+    aapl_external = [h for h in added_holdings if h.ticker == "AAPL"]
+    assert len(aapl_external) == 1
+    assert aapl_external[0].quantity == 3
+    assert aapl_external[0].management == MANAGEMENT_EXTERNAL
+    assert holding_aapl.quantity + aapl_external[0].quantity == 8  # 총량은 브로커와 일치
     assert any("Quantity increased for AAPL" in msg for _lvl, msg in logs)
-    added_tickers = [h.ticker for h in fake_db.added if isinstance(h, Holding)]
+
+    # 봇 매수 이력이 없는 계좌 보유분은 첫 슬롯이 아니라 EXTERNAL로 등록된다.
+    added_tickers = [h.ticker for h in added_holdings]
     assert "MSFT" in added_tickers
-    assert any("Phantom holding detected in account: MSFT" in msg for _lvl, msg in logs)
+    msft = next(h for h in added_holdings if h.ticker == "MSFT")
+    assert msft.management == MANAGEMENT_EXTERNAL
+    assert msft.strategy_type == EXTERNAL_STRATEGY_TYPE
+    assert any(
+        "Registered broker position without bot buy history: MSFT" in msg
+        for _lvl, msg in logs
+    )
     deleted_tickers = [h.ticker for h in fake_db.deleted if isinstance(h, Holding)]
     assert "GHOST" in deleted_tickers
-    assert any("does not exist in actual broker account. Sweeping legacy DB record." in msg for _lvl, msg in logs)
+    # 삭제는 이제 delete_holding을 거치며 ActionLog 행으로 감사 기록을 남긴다(log_action 경유가 아니다).
+    # 로그 없이 사라진 행은 앱이 지운 것이 아니라는 소거법이 서려면 이 기록이 반드시 있어야 한다.
+    from app.core.models import ActionLog as _ActionLog
+    audit = [
+        a.message for a in fake_db.added
+        if isinstance(a, _ActionLog) and "[Holding Deleted]" in a.message and "GHOST" in a.message
+    ]
+    assert len(audit) == 1
+    assert "actor=scheduler.sync_broker_holdings" in audit[0]
 

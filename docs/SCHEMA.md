@@ -64,6 +64,8 @@ erDiagram
         datetime last_price_updated_at
         string regime_mode
         int buy_stage
+        string strategy_type
+        string management
         datetime updated_at
     }
 
@@ -172,8 +174,13 @@ erDiagram
 * `last_price_updated_at` (DATETIME, Nullable): `last_price` 관측 시각. 백그라운드 잡이 10분 이상 낡은 종목만 벌크 시세로 재갱신하는 신선도 기준.
 * `regime_mode` (VARCHAR, Nullable): ⭐ **[v2.0]** 최초 진입 당시 장세 레짐
 * `buy_stage` (INTEGER, Default: 1): ⭐ **[v2.0]** 후지모토 시게루식 1:2:6 피라미딩 매수 단계 (1=정찰, 2=확인, 3=승부)
+* `strategy_type` (VARCHAR, Default: 'regime_switching', NOT NULL): 이 보유분을 소유한 전략 슬롯 키. `management='EXTERNAL'`인 행은 어떤 슬롯 키와도 겹치지 않는 `'external'`을 갖는다.
+* `management` (VARCHAR, Default: 'BOT_OWNED', NOT NULL): **봇 관할권.** 이 보유분을 봇이 다룰 수 있는지의 단일 기준이며, 판정 권한은 `strategy_type`이 아니라 이 컬럼에 있다.
+    * `BOT_OWNED`: 봇이 매수한 포지션. 손절·트레일링·시그널 붕괴 청산·피라미딩 대상이며 슬롯 자본에 산입된다.
+    * `EXTERNAL`: 봇이 사지 않은 외부 유입 포지션. 매도·추가매수 대상이 아니고 슬롯 자본에서도 제외되며, 전량 청산(`/force-liquidate`)에서도 기본 제외된다. 다만 수량 동기화와 관측(`last_price`·`highest_price`)은 계속된다.
+    * 값 후보를 Boolean이 아닌 문자열로 여는 이유는 위임(`DELEGATED`) 추가 시 마이그레이션을 두 번 하지 않기 위함이다. 상세 설계는 [plans/holding_management_modes.md](plans/holding_management_modes.md)가 소유한다.
 * `updated_at` (DATETIME): 마지막 보유 현황 동기화 일시
-* *제약 조건:* 동일 사용자가 동일 티커를 중복 보유할 수 없도록 복합 유니크 제약(`user_id`, `ticker`) 적용.
+* *제약 조건:* 복합 유니크 제약(`user_id`, `ticker`, `strategy_type`). 전략 슬롯이 다르면 같은 티커를 동시에 보유할 수 있으며, 이 덕분에 같은 종목을 봇 슬롯과 `EXTERNAL`로 나눠 들 수 있다.
 
 ### ⑤ `action_logs` (실시간 봇 활동 로그)
 사용자 계정별 봇의 타점 포착, 매매 판단, 에러 통신 등 실시간 동작 로그를 기록합니다.

@@ -238,7 +238,27 @@ export const accountAPI = {
   getHoldings: (config?: AxiosRequestConfig) => api.get('/account/holdings', config),
   getHistory: (config?: AxiosRequestConfig) => api.get('/account/history', config),
   resetBalance: () => api.post('/account/reset-balance'),
-  forceLiquidate: () => api.post('/account/force-liquidate'),
+  forceLiquidate: (includeExternal = false) =>
+    api.post('/account/force-liquidate', undefined, { params: { include_external: includeExternal } }),
+  // confirm 기본값은 서버가 false로 둔다. 먼저 프리뷰를 받아 사용자에게 보여주고,
+  // 사용자가 확인한 뒤에만 confirm: true로 같은 엔드포인트를 다시 호출한다.
+  previewSellHolding: (ticker: string, body?: { quantity?: number; strategy_type?: string }) =>
+    api.post(`/account/holdings/${encodeURIComponent(ticker)}/sell`, { ...body, confirm: false }),
+  sellHolding: (ticker: string, body?: { quantity?: number; strategy_type?: string }) =>
+    api.post(`/account/holdings/${encodeURIComponent(ticker)}/sell`, { ...body, confirm: true }),
+  // 위임 스위치 변경. 주문을 내지 않고 되돌릴 수 있으므로 confirm 게이트가 없다.
+  // 보내지 않은 스위치는 서버가 건드리지 않는다. 바꿀 것만 실어야 한다 -
+  // guard_enabled를 함께 실으면 서버가 방어 기준선을 리셋한다.
+  updateHoldingManagement: (
+    ticker: string,
+    body: {
+      strategy_type?: string;
+      harvest_enabled?: boolean;
+      guard_enabled?: boolean;
+      guard_action?: 'ALERT_ONLY' | 'SHADOW' | 'LIQUIDATE';
+      guard_sell_ratio?: number;
+    },
+  ) => api.patch(`/account/holdings/${encodeURIComponent(ticker)}/management`, body),
 };
 
 export const scannerAPI = {

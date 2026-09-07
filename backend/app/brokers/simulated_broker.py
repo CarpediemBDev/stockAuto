@@ -5,7 +5,8 @@ from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from app.brokers.base_broker import BaseBroker
 from app.core.database import SessionLocal
-from app.core.models import Holding, TradeLog, UnfilledOrder
+from app.core.holding_audit import delete_holding
+from app.core.models import Holding, TradeLog, UnfilledOrder, MANAGEMENT_BOT_OWNED
 from app.core.config import settings
 from app.bot.fx_cache import FXRateCache
 from app.bot.trade_calculations import to_decimal, calculate_realized_pnl, fee_rate_for_trade_mode
@@ -112,6 +113,9 @@ class LocalSimulatedBroker(BaseBroker):
                 "ticker_name": h.ticker_name,
                 "strategy_type": h.strategy_type,
                 "strategy_name": Translator.translate_strategy(h.strategy_type, "ko"),
+                # 관할권은 시뮬레이터가 DB에서 그대로 읽어 넘긴다. 실증권 브로커는 계좌
+                # 응답에 이 개념이 없어 라우터가 DB와 대조해 채운다(router_account.get_holdings).
+                "management": h.management or MANAGEMENT_BOT_OWNED,
                 "avg_price": float(to_decimal(h.avg_price)),
                 "quantity": h.quantity,
                 "highest_price": float(to_decimal(h.highest_price)),
@@ -295,7 +299,8 @@ class LocalSimulatedBroker(BaseBroker):
                     # Atomic 차감 후 남은 수량이 0 이하라면(즉 h.quantity - sell_qty == 0) 삭제
                     # (여기서 h 객체는 DB와 분리되어 있으므로 수동 평가하거나 쿼리로 지움)
                     if (h.quantity - sell_qty) <= 0:
-                        db.delete(h)
+                        delete_holding(db, h, actor="simulated_broker.fill_unfilled_orders",
+                                       reason=f"unfilled sell filled ({order.order_no})")
 
                 db.delete(order)
                 db.commit()

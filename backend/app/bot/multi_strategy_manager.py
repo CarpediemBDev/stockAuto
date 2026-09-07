@@ -1,6 +1,7 @@
 from app.strategies.strategy_factory import get_strategy
 from app.core.logging import logger
 from app.bot.market_session import EXTENDED_MARKET_SESSIONS, MarketSession
+from app.core.models import MANAGEMENT_BOT_OWNED, MANAGEMENT_EXTERNAL
 
 class MultiStrategyManager:
     """
@@ -120,6 +121,12 @@ class MultiStrategyManager:
         slot_stock_values = {slot_key: 0.0 for slot_key in self.SLOTS}
         
         for h in holdings:
+            # 봇이 사지 않은 외부 보유분은 봇의 운용 자본이 아니다. 여기서 제외하지 않으면
+            # 아래 미매핑 폴백을 타고 첫 번째 슬롯 평가액에 가산되어, 사용자가 원래 갖고 있던
+            # 종목의 평가금만큼 봇의 매수여력이 조용히 깎인다.
+            if getattr(h, 'management', MANAGEMENT_BOT_OWNED) == MANAGEMENT_EXTERNAL:
+                continue
+
             qty = h.quantity
             # 평가가치 우선순위: 봇 사이클 관측가(current_price) → DB 영속 관측가(last_price) → 최고가 → 평단가.
             # Numeric 컬럼은 Decimal이므로 float 합산과 섞이지 않도록 명시 변환한다.

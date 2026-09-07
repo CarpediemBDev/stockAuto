@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Target, MessageSquare, ExternalLink,
-  TrendingUp, TrendingDown, Newspaper, ArrowUpRight, ArrowDownRight, Info, ShieldAlert
+  TrendingUp, TrendingDown, Newspaper, ArrowUpRight, ArrowDownRight, Info, ShieldAlert, Sprout,
+  SlidersHorizontal
 } from 'lucide-react';
-import useSWR from 'swr';
+import useSWR, { mutate as globalMutate } from 'swr';
 import { pollInterval } from '@/lib/sse';
-import { fetcher } from '@/lib/api';
+import { fetcher, accountAPI } from '@/lib/api';
 import { cn, usdToKrw, formatKrw } from '@/lib/utils';
 import { getProfitColor } from '@/lib/theme';
 import { Modal } from '@/components/ui';
@@ -26,6 +27,34 @@ interface Holding {
   fx_rate?: number;
   strategy_type?: string;
   strategy_name?: string;
+  /** 봇 관할권. EXTERNAL은 봇이 사지 않은 보유분이라 매도·추가매수 대상이 아니다. */
+  management?: "BOT_OWNED" | "EXTERNAL";
+  /** 수확 모드 - EXTERNAL 전용 opt-in. 급등 후 고점 이탈 시에만 자동 매도한다. */
+  harvest_enabled?: boolean;
+  /** 급등 임계를 넘겨 추적이 시작됐는지. 무장 전에는 아무 동작도 하지 않는다. */
+  harvest_armed?: boolean;
+  observed_base_price?: number | null;
+  /** 방어 경보 - EXTERNAL 전용 opt-in. 기본값에서는 알림만 보내고 매도는 하지 않는다. */
+  guard_enabled?: boolean;
+  /** 방어 조건 충족 시 동작. 기본 ALERT_ONLY. LIQUIDATE만 실제로 매도한다. */
+  guard_action?: 'ALERT_ONLY' | 'SHADOW' | 'LIQUIDATE';
+  guard_sell_ratio?: number;
+  /** 매도 대상 지정용 슬라이스 목록. id는 브로커마다 의미가 달라 키로 쓸 수 없다. */
+  slices?: { strategy_type: string; management: string; quantity: number }[];
+}
+
+/** 서버가 confirm=false 프리뷰로 돌려주는 예상 결과. 이 값을 보여준 뒤에만 실제 매도를 보낸다. */
+interface SellPreview {
+  ticker: string;
+  ticker_name: string;
+  strategy_type?: string;
+  management?: "BOT_OWNED" | "EXTERNAL";
+  held_quantity: number;
+  sell_quantity: number;
+  estimated_price: number;
+  estimated_proceeds: number;
+  estimated_realized_pnl: number;
+  estimated_return_rate: number;
 }
 
 interface NewsInfo {
@@ -38,6 +67,106 @@ interface NewsInfo {
 const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | "USD" }) => {
   const t = useTranslations("components");
   const [activeNewsItem, setActiveNewsItem] = useState<{ ticker: string; name: string; news: NewsInfo } | null>(null);
+
+  // 매도는 되돌릴 수 없으므로 2단계다 - 먼저 서버 프리뷰를 받아 보여주고, 사용자가 확인 버튼을
+  // 누르면 그때 실제 주문이 나간다. pendingTicker는 중복 탭 가드를 겸한다.
+  const [sellPreview, setSellPreview] = useState<SellPreview | null>(null);
+  const [pendingTicker, setPendingTicker] = useState<string | null>(null);
+  const [sellError, setSellError] = useState<string | null>(null);
+  const [sellResult, setSellResult] = useState<string | null>(null);
+
+  // ⚠️ 중복 요청 가드는 반드시 ref여야 한다. state로 막으면 setState가 리렌더 뒤에야
+  //    disabled를 걸기 때문에, 같은 틱에 들어온 두 번째·세 번째 탭이 전부 통과한다
+  //    (모바일 더블탭·고스트 클릭에서 실제로 재현된다 — stock-auto-mobile 세션 보고).
+  //    서버의 사용자·심볼 주문 락은 두 번째 요청에 409를 돌려줄 뿐 요청 자체를 막지 못하고,
+  //    수량을 지정한 매도라면 첫 요청이 끝난 뒤 도착한 두 번째가 그대로 또 체결될 수 있다.
+  const inFlightRef = useRef(false);
+
+  /** 동기 래치. 이미 진행 중이면 false를 돌려주고, 아니면 래치를 걸고 true를 준다. */
+  const acquireLatch = () => {
+    if (inFlightRef.current) return false;
+    inFlightRef.current = true;
+    return true;
+  };
+  const releaseLatch = () => {
+    inFlightRef.current = false;
+  };
+
+  const [togglingTicker, setTogglingTicker] = useState<string | null>(null);
+  // 위임 스위치는 카드 푸터가 아니라 전용 모달에서 다룬다. 방어를 켜면 조치 모드 3개가
+  // 더 붙어 버튼이 6개가 되는데, 415px 카드 한 줄에 넣으면 글자가 줄바꿈되어 읽을 수 없다.
+  const [delegationTarget, setDelegationTarget] = useState<Holding | null>(null);
+
+  const toggleSwitch = async (
+    h: Holding,
+    patch: {
+      harvest_enabled?: boolean;
+      guard_enabled?: boolean;
+      guard_action?: 'ALERT_ONLY' | 'SHADOW' | 'LIQUIDATE';
+      guard_sell_ratio?: number;
+    },
+    failKey: string,
+  ) => {
+    const cleanTicker = h.ticker.replace(/^[A-Z0-9]+_/, "");
+    if (!acquireLatch()) return;
+    setTogglingTicker(cleanTicker);
+    setSellError(null);
+    try {
+      await accountAPI.updateHoldingManagement(cleanTicker, {
+        strategy_type: h.strategy_type,
+        ...patch,
+      });
+      globalMutate('/account/holdings');
+    } catch (err) {
+      const detail = (err as { response?: { data?: { message?: string; detail?: string } } })?.response?.data;
+      setSellError(detail?.message || detail?.detail || t(failKey));
+    } finally {
+      setTogglingTicker(null);
+      releaseLatch();
+    }
+  };
+
+  const requestSellPreview = async (h: Holding) => {
+    if (!acquireLatch()) return;
+    const cleanTicker = h.ticker.replace(/^[A-Z0-9]+_/, "");
+    setPendingTicker(cleanTicker);
+    setSellError(null);
+    setSellResult(null);
+    try {
+      const res = await accountAPI.previewSellHolding(cleanTicker, { strategy_type: h.strategy_type });
+      setSellPreview((res.data?.data ?? res.data) as SellPreview);
+    } catch (err) {
+      const detail = (err as { response?: { data?: { message?: string; detail?: string } } })?.response?.data;
+      setSellError(detail?.message || detail?.detail || t("portfolio.sell_failed"));
+    } finally {
+      setPendingTicker(null);
+      releaseLatch();
+    }
+  };
+
+  const confirmSell = async () => {
+    if (!sellPreview) return;
+    if (!acquireLatch()) return;
+    setPendingTicker(sellPreview.ticker);
+    setSellError(null);
+    try {
+      const res = await accountAPI.sellHolding(sellPreview.ticker, {
+        quantity: sellPreview.sell_quantity,
+        strategy_type: sellPreview.strategy_type,
+      });
+      const body = (res.data?.data ?? res.data) as { message?: string };
+      setSellResult(body?.message || t("portfolio.sell_done"));
+      setSellPreview(null);
+      globalMutate('/account/holdings');
+      globalMutate('/account/balance');
+    } catch (err) {
+      const detail = (err as { response?: { data?: { message?: string; detail?: string } } })?.response?.data;
+      setSellError(detail?.message || detail?.detail || t("portfolio.sell_failed"));
+    } finally {
+      setPendingTicker(null);
+      releaseLatch();
+    }
+  };
 
   const { data: holdingsData, isLoading } = useSWR('/account/holdings', fetcher, { refreshInterval: pollInterval(15000) });
   const holdings: Holding[] = holdingsData || [];
@@ -74,6 +203,13 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
     );
   }
 
+  // 모달은 스냅샷이 아니라 폴링 최신값을 따라가야 한다. 열어둔 종목이 목록에서 사라지면 닫는다.
+  const delegationHolding = delegationTarget
+    ? holdings.find(
+        (x) => x.ticker === delegationTarget.ticker && x.strategy_type === delegationTarget.strategy_type,
+      ) ?? null
+    : null;
+
   const selectedNews = activeNewsItem?.news;
   const isPositive = selectedNews?.sentiment === 'POSITIVE';
   const isNegative = selectedNews?.sentiment === 'NEGATIVE';
@@ -83,8 +219,12 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {holdings.map((h) => {
           const cleanTicker = h.ticker.replace(/^[A-Z0-9]+_/, "");
+          const isExternal = h.management === "EXTERNAL";
           const strategyLabel = h.strategy_name || h.strategy_type?.replaceAll("_", " ") || "";
-          const strategyBadgeClass = "bg-indigo-500/15 text-indigo-400 border-indigo-500/30";
+          // 봇이 건드리지 않는 보유분은 전략 뱃지와 색을 달리해, 자동 매도를 기대하지 않도록 구분한다.
+          const strategyBadgeClass = isExternal
+            ? "bg-zinc-500/15 text-zinc-400 border-zinc-500/30"
+            : "bg-indigo-500/15 text-indigo-400 border-indigo-500/30";
 
           const currentPrice = h.current_price !== undefined ? h.current_price : h.avg_price * 1.02;
           const profitRate = h.avg_price > 0 ? ((currentPrice - h.avg_price) / h.avg_price) * 100 : 0;
@@ -93,14 +233,47 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
           const isProfitable = profitRate >= 0;
 
           return (
-            <div key={h.id} className="bg-surface-card/80 backdrop-blur-xl border border-zinc-800/80 rounded-2xl p-5 hover:border-zinc-700 transition-all group flex flex-col h-full shadow-lg">
+            // key로 h.id를 쓰면 안 된다 - KIS 경로의 id는 목록 순번이라 한 종목이 청산되면
+            // 나머지 행의 id가 전부 밀리고, Toss 경로는 id가 없다. (ticker, strategy_type)이
+            // 브로커 무관하게 안정적인 키다(DB 유니크 제약과 동일).
+            <div key={`${h.ticker}:${h.strategy_type ?? ''}`} className="bg-surface-card/80 backdrop-blur-xl border border-zinc-800/80 rounded-2xl p-5 hover:border-zinc-700 transition-all group flex flex-col h-full shadow-lg">
               <div className="flex justify-between items-start mb-4">
                 <div className="min-w-0 flex-1 mr-3">
                   <h4 className="text-xs font-bold text-zinc-400 tracking-wider uppercase flex items-center gap-1.5 flex-wrap">
                     {cleanTicker}
-                    {strategyLabel && (
+                    {/* EXTERNAL은 서버가 strategy_name을 "봇 관리 안 함"으로 치환해 내려주므로
+                        아래 전용 배지와 문구가 겹친다. 관할권 표시는 전용 배지 하나로만 한다. */}
+                    {strategyLabel && !isExternal && (
                       <span className={`text-[8px] font-black px-1.5 py-0.5 rounded border tracking-wider uppercase ${strategyBadgeClass}`}>
                         {strategyLabel}
+                      </span>
+                    )}
+                    {isExternal && (
+                      <span
+                        className="text-[8px] font-black px-1.5 py-0.5 rounded border tracking-wider uppercase bg-slate-500/15 text-slate-300 border-slate-500/30"
+                        title={t("portfolio.external_badge_tip")}
+                      >
+                        {t("portfolio.external_badge")}
+                      </span>
+                    )}
+                    {/* 켜진 위임 스위치는 배지로만 알린다. 조작은 위임 설정 모달에서 한다. */}
+                    {isExternal && h.harvest_enabled && (
+                      <span className="text-[8px] font-black px-1.5 py-0.5 rounded border tracking-wider uppercase bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                        {h.harvest_armed ? t("portfolio.harvest_armed_label") : t("portfolio.harvest_on")}
+                      </span>
+                    )}
+                    {isExternal && h.guard_enabled && (
+                      <span className={cn(
+                        "text-[8px] font-black px-1.5 py-0.5 rounded border tracking-wider uppercase",
+                        h.guard_action === "LIQUIDATE"
+                          ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
+                          : "bg-sky-500/15 text-sky-400 border-sky-500/30"
+                      )}>
+                        {h.guard_action === "LIQUIDATE"
+                          ? t("portfolio.guard_action_liquidate")
+                          : h.guard_action === "SHADOW"
+                            ? t("portfolio.guard_action_shadow")
+                            : t("portfolio.guard_on")}
                       </span>
                     )}
                     <span className={`text-[8px] font-black px-1 py-0.5 rounded border tracking-wider uppercase ${
@@ -234,18 +407,246 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                       }
                     </span>
                   </div>
-                  {dropFromPeak < -3 && h.highest_price > h.avg_price && (
-                    <div className="flex items-center text-amber-500 animate-pulse">
-                      <ShieldAlert size={16} className="mr-1" />
-                      <span className="text-[11px] font-bold">{t("portfolio.dynamic_exit")}</span>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {isExternal && (
+                      <button
+                        type="button"
+                        onClick={() => setDelegationTarget(h)}
+                        className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg border border-zinc-700 text-zinc-400 hover:bg-zinc-800 transition-colors"
+                      >
+                        <SlidersHorizontal size={12} />
+                        {t("portfolio.delegation_settings")}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => requestSellPreview(h)}
+                      disabled={pendingTicker !== null}
+                      className="text-[11px] font-bold px-2.5 py-1 rounded-lg border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {t("portfolio.sell_action")}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* 봇 위임 설정 모달 — 스위치와 조치 모드를 카드 밖으로 뺀다 */}
+      <Modal
+        isOpen={!!delegationHolding}
+        onClose={() => { if (!togglingTicker) setDelegationTarget(null); }}
+        maxWidth="sm"
+        title={
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal size={18} className="text-zinc-400" />
+            <span className="font-bold">{t("portfolio.delegation_title")}</span>
+          </div>
+        }
+      >
+        {delegationHolding && (
+          <div className="space-y-5 text-sm">
+            <p className="text-zinc-500 text-xs leading-relaxed">
+              {t("portfolio.delegation_intro", { ticker: delegationHolding.ticker.replace(/^[A-Z0-9]+_/, "") })}
+            </p>
+
+            {/* 수확 */}
+            <div className="rounded-xl border border-zinc-800 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-1.5 font-bold text-slate-200">
+                  <Sprout size={14} className="text-emerald-400" />
+                  {t("portfolio.harvest_title")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => toggleSwitch(delegationHolding, { harvest_enabled: !delegationHolding.harvest_enabled }, "portfolio.harvest_toggle_failed")}
+                  disabled={togglingTicker !== null}
+                  className={cn(
+                    "text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-40 shrink-0",
+                    delegationHolding.harvest_enabled
+                      ? "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                      : "border-zinc-700 text-zinc-500 hover:bg-zinc-800"
+                  )}
+                >
+                  {delegationHolding.harvest_enabled
+                    ? (delegationHolding.harvest_armed ? t("portfolio.harvest_armed_label") : t("portfolio.harvest_on"))
+                    : t("portfolio.harvest_off")}
+                </button>
+              </div>
+              <p className="text-[11px] text-zinc-500 leading-relaxed">
+                {delegationHolding.harvest_armed ? t("portfolio.harvest_armed_tip") : t("portfolio.harvest_tip")}
+              </p>
+            </div>
+
+            {/* 방어 */}
+            <div className="rounded-xl border border-zinc-800 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-1.5 font-bold text-slate-200">
+                  <ShieldAlert size={14} className="text-sky-400" />
+                  {t("portfolio.guard_title")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => toggleSwitch(delegationHolding, { guard_enabled: !delegationHolding.guard_enabled }, "portfolio.guard_toggle_failed")}
+                  disabled={togglingTicker !== null}
+                  className={cn(
+                    "text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-40 shrink-0",
+                    delegationHolding.guard_enabled
+                      ? "border-sky-500/40 text-sky-400 hover:bg-sky-500/10"
+                      : "border-zinc-700 text-zinc-500 hover:bg-zinc-800"
+                  )}
+                >
+                  {delegationHolding.guard_enabled ? t("portfolio.guard_on") : t("portfolio.guard_off")}
+                </button>
+              </div>
+              <p className="text-[11px] text-zinc-500 leading-relaxed">{t("portfolio.guard_tip")}</p>
+
+              {delegationHolding.guard_enabled && (
+                <div className="pt-2 mt-1 border-t border-zinc-800/70 space-y-2">
+                  <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-500">
+                    {t("portfolio.guard_action_label")}
+                  </span>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(["ALERT_ONLY", "SHADOW", "LIQUIDATE"] as const).map((mode) => {
+                      const active = (delegationHolding.guard_action || "ALERT_ONLY") === mode;
+                      const label =
+                        mode === "ALERT_ONLY" ? t("portfolio.guard_action_alert_only")
+                        : mode === "SHADOW" ? t("portfolio.guard_action_shadow")
+                        : t("portfolio.guard_action_liquidate");
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => toggleSwitch(delegationHolding, { guard_action: mode }, "portfolio.guard_toggle_failed")}
+                          disabled={togglingTicker !== null}
+                          className={cn(
+                            "text-[10px] font-bold px-1.5 py-1.5 rounded-lg border transition-colors disabled:opacity-40 leading-tight",
+                            active
+                              ? (mode === "LIQUIDATE"
+                                  ? "border-rose-500/50 text-rose-400 bg-rose-500/10"
+                                  : "border-sky-500/40 text-sky-400 bg-sky-500/10")
+                              : "border-zinc-800 text-zinc-600 hover:bg-zinc-800"
+                          )}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-zinc-500 leading-relaxed">{t("portfolio.guard_action_tip")}</p>
+
+                  {/* 조치가 실제로 나가기까지의 조건을 미리 알린다. 모르면 모드를 바꿔놓고
+                      "왜 안 팔리지?"가 된다 — 스트릭이 0부터 다시 쌓이기 때문이다. */}
+                  <p className="text-[11px] text-zinc-600 leading-relaxed">
+                    {t("portfolio.guard_streak_notice")}
+                  </p>
+
+                  {delegationHolding.guard_action === "LIQUIDATE" && (
+                    <div className="space-y-2 pt-2 mt-1 border-t border-zinc-800/70">
+                      <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-500">
+                        {t("portfolio.guard_sell_ratio_label")}
+                      </span>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {[0.25, 0.5, 0.75, 1].map((ratio) => {
+                          const active = Math.abs((delegationHolding.guard_sell_ratio ?? 0.5) - ratio) < 0.001;
+                          return (
+                            <button
+                              key={ratio}
+                              type="button"
+                              onClick={() => toggleSwitch(delegationHolding, { guard_sell_ratio: ratio }, "portfolio.guard_toggle_failed")}
+                              disabled={togglingTicker !== null}
+                              className={cn(
+                                "text-[11px] font-bold px-1.5 py-1.5 rounded-lg border transition-colors disabled:opacity-40",
+                                active
+                                  ? "border-rose-500/50 text-rose-400 bg-rose-500/10"
+                                  : "border-zinc-800 text-zinc-600 hover:bg-zinc-800"
+                              )}
+                            >
+                              {Math.round(ratio * 100)}%
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[11px] text-rose-400 leading-relaxed">
+                        {t("portfolio.guard_action_warning")}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {sellError && <p className="text-[11px] text-rose-400">{sellError}</p>}
+          </div>
+        )}
+      </Modal>
+
+      {/* 개별 매도 확인 모달 — 서버 프리뷰를 그대로 보여주고, 확인해야 주문이 나간다 */}
+      <Modal
+        isOpen={!!sellPreview}
+        onClose={() => { if (!pendingTicker) setSellPreview(null); }}
+        maxWidth="sm"
+        title={
+          <div className="flex items-center gap-2 text-rose-400">
+            <ShieldAlert size={18} />
+            <span className="font-bold">{t("portfolio.sell_confirm_title")}</span>
+          </div>
+        }
+      >
+        {sellPreview && (
+          <div className="space-y-4 text-sm">
+            <p className="text-zinc-400 leading-relaxed">
+              {t("portfolio.sell_confirm_body", {
+                ticker: sellPreview.ticker,
+                quantity: sellPreview.sell_quantity,
+              })}
+            </p>
+            <div className="rounded-xl border border-zinc-800 divide-y divide-zinc-800/70">
+              {[
+                [t("portfolio.sell_est_price"), `$${sellPreview.estimated_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+                [t("portfolio.sell_est_proceeds"), `$${sellPreview.estimated_proceeds.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+                [t("portfolio.sell_est_pnl"), `$${sellPreview.estimated_realized_pnl.toLocaleString(undefined, { minimumFractionDigits: 2 })} (${sellPreview.estimated_return_rate.toFixed(2)}%)`],
+              ].map(([label, value]) => (
+                <div key={label} className="flex justify-between px-3 py-2">
+                  <span className="text-zinc-500 text-xs">{label}</span>
+                  <span className="font-mono text-slate-200">{value}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-amber-500/90">{t("portfolio.sell_irreversible")}</p>
+            {sellError && <p className="text-[11px] text-rose-400">{sellError}</p>}
+            <div className="flex gap-2 justify-end pt-1">
+              <button
+                type="button"
+                onClick={() => setSellPreview(null)}
+                disabled={pendingTicker !== null}
+                className="px-3 py-1.5 text-xs font-bold rounded-lg border border-zinc-700 text-zinc-400 hover:bg-zinc-800 disabled:opacity-40"
+              >
+                {t("portfolio.sell_cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={confirmSell}
+                disabled={pendingTicker !== null}
+                className="px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-600 text-white hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {pendingTicker ? t("portfolio.sell_pending") : t("portfolio.sell_confirm_action")}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {(sellResult || (sellError && !sellPreview)) && (
+        <div className={cn(
+          "mt-4 text-xs rounded-lg border px-3 py-2",
+          sellResult ? "border-emerald-500/30 text-emerald-400" : "border-rose-500/30 text-rose-400"
+        )}>
+          {sellResult || sellError}
+        </div>
+      )}
 
       {/* AI 뉴스 분석 모달 */}
       <Modal

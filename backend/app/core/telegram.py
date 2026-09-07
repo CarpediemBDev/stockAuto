@@ -1,4 +1,3 @@
-import asyncio
 import secrets
 import threading
 import time
@@ -319,18 +318,29 @@ async def _send_message_async_coro(user_id: int, text: str, db=None, parse_mode:
 
 def send_message_async(user_id: int, text: str, parse_mode: str | None = "Markdown"):
     """
-    비동기식 텔레그램 메시지 전송 (Non-blocking asyncio Task 스케줄링)
+    호출자를 붙잡지 않는 텔레그램 발송 (루프 수명과 분리된 전용 스레드 풀에 위임)
 
     여기에는 의도적으로 db 인자를 두지 않는다. 발송이 호출자보다 늦게 실행되는 fire-and-forget
     이므로 요청 스코프 세션을 넘기면 이미 닫힌 세션을 쓰게 된다. 세션을 재사용해야 하는 호출자는
     _send_message_async_coro를 직접 await 하거나 send_message_sync를 쓴다.
+
+    loop.create_task로 띄우면 안 된다. 주 호출자인 매매 루프는 BackgroundScheduler 워커
+    스레드에서 asyncio.run(async_trading_loop())로 돌기 때문에(scheduler.py
+    trading_loop_wrapper), 본문이 끝나는 순간 asyncio.run이 남은 태스크를 전부 취소하고 루프를
+    닫는다. 발송 태스크가 텔레그램 왕복(수백 ms)을 마치기 전에 사이클이 끝나면 알림은 아무
+    로그도 남기지 않고 통째로 사라진다 - 매도 체결 직후 같은 자리에서 생성되는
+    equity-snapshot-refresh 태스크가 CancelledError로 죽는 것과 정확히 같은 원인이다.
+    루프 수명과 무관한 모듈 레벨 스레드 풀로 넘겨야 사이클 길이와 무관하게 전달이 보장된다.
+
+    반환값은 전송 Future다. 호출자는 기다릴 필요가 없고, 테스트는 Future로 완료를 결정론적으로
+    대기할 수 있다.
     """
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_send_message_async_coro(user_id, text, parse_mode=parse_mode))
-    except RuntimeError:
-        # 이벤트 루프가 없는 동기식 백그라운드 스레드인 경우 안전하게 동기식 발송으로 대체
-        send_message_sync(user_id, text, parse_mode=parse_mode)
+    return _get_alert_executor().submit(
+        send_message_sync,
+        user_id,
+        text,
+        parse_mode=parse_mode,
+    )
 
 def _send_direct_message(chat_id: str, text: str, parse_mode: str | None = "Markdown") -> bool:
     """

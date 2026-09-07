@@ -15,6 +15,7 @@ from app.bot.trade_calculations import (
 from app.core.database import SessionLocal
 from app.core.locks import acquire_symbol_order_lock, RedisLockUnavailable
 from app.core.logging import logger
+from app.core.holding_audit import delete_holding
 from app.core.models import ActionLog, BrokerOrder, Holding, TradeLog, UserSettings, utc_now_aware
 from app.core.telegram import send_message_async
 
@@ -55,6 +56,22 @@ def has_unresolved_orders(db: Session, user_id: int) -> bool:
     """주어진 사용자의 미체결/진행중 주문이 존재하는지 여부를 반환합니다."""
     return db.query(BrokerOrder.id).filter(
         BrokerOrder.user_id == user_id,
+        BrokerOrder.status.in_(UNRESOLVED_ORDER_STATUSES),
+    ).first() is not None
+
+
+def has_unresolved_orders_for_ticker(db: Session, user_id: int, ticker: str) -> bool:
+    """해당 티커에 한정해 미체결/진행중 주문이 있는지 반환합니다.
+
+    브로커 수량과 DB 수량의 차분을 어느 보유 슬라이스에 배분할지 가를 때 쓴다.
+    사용자 단위(has_unresolved_orders)로 판정하면 무관한 종목의 미체결 주문 하나가
+    전체 티커의 배분 규칙을 뒤집으므로 티커 단위로 좁힌다.
+    """
+    if not ticker:
+        return False
+    return db.query(BrokerOrder.id).filter(
+        BrokerOrder.user_id == user_id,
+        BrokerOrder.ticker == ticker,
         BrokerOrder.status.in_(UNRESOLVED_ORDER_STATUSES),
     ).first() is not None
 
@@ -271,7 +288,8 @@ def _apply_sell_delta(db: Session, order: BrokerOrder, delta: int, filled_price:
 
     remaining_qty = holding.quantity - delta
     if remaining_qty == 0:
-        db.delete(holding)
+        delete_holding(db, holding, actor="order_reconciler.apply_sell_fill",
+                       reason=f"sell reconciled to zero (order {order.broker_order_no or order.intent_id})")
     else:
         holding.quantity = remaining_qty
 
