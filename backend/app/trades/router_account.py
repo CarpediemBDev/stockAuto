@@ -20,11 +20,16 @@ from app.core.equity_repository import get_latest_equity_snapshot
 from fastapi.concurrency import run_in_threadpool
 from app.core.dependencies import get_current_user
 from app.core.holding_audit import delete_holding
+from decimal import Decimal
+
+from app.core.logging import logger
 from app.core.models import (
-    User, Holding, TradeLog, ActionLog, utc_now_aware,
-    MANAGEMENT_BOT_OWNED, MANAGEMENT_EXTERNAL,
+    User, Holding, TradeLog, ActionLog, Strategy, utc_now_aware,
+    MANAGEMENT_BOT_OWNED, MANAGEMENT_EXTERNAL, MANAGEMENT_DELEGATED,
+    EXTERNAL_STRATEGY_TYPE,
     GUARD_ACTIONS, GUARD_ACTION_ALERT_ONLY,
 )
+from app.strategies.strategy_factory import get_strategy
 from app.core.config import settings as app_settings
 from app.core.locks import (
     RedisLockUnavailable,
@@ -246,8 +251,25 @@ def get_holdings(
             "strategy_type": holding.strategy_type,
             "management": value,
             "quantity": holding.quantity,
+            # 위임분은 손절선이 매수가가 아니라 위임 시점가 기준으로 잡힌다.
+            # 화면이 "왜 아직 안 팔았지"를 설명하려면 이 값이 필요하다.
+            "risk_basis_price": (
+                float(holding.risk_basis_price)
+                if holding.risk_basis_price is not None
+                else None
+            ),
         })
-        if management_by_ticker.get(holding.ticker) == MANAGEMENT_BOT_OWNED:
+        # 한 티커가 여러 슬라이스로 갈릴 때 대표 표시값을 정한다.
+        # 봇이 손대는 쪽이 이긴다 - 사용자가 알아야 하는 것은 "이 종목에 봇이 개입한다"이며,
+        # 개입하지 않는 슬라이스가 대표값을 가져가면 그 경고가 사라진다.
+        # 정확한 내역은 slices 배열이 그대로 싣는다.
+        _display_rank = {
+            MANAGEMENT_BOT_OWNED: 2,
+            MANAGEMENT_DELEGATED: 1,
+            MANAGEMENT_EXTERNAL: 0,
+        }
+        _current = management_by_ticker.get(holding.ticker)
+        if _current is not None and _display_rank.get(_current, 0) >= _display_rank.get(value, 0):
             continue
         management_by_ticker[holding.ticker] = value
     for holding in holdings:
@@ -288,6 +310,8 @@ def get_holdings(
             # "단일 전략 (external)" 같은 폴백 문자열을 낸다. 전략이 아니라 관할권이므로
             # 표시 이름을 여기서 확정한다.
             holding["strategy_name"] = "봇 관리 안 함"
+        # DELEGATED는 실제 전략 슬롯 키를 가지므로 번역기가 정상적으로 전략명을 낸다.
+        # 이름을 덮지 않는 것이 맞다 - 어느 전략에 맡겼는지가 사용자가 알아야 할 정보다.
     return holdings
 
 @router.post("/reset-balance")
@@ -329,6 +353,165 @@ def reset_balance(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"계좌 초기화 중 오류가 발생했습니다: {str(e)}")
 
+def _revoke_delegation(holding: Holding) -> None:
+    """위임을 되돌려 다시 봇 관할 밖(EXTERNAL)으로 만든다.
+
+    위임을 되돌릴 수 없게 만들면 아무도 누르지 않는다. 되돌리는 순간 봇은 손을 떼야 하므로
+    슬롯 키를 EXTERNAL 전용 값으로 돌려놓고 리스크 기준가를 지운다. 기준가를 남기면 나중에
+    다시 위임했을 때 옛 시점가로 손절을 재게 되고, 그 사이의 하락이 전부 손절 폭에 잡힌다.
+
+    수량·평단가(avg_price)는 건드리지 않는다. 그것은 사용자의 실제 매수 기록이며 관할권
+    전환으로 바뀌어서는 안 되는 값이다.
+    """
+    holding.management = MANAGEMENT_EXTERNAL
+    holding.strategy_type = EXTERNAL_STRATEGY_TYPE
+    holding.risk_basis_price = None
+    holding.exit_breach_started_at = None
+
+
+async def _delegate_holding(
+    db: Session,
+    current_user: User,
+    holding: Holding,
+    delegate_slot: str | None,
+    clean_ticker: str,
+) -> dict:
+    """보유분을 봇에 위임하고 재진입 심사 결과를 돌려준다.
+
+    위임 시점에 즉시 청산하지 않는다. 청산은 다음 사이클의 정상 규칙에 맡긴다.
+    위임 버튼이 곧 매도 버튼이 되면 아무도 누르지 않기 때문이다.
+
+    재진입 심사는 게이트가 아니라 통보다. "봇 기준으로는 지금 새로 살 종목이 아니다"를
+    알려 주되 위임 자체를 막지는 않는다. 이미 들고 있는 것을 맡기는 결정과 새로 사는
+    결정은 다른 판단이며, 후자의 기준으로 전자를 거부하면 손실 난 종목은 영원히 맡길 수 없다.
+    """
+    slot_key = (delegate_slot or "").strip().lower()
+    if not slot_key:
+        raise HTTPException(
+            status_code=400,
+            detail="위임하려면 맡길 전략 슬롯(delegate_slot)을 지정해야 합니다.",
+        )
+    if slot_key == EXTERNAL_STRATEGY_TYPE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{EXTERNAL_STRATEGY_TYPE}'은 관할권 표식이지 전략 슬롯이 아닙니다.",
+        )
+
+    catalog_row = (
+        db.query(Strategy)
+        .filter(
+            Strategy.strategy_type == slot_key,
+            Strategy.is_active == True,  # noqa: E712
+            Strategy.is_selectable == True,  # noqa: E712
+        )
+        .first()
+    )
+    if catalog_row is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"선택할 수 없는 전략 슬롯입니다: {slot_key}",
+        )
+
+    # (user_id, ticker, strategy_type) 유니크 제약. 같은 슬롯에 같은 티커가 이미 있으면
+    # 위임이 그 행과 충돌한다. 봇 보유분과 사용자 보유분을 한 행으로 합치면 평단가가
+    # 섞여 실현손익이 오염되므로, 합치지 않고 거부한다.
+    conflict = (
+        db.query(Holding)
+        .filter(
+            Holding.user_id == current_user.id,
+            Holding.ticker == holding.ticker,
+            Holding.strategy_type == slot_key,
+            Holding.id != holding.id,
+        )
+        .first()
+    )
+    if conflict is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{clean_ticker}는 이미 {slot_key} 슬롯에 보유 중입니다. "
+                "평단가가 섞이지 않도록 다른 슬롯을 고르세요."
+            ),
+        )
+
+    delegated_at_price = await _resolve_market_price(holding)
+
+    holding.management = MANAGEMENT_DELEGATED
+    holding.strategy_type = slot_key
+    # 리스크 기준가와 고점을 위임 시점가로 박는다. avg_price는 그대로 둔다 -
+    # 실현손익은 사용자가 실제로 낸 돈으로 계산되어야 한다.
+    holding.risk_basis_price = Decimal(str(delegated_at_price))
+    holding.highest_price = delegated_at_price
+    # 추가매수를 봉인한다. 봇이 물타기로 사용자의 기존 손실 포지션을 키우면
+    # 위임의 취지("있는 것을 정리해 달라")와 정반대가 된다.
+    holding.buy_stage = 3
+    # 수확·방어는 EXTERNAL 전용 옵션이라 위임과 동시에 꺼야 판정이 이중으로 돌지 않는다.
+    holding.harvest_enabled = False
+    holding.harvest_armed = False
+    holding.harvest_breach_started_at = None
+    holding.guard_enabled = False
+    holding.guard_action = GUARD_ACTION_ALERT_ONLY
+    holding.guard_streak = 0
+    holding.guard_streak_started_at = None
+    holding.guard_baseline_score = None
+    holding.guard_baseline_low = None
+    # 위임 전에 쌓여 있던 손절 대기는 의미가 없다. 기준가가 바뀌었으므로 처음부터 센다.
+    holding.exit_breach_started_at = None
+
+    screening = await _screen_reentry(slot_key, clean_ticker)
+    scheduler_mod.log_action(
+        db,
+        current_user.id,
+        f"[Delegation] {clean_ticker} delegated to {slot_key} at ${delegated_at_price:,.4f} "
+        f"| screening={screening.get('verdict')}",
+        "WARNING",
+    )
+    return {"delegated_at_price": delegated_at_price, **screening}
+
+
+async def _screen_reentry(slot_key: str, clean_ticker: str) -> dict:
+    """봇의 신규 진입 기준으로 이 종목을 지금 살 만한지 한 번 심사한다.
+
+    기존 진입 게이트를 그대로 재사용한다. 별도 기준을 만들면 "봇이 살 종목"의 정의가
+    두 벌이 되어 어느 쪽이 참인지 알 수 없게 된다.
+
+    심사 실패(시세·지표 조회 불가)는 위임을 막지 않는다. 통보가 목적이므로 판정 불가는
+    판정 불가로 알린다.
+    """
+    try:
+        from app.scanner.scanner import analyze_single_ticker, get_cached_market_sentiment
+
+        sentiment = get_cached_market_sentiment() or "NEUTRAL"
+        analysis = await analyze_single_ticker(clean_ticker)
+        if not analysis:
+            return {"verdict": "UNKNOWN", "reason": "지표를 산출할 수 없어 심사하지 못했습니다."}
+
+        strategy_instance = get_strategy(slot_key)
+        score = strategy_instance.calculate_score(
+            analysis.get("details") or analysis, sentiment, is_entry=True
+        )
+        cutoff = strategy_instance.get_cutoff_score(sentiment)
+        passed = score >= cutoff
+        return {
+            "verdict": "PASS" if passed else "BELOW_CUTOFF",
+            "score": round(float(score), 2),
+            "cutoff_score": round(float(cutoff), 2),
+            "sentiment": sentiment,
+            "reason": (
+                f"{strategy_instance.name} 기준 점수 {score:.1f}점으로 진입 기준 {cutoff:.1f}점을 넘습니다."
+                if passed
+                else (
+                    f"{strategy_instance.name} 기준 점수 {score:.1f}점으로 진입 기준 {cutoff:.1f}점에 미달합니다. "
+                    "봇 기준으로는 지금 새로 살 종목이 아닙니다. 위임은 그대로 적용됐으며 "
+                    "청산 여부는 다음 사이클부터 봇의 정상 규칙이 판단합니다."
+                )
+            ),
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[Delegation] Re-entry screening failed for %s: %s", clean_ticker, exc)
+        return {"verdict": "UNKNOWN", "reason": "심사 중 오류가 발생해 판정하지 못했습니다."}
+
+
 class HoldingManagementRequest(BaseModel):
     """보유 종목의 봇 위임 스위치 변경 요청.
 
@@ -366,12 +549,24 @@ def update_holding_management(
         db, current_user.id, clean_ticker, payload.strategy_type
     )
 
-    if (holding.management or MANAGEMENT_BOT_OWNED) != MANAGEMENT_EXTERNAL:
+    current_management = holding.management or MANAGEMENT_BOT_OWNED
+    if current_management == MANAGEMENT_BOT_OWNED:
         raise HTTPException(
             status_code=400,
             detail=(
                 f"{clean_ticker}는 봇이 매수한 종목이라 위임 스위치를 바꿀 수 없습니다. "
                 "봇 관할 밖(EXTERNAL) 보유분에만 적용됩니다."
+            ),
+        )
+
+    # 수확·방어는 EXTERNAL 전용 옵션이다. 위임분에 함께 켜 두면 같은 포지션을 두 규칙이
+    # 동시에 판정한다 - 봇의 손절과 수확 트레일링이 서로 다른 앵커로 매도를 내게 된다.
+    if current_management == MANAGEMENT_DELEGATED:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{clean_ticker}는 봇에 위임된 종목이라 수확·방어 스위치를 쓸 수 없습니다. "
+                "봇이 자기 규칙으로 이미 판정하고 있습니다. 스위치를 쓰려면 위임을 먼저 해제하세요."
             ),
         )
 
@@ -461,6 +656,107 @@ def update_holding_management(
         ),
         "guard_action": holding.guard_action or GUARD_ACTION_ALERT_ONLY,
         "guard_sell_ratio": float(holding.guard_sell_ratio or 0.5),
+        "risk_basis_price": (
+            float(holding.risk_basis_price)
+            if holding.risk_basis_price is not None
+            else None
+        ),
+    }
+
+
+class HoldingDelegationRequest(BaseModel):
+    """보유 종목의 봇 관할권 이전 요청.
+
+    스위치(PATCH /management)와 계약을 나눈 이유는 행위의 성질이 다르기 때문이다.
+    스위치는 값 하나를 뒤집는 즉시 반영이고 네트워크 I/O가 없다. 위임은 시세를 조회해
+    리스크 기준가를 박고, 봇의 진입 기준으로 재심사한 결과를 돌려준다.
+
+    confirm 게이트를 두지 않는 것은 위임 자체가 주문을 내지 않기 때문이다. 위임 시점에
+    즉시 청산하지 않으며 청산은 다음 사이클의 정상 규칙에 맡긴다. 되돌리려면 action=REVOKE다.
+    """
+    action: str = Field(default="DELEGATE", description="DELEGATE(봇에 맡김) 또는 REVOKE(되돌림)")
+    strategy_type: str | None = Field(
+        default=None, description="같은 티커를 여러 슬라이스로 보유한 경우 대상 지정"
+    )
+    delegate_slot: str | None = Field(
+        default=None, description="맡길 전략 슬롯 키. action=DELEGATE이면 필수"
+    )
+
+
+@router.post("/holdings/{ticker}/delegation")
+async def change_holding_delegation(
+    ticker: str,
+    payload: HoldingDelegationRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """봇 관할 밖(EXTERNAL) 보유분을 봇에 위임하거나 위임을 되돌린다.
+
+    위임은 스위치가 아니라 관할권 자체의 이전이다. 수확·방어가 "이런 조건에서만 팔아라"라면
+    위임은 "네 규칙대로 알아서 해라"다. 그래서 값 하나를 켜는 것이 아니라 리스크 기준가·고점·
+    추가매수 단계·슬롯 키를 함께 재설정한다.
+
+    BOT_OWNED로는 전환할 수 없다. 봇이 사지 않은 포지션을 봇 매수분과 같은 원장에 섞으면
+    전략 성과 측정이 깨지므로, 위임분은 끝까지 DELEGATED로 구분한다.
+    """
+    clean_ticker = (ticker or "").strip().upper()
+    holding = _resolve_target_holding(
+        db, current_user.id, clean_ticker, payload.strategy_type
+    )
+
+    current_management = holding.management or MANAGEMENT_BOT_OWNED
+    if current_management == MANAGEMENT_BOT_OWNED:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{clean_ticker}는 봇이 매수한 종목이라 관할권을 바꿀 수 없습니다. "
+                "봇 관할 밖(EXTERNAL) 보유분에만 적용됩니다."
+            ),
+        )
+
+    action = (payload.action or "").strip().upper()
+    if action not in ("DELEGATE", "REVOKE"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"허용되지 않은 action입니다: {payload.action}. 허용: ['DELEGATE', 'REVOKE']",
+        )
+
+    screening = None
+    if action == "DELEGATE":
+        if current_management == MANAGEMENT_DELEGATED:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{clean_ticker}는 이미 위임 중입니다.",
+            )
+        screening = await _delegate_holding(
+            db, current_user, holding, payload.delegate_slot, clean_ticker
+        )
+    else:
+        if current_management != MANAGEMENT_DELEGATED:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{clean_ticker}는 위임 상태가 아닙니다.",
+            )
+        _revoke_delegation(holding)
+        scheduler_mod.log_action(
+            db, current_user.id,
+            f"[Delegation] {clean_ticker} delegation revoked; back to EXTERNAL",
+            "WARNING",
+        )
+
+    db.commit()
+    db.refresh(holding)
+    return {
+        "ticker": holding.ticker,
+        "strategy_type": holding.strategy_type,
+        "management": holding.management,
+        "risk_basis_price": (
+            float(holding.risk_basis_price)
+            if holding.risk_basis_price is not None
+            else None
+        ),
+        "highest_price": holding.highest_price,
+        "screening": screening,
     }
 
 

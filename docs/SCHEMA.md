@@ -60,6 +60,8 @@ erDiagram
         int quantity
         float highest_price
         float rolling_stop_price
+        datetime exit_breach_started_at
+        float risk_basis_price
         float last_price
         datetime last_price_updated_at
         string regime_mode
@@ -170,6 +172,7 @@ erDiagram
 * `quantity` (INTEGER): 보유 수량
 * `highest_price` (FLOAT): **매수 이후 최고가 (Trailing Stop 고점 기준점)**
 * `rolling_stop_price` (NUMERIC(20,4), Nullable): 롤링 박스 스탑 래칫 가격 — 최근 N봉 저점 박스 하단의 단조 증가 스탑. `use_rolling_box_stop` opt-in 전략만 갱신·판정에 사용하며 NULL은 미시드 상태.
+* `exit_breach_started_at` (DATETIME, Nullable): **봇 소유 포지션의 손절 노이즈 버퍼 기준 시각.** 손절·트레일링·롤링박스 이탈을 처음 관측한 시각이며, 회복하거나 매도가 체결되면 NULL로 되돌린다. 매도는 관측 횟수(2회)와 경과 시간(2분)을 **모두** 충족해야 확정된다. 사이클 수만으로 세면 안 되는 이유는 매매 루프의 실제 주기가 등록값 1분이 아니라 실측 중앙값 124초(104~846초)이기 때문이다(재현: `backend/tests/test_scheduler_cycle_interval.py`). 시각을 DB에 두는 것은 재기동이 진행 중이던 대기를 지우지 못하게 하기 위함이다.
 * `last_price` (NUMERIC(20,4), Nullable): 스케줄러가 관측·영속화한 최근 현재가 (`avg_price`와 동일한 USD 기준). 유저 대면 잔고/보유종목 API가 외부 시세 호출 없이 평가금을 계산하는 원천.
 * `last_price_updated_at` (DATETIME, Nullable): `last_price` 관측 시각. 백그라운드 잡이 10분 이상 낡은 종목만 벌크 시세로 재갱신하는 신선도 기준.
 * `regime_mode` (VARCHAR, Nullable): ⭐ **[v2.0]** 최초 진입 당시 장세 레짐
@@ -177,8 +180,10 @@ erDiagram
 * `strategy_type` (VARCHAR, Default: 'regime_switching', NOT NULL): 이 보유분을 소유한 전략 슬롯 키. `management='EXTERNAL'`인 행은 어떤 슬롯 키와도 겹치지 않는 `'external'`을 갖는다.
 * `management` (VARCHAR, Default: 'BOT_OWNED', NOT NULL): **봇 관할권.** 이 보유분을 봇이 다룰 수 있는지의 단일 기준이며, 판정 권한은 `strategy_type`이 아니라 이 컬럼에 있다.
     * `BOT_OWNED`: 봇이 매수한 포지션. 손절·트레일링·시그널 붕괴 청산·피라미딩 대상이며 슬롯 자본에 산입된다.
+    * `DELEGATED`: 사용자가 봇에 넘긴 외부 포지션. 봇의 손절·트레일링·시그널 붕괴 청산을 그대로 받고 슬롯 자본에 산입되며 전량 청산 대상이다. 단 추가매수는 봉인되고(`buy_stage=3`) 리스크 앵커가 `risk_basis_price`로 분리된다. `BOT_OWNED`로 승격되지 않는다 - 성과 원장을 분리하기 위해 끝까지 구분한다.
     * `EXTERNAL`: 봇이 사지 않은 외부 유입 포지션. 매도·추가매수 대상이 아니고 슬롯 자본에서도 제외되며, 전량 청산(`/force-liquidate`)에서도 기본 제외된다. 다만 수량 동기화와 관측(`last_price`·`highest_price`)은 계속된다.
     * 값 후보를 Boolean이 아닌 문자열로 여는 이유는 위임(`DELEGATED`) 추가 시 마이그레이션을 두 번 하지 않기 위함이다. 상세 설계는 [plans/holding_management_modes.md](plans/holding_management_modes.md)가 소유한다.
+* `risk_basis_price` (NUMERIC(20,4), Nullable): **위임 포지션의 리스크 기준가.** 손절선과 트레일링·롤링박스의 하한 가드가 이 값을 앵커로 쓴다. NULL이면 `avg_price`로 폴백하므로 기존 `BOT_OWNED` 레코드는 영향을 받지 않는다. `avg_price`와 분리하는 이유는 용도가 둘로 갈리기 때문이다 - 실현손익은 사용자의 실제 매수가로 계산해야 정직하고, 손절선은 위임 시점가를 기준으로 잡아야 봇이 물려받은 과거 손실에 즉시 청산당하지 않는다. 위임 시 `avg_price`를 현재가로 덮어쓰면 손절은 정상화되지만 원장이 거짓말을 한다. 표시용 손익률과 실현손익은 계속 `avg_price` 기준이다.
 * `updated_at` (DATETIME): 마지막 보유 현황 동기화 일시
 * *제약 조건:* 복합 유니크 제약(`user_id`, `ticker`, `strategy_type`). 전략 슬롯이 다르면 같은 티커를 동시에 보유할 수 있으며, 이 덕분에 같은 종목을 봇 슬롯과 `EXTERNAL`로 나눠 들 수 있다.
 

@@ -259,6 +259,19 @@ HARVEST_SUSTAIN_CYCLES = 2       # 최소 관측 횟수. 표본이 성긴 구간
 HARVEST_SUSTAIN_MINUTES = 2      # 최소 지속 시간(분). 주기가 빨라져도 이 값은 고정이다
 
 
+# 봇 소유 포지션의 손절 노이즈 버퍼. 손절·트레일링·롤링박스 이탈에 공통으로 적용된다.
+#
+# 2회 관측 요구는 원래부터 있었고 여기서 바꾸지 않는다. 바뀌는 것은 그 대기가 사이클 수로만
+# 세어지던 것을 벽시계 하한과 병행 게이트로 만든 것뿐이다. 사이클 실측 중앙값이 124초이므로
+# 하한 2분은 현재 운영 동작과 사실상 같다 - 라이브 A/B 계정이 이 경로로 매매 중이라
+# 동작을 바꾸는 것이 목적이 아니라 주기 변동에 흔들리지 않게 고정하는 것이 목적이다.
+#
+# 이 값을 키우면 손절이 늦어져 손실이 커진다. 노이즈 제거와 손실 확대의 맞바꿈이므로
+# 꼬리 하나를 거르는 데 필요한 최소치만 잡는다.
+EXIT_NOISE_BUFFER_CYCLES = 2     # 최소 관측 횟수 (기존 동작 유지)
+EXIT_NOISE_BUFFER_MINUTES = 2    # 최소 지속 시간(분). 주기가 빨라져도 이 값은 고정이다
+
+
 def _atr_pct(atr: float | Decimal | None, price: float | Decimal | None) -> Decimal:
     dec_atr = to_decimal(atr)
     dec_price = to_decimal(price)

@@ -70,3 +70,23 @@ def log_security_event(event_type: str, **fields) -> None:
     except Exception:
         # 보안 기록 실패가 호출자(인증 트랜잭션)를 깨뜨리지 않게 한다.
         logger.exception("[Security] Failed to write security event log: %s", event_type)
+
+
+# APScheduler 자체 로거를 같은 파일 핸들러에 붙인다.
+#
+# 이 조치 전까지 스케줄러의 실행 스킵 경고("Execution of job ... skipped: maximum number of
+# running instances reached")는 apscheduler.executors.default 로거로만 나갔고, stockauto 로거는
+# propagate=False라 stockauto.log에 단 한 줄도 남지 않았다. 그래서 매매 루프가 등록값(1분)이
+# 아니라 2분 간격으로 도는데도 로그상으로는 아무 일도 없는 것처럼 보였다. 사이클 카운트를
+# 시간 단위로 쓰던 게이트들이 조용히 두 배로 늘어져 있었던 원인이 여기 있다.
+#
+# 레벨을 WARNING으로 두는 이유는 APScheduler가 INFO로 잡 추가·실행을 전부 찍어서 매매 로그를
+# 덮어버리기 때문이다. 우리가 알아야 하는 것은 "스킵됐다"와 "잡이 죽었다" 두 가지뿐이다.
+for _apscheduler_logger_name in ("apscheduler.scheduler", "apscheduler.executors.default"):
+    _apscheduler_logger = logging.getLogger(_apscheduler_logger_name)
+    _apscheduler_logger.setLevel(logging.WARNING)
+    if file_handler not in _apscheduler_logger.handlers:
+        _apscheduler_logger.addHandler(file_handler)
+    if stream_handler not in _apscheduler_logger.handlers:
+        _apscheduler_logger.addHandler(stream_handler)
+    _apscheduler_logger.propagate = False

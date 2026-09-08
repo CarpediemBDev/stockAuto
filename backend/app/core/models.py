@@ -32,6 +32,11 @@ def utc_now_aware():
 # 조용히 "봇이 안 건드림"을 "봇이 건드림"으로 뒤집으므로 여기서만 정의한다.
 MANAGEMENT_BOT_OWNED = "BOT_OWNED"   # 봇이 매수한 포지션
 MANAGEMENT_EXTERNAL = "EXTERNAL"     # 봇이 사지 않은 외부 유입 포지션 (봇 관할 밖)
+MANAGEMENT_DELEGATED = "DELEGATED"   # 사용자가 봇에 넘긴 외부 포지션 (봇 관할 안, 원장은 분리)
+
+# 봇이 매도·판정을 수행하는 값. EXTERNAL만 관할 밖이다.
+# 새 값을 추가할 때 각 소비자에서 != EXTERNAL 조건을 일일이 고치는 대신 이 집합을 쓴다.
+BOT_MANAGED_MANAGEMENTS = (MANAGEMENT_BOT_OWNED, MANAGEMENT_DELEGATED)
 
 # EXTERNAL 보유분이 갖는 strategy_type. 어떤 전략 슬롯 키와도 겹치지 않아야 한다 -
 # 슬롯 키와 겹치면 매도 판정 루프와 슬롯 자본 계산이 이 보유분을 봇 포지션으로 오인한다.
@@ -246,6 +251,21 @@ class Holding(Base):
     guard_streak = Column(Integer, nullable=False, server_default="0", default=0)  # 연속 충족 사이클
     guard_streak_started_at = Column(AwareDateTime, nullable=True)  # 연속 충족이 시작된 시각(벽시계 게이트 기준)
     guard_last_action_at = Column(AwareDateTime, nullable=True)  # 일일 1회 캡 기준 시각
+    # 봇 소유 포지션의 손절 노이즈 버퍼 기준 시각.
+    # 순간적으로 손절선을 찔렀다 돌아오는 꼬리에 털리지 않으려고 이탈을 두 번 확인하는데,
+    # 그 대기가 사이클 수로만 세어져 있었다. 사이클 주기는 시간에 안정적이지 않고(실측 104~846초)
+    # 카운터가 인메모리라 재기동이 진행 중이던 대기를 통째로 지운다. 시각을 DB에 둬서
+    # 대기의 하한을 벽시계로 고정한다.
+    exit_breach_started_at = Column(AwareDateTime, nullable=True)
+    # 위임(DELEGATED) 포지션의 리스크 기준가. 손절선과 트레일링 하한 가드가 이 값을 앵커로 쓴다.
+    #
+    # avg_price를 그대로 쓰면 안 되는 이유는 용도가 둘로 갈리기 때문이다. 실현손익은 사용자의
+    # 실제 매수가로 계산해야 정직하고, 손절선은 위임 시점가를 기준으로 잡아야 봇이 물려받은
+    # 과거 손실에 즉시 청산당하지 않는다. 위임 시 avg_price를 현재가로 덮어쓰면 손절은
+    # 정상화되지만 실현손익이 조작되므로, 리스크 기준가만 따로 판다.
+    #
+    # NULL이면 avg_price로 폴백한다. 따라서 기존 BOT_OWNED 레코드는 아무 영향을 받지 않는다.
+    risk_basis_price = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=True)
     updated_at = Column(AwareDateTime, default=utc_now_aware, onupdate=utc_now_aware)
     version_id = Column(Integer, default=1, nullable=False)
 

@@ -4,10 +4,29 @@ import pytest
 
 import app.bot.multi_strategy_manager as strategy_module
 import app.bot.scheduler as scheduler
+from datetime import timedelta
+
 from app.core.models import (
-    Holding, TradeLog, UserSettings,
+    Holding, TradeLog, UserSettings, utc_now_aware,
     EXTERNAL_STRATEGY_TYPE, MANAGEMENT_EXTERNAL,
 )
+
+
+def seed_pending_breach(holding, *, user_id=1):
+    """이미 한 번 이탈을 관측한 상태를 만든다.
+
+    노이즈 버퍼는 관측 횟수와 경과 시간을 모두 요구한다. 예전에는 카운터만 심으면 됐지만,
+    사이클 수가 시간에 안정적이지 않아(실측 104~846초) 시간 하한이 병행 게이트로 붙었다.
+    두 축을 한 곳에서 심어야 한쪽만 채운 채 통과하는 테스트가 생기지 않는다.
+    """
+    scheduler.BREACH_COUNT_CACHE[(user_id, holding.ticker, holding.strategy_type)] = 1
+    holding.exit_breach_started_at = utc_now_aware() - timedelta(
+        minutes=scheduler.EXIT_NOISE_BUFFER_MINUTES + 1
+    )
+
+
+def clear_pending_breach(holding, *, user_id=1):
+    scheduler.BREACH_COUNT_CACHE.pop((user_id, holding.ticker, holding.strategy_type), None)
 
 
 class FakeQuery:
@@ -374,7 +393,7 @@ async def test_run_user_trading_flow_records_successful_sell(monkeypatch):
         FakeStrategy(entry_score=0),
     )
 
-    scheduler.BREACH_COUNT_CACHE[(1, "AAPL", "slot")] = 1
+    seed_pending_breach(holding)
     try:
         await scheduler.run_user_trading_flow(
             user_id=1,
@@ -385,7 +404,7 @@ async def test_run_user_trading_flow_records_successful_sell(monkeypatch):
             session="REGULAR_MARKET",
         )
     finally:
-        scheduler.BREACH_COUNT_CACHE.pop((1, "AAPL", "slot"), None)
+        clear_pending_breach(holding)
 
     assert fake_broker.sell_calls == [("AAPL", 3, 100.0, "slot")]
     assert fake_broker.buy_calls == []
@@ -448,7 +467,7 @@ async def test_run_user_trading_flow_preserves_bot_preference_without_deleting_u
         FakeStrategy(entry_score=0),
     )
 
-    scheduler.BREACH_COUNT_CACHE[(1, "AAPL", "slot")] = 1
+    seed_pending_breach(holding)
     try:
         await scheduler.run_user_trading_flow(
             user_id=1,
@@ -459,7 +478,7 @@ async def test_run_user_trading_flow_preserves_bot_preference_without_deleting_u
             session="REGULAR_MARKET",
         )
     finally:
-        scheduler.BREACH_COUNT_CACHE.pop((1, "AAPL", "slot"), None)
+        clear_pending_breach(holding)
 
     assert fake_db.holdings == [holding]
     assert fake_db.deleted == []
@@ -511,7 +530,7 @@ async def test_run_user_trading_flow_keeps_remaining_quantity_after_partial_sell
         FakeStrategy(entry_score=0),
     )
 
-    scheduler.BREACH_COUNT_CACHE[(1, "AAPL", "slot")] = 1
+    seed_pending_breach(holding)
     try:
         await scheduler.run_user_trading_flow(
             user_id=1,
@@ -522,7 +541,7 @@ async def test_run_user_trading_flow_keeps_remaining_quantity_after_partial_sell
             session="REGULAR_MARKET",
         )
     finally:
-        scheduler.BREACH_COUNT_CACHE.pop((1, "AAPL", "slot"), None)
+        clear_pending_breach(holding)
 
     assert holding.quantity == 3
     assert fake_db.deleted == []
