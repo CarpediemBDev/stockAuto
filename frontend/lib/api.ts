@@ -259,6 +259,16 @@ export const accountAPI = {
       guard_sell_ratio?: number;
     },
   ) => api.patch(`/account/holdings/${encodeURIComponent(ticker)}/management`, body),
+  // 관할권 이전은 스위치와 계약이 다르다. 시세를 조회해 리스크 기준가를 박고 봇의
+  // 진입 기준으로 재심사한 결과를 돌려주므로 응답이 오기까지 시간이 걸린다.
+  changeHoldingDelegation: (
+    ticker: string,
+    body: {
+      action: 'DELEGATE' | 'REVOKE';
+      strategy_type?: string;
+      delegate_slot?: string;
+    },
+  ) => api.post(`/account/holdings/${encodeURIComponent(ticker)}/delegation`, body),
 };
 
 export const scannerAPI = {

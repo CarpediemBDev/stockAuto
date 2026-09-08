@@ -84,10 +84,10 @@ HTTP 상태 코드: `4xx` 또는 `5xx`
 
 봇이 매수하지 않은 보유 종목을 봇의 매도·추가매수 대상에서 분리하는 계약입니다. 값의 정본은 `Holding.management`이며 스키마 설명은 `docs/SCHEMA.md`, 설계 배경과 후속 단계는 `docs/plans/holding_management_modes.md`가 소유합니다.
 
-- **`GET /api/v1/account/holdings`**: 각 보유 항목에 `management` 필드가 추가됩니다. 값은 `BOT_OWNED` 또는 `EXTERNAL`이며, DB에 대응 행이 없는 항목은 `BOT_OWNED`로 채웁니다. 같은 티커를 봇 슬롯과 `EXTERNAL`로 동시에 보유한 경우 브로커 응답은 티커 하나로 합쳐 오므로 `BOT_OWNED`로 표기합니다 — 봇이 매도하지 않을 것으로 오인하게 만드는 쪽이 반대 오류보다 위험하기 때문입니다.
+- **`GET /api/v1/account/holdings`**: 각 보유 항목에 `management` 필드가 추가됩니다. 값은 `BOT_OWNED`, `EXTERNAL`, `DELEGATED` 중 하나이며, DB에 대응 행이 없는 항목은 `BOT_OWNED`로 채웁니다. 같은 티커를 봇 슬롯과 `EXTERNAL`로 동시에 보유한 경우 브로커 응답은 티커 하나로 합쳐 오므로 `BOT_OWNED`로 표기합니다 — 봇이 매도하지 않을 것으로 오인하게 만드는 쪽이 반대 오류보다 위험하기 때문입니다.
 - **매도 대상 지정 키는 `(ticker, strategy_type)`입니다.** 응답의 `id`는 표시용이며 매도·설정 요청의 키로 쓰면 안 됩니다 - 브로커 경로마다 의미가 다릅니다. 시뮬레이터는 DB `Holding.id`를 그대로 주지만, KIS 경로는 목록 순번(`idx + 1000`)을 발급하므로 한 종목이 청산되면 나머지 행의 id가 전부 밀리고, Toss 경로는 `id` 필드 자체가 없습니다. 폴링 사이에 목록이 바뀌면 순번 id로 보낸 요청이 엉뚱한 종목을 지정하게 됩니다.
 - **경로 티커는 접두사 없는 심볼입니다.** `POST /holdings/{ticker}/sell`과 `PATCH /holdings/{ticker}/management`의 경로 티커는 `Holding.ticker`와 문자 그대로 일치해야 하며, 그 값은 거래소 접두사가 붙지 않은 심볼(`AAPL`)입니다. 서버는 `Holding.ticker == ticker` 로 매칭하므로 클라이언트가 임의로 접두사를 붙이거나 떼면 `404`가 됩니다. 새 브로커 어댑터를 추가할 때도 `ticker`에 접두사를 실어 보내지 마십시오 - `GET /holdings`의 `ticker`와 매도 경로의 키가 갈라집니다.
-- **`slices` 배열**: 각 보유 항목에 `slices: [{strategy_type, management, quantity}]`가 함께 반환됩니다. 브로커 응답은 티커 하나로 합쳐 오지만 DB는 슬라이스별로 나뉘므로, 클라이언트가 매도 대상을 미리 특정하려면 이 배열을 봐야 합니다. 원소가 2개 이상이면 매도 요청에 `strategy_type`을 지정해야 합니다(지정하지 않으면 `400`).
+- **`slices` 배열**: 각 보유 항목에 `slices: [{strategy_type, management, quantity, risk_basis_price}]`가 함께 반환됩니다. 브로커 응답은 티커 하나로 합쳐 오지만 DB는 슬라이스별로 나뉘므로, 클라이언트가 매도 대상을 미리 특정하려면 이 배열을 봐야 합니다. 원소가 2개 이상이면 매도 요청에 `strategy_type`을 지정해야 합니다(지정하지 않으면 `400`).
 - **`EXTERNAL` 항목의 `strategy_name`**: 전략이 아니라 관할권이므로 전략 번역기를 타지 않고 `"봇 관리 안 함"`으로 고정 반환합니다. `strategy_type`은 `"external"`이며 어떤 전략 슬롯 키와도 겹치지 않습니다.
 - **`POST /api/v1/account/force-liquidate`**: 쿼리 파라미터 `include_external`(boolean, 기본 `false`)이 추가됩니다. 기본값에서는 `EXTERNAL` 보유분을 청산 대상에서 제외합니다. 응답에 `excluded_external_count`와 `liquidated_tickers`가 추가되며, 제외분이 있으면 `message`에 `include_external=true` 재요청 안내가 포함됩니다. 청산 대상이 `EXTERNAL`뿐이라 남는 것이 없으면 주문을 내지 않고 안내 메시지만 반환합니다.
 - **기본값 방향**: 위험한 동작(외부 보유분까지 청산)은 호출자가 명시적으로 의도를 드러내야 하고, 기본값은 항상 안전한 쪽입니다.
@@ -149,3 +149,40 @@ HTTP 상태 코드: `4xx` 또는 `5xx`
 조치는 경보보다 훨씬 보수적인 가드를 통과해야 합니다 — 조건 10사이클 연속 충족, 보유분당 24시간 1회. 경보의 최악은 헛울림이지만 조치의 최악은 되돌릴 수 없는 손실 확정이기 때문입니다. 상세는 `docs/plans/holding_management_modes.md` 5.4절이 소유합니다.
 
 **클라이언트는 `LIQUIDATE`를 "손실 방어"로 표시해서는 안 됩니다.** 이 신호가 실제 붕괴를 예측한다는 근거는 아직 없으며, `SHADOW` 모드가 그 근거를 수집하기 위해 존재합니다.
+### 6.5 관할권 이전 - 위임 (`POST /api/v1/account/holdings/{ticker}/delegation`)
+
+`EXTERNAL` 보유분을 봇에 통째로 넘기거나 되돌립니다. **스위치(6.2~6.4)와 계약을 나눈 이유는 행위의 성질이 다르기 때문입니다.** 스위치는 값 하나를 뒤집는 즉시 반영이고 네트워크 I/O가 없습니다. 위임은 시세를 조회해 리스크 기준가를 박고, 봇의 진입 기준으로 재심사한 결과를 함께 돌려줍니다.
+
+| 필드 | 값 | 설명 |
+| :--- | :--- | :--- |
+| `action` | `DELEGATE` / `REVOKE` | 기본 `DELEGATE` |
+| `strategy_type` | string, optional | 같은 티커를 여러 슬라이스로 보유한 경우 대상 지정 |
+| `delegate_slot` | string | 맡길 전략 슬롯 키. `action=DELEGATE`이면 필수 |
+
+**위임 시 서버가 하는 일**
+
+1. `management = DELEGATED`, `strategy_type = delegate_slot`
+2. `risk_basis_price = highest_price = 위임 시점 시세`. **`avg_price`는 손대지 않습니다.**
+3. `buy_stage = 3` (추가매수 봉인)
+4. 수확·방어 스위치를 모두 끕니다 (해당 옵션은 `EXTERNAL` 전용)
+5. 재진입 심사 1회 후 결과를 `screening`에 담아 반환
+
+**`risk_basis_price`가 `avg_price`와 분리되는 이유**는 용도가 둘로 갈리기 때문입니다. 실현손익은 사용자의 실제 매수가로 계산해야 정직하고, 손절선은 위임 시점가를 기준으로 잡아야 봇이 물려받은 과거 손실에 즉시 청산당하지 않습니다. 위임 시 `avg_price`를 현재가로 덮어쓰면 손절은 정상화되지만 원장이 거짓말을 합니다. 손절·트레일링·롤링박스 판정만 이 값을 앵커로 쓰고, 표시용 손익률과 실현손익은 계속 `avg_price` 기준입니다.
+
+**재진입 심사는 게이트가 아니라 통보입니다.** `screening.verdict`가 `BELOW_CUTOFF`여도 위임은 그대로 적용됩니다. 이미 들고 있는 것을 맡기는 결정과 새로 사는 결정은 다른 판단이며, 후자의 기준으로 전자를 거부하면 손실 난 종목은 영원히 맡길 수 없습니다. `verdict`는 `PASS` / `BELOW_CUTOFF` / `UNKNOWN`(지표 조회 실패)입니다.
+
+**위임 시점에 즉시 청산하지 않습니다.** 청산은 다음 사이클의 정상 규칙에 맡깁니다. 위임 버튼이 곧 매도 버튼이 되면 아무도 누르지 않기 때문입니다.
+
+**오류**
+
+- `BOT_OWNED` 대상: `400`. 봇 매수분과 원장을 섞으면 전략 성과 측정이 깨지므로 `DELEGATED`로도 `BOT_OWNED`로도 전환할 수 없습니다.
+- 카탈로그에 없거나 선택 불가한 슬롯: `400`
+- 그 슬롯에 같은 티커를 이미 보유: `409`. 평단가가 섞이지 않도록 합치지 않고 거부합니다.
+- 이미 위임 중인데 `DELEGATE`, 위임 상태가 아닌데 `REVOKE`: `409`
+
+**`REVOKE`**는 `management`를 `EXTERNAL`로, `strategy_type`을 `"external"`로 되돌리고 `risk_basis_price`를 `NULL`로 지웁니다. 기준가를 남기면 다시 위임했을 때 옛 시점가로 손절을 재게 됩니다. `avg_price`와 수량은 관할권 전환으로 바뀌지 않습니다.
+
+**위임분에는 스위치를 쓸 수 없습니다.** `PATCH /management`를 `DELEGATED` 보유분에 호출하면 `400`입니다. 봇이 자기 규칙으로 이미 판정하고 있어 수확 트레일링과 봇 손절이 서로 다른 앵커로 매도를 내게 됩니다.
+
+**`DELEGATED`는 `BOT_OWNED`로 승격되지 않습니다.** 성과 원장을 분리하기 위해 끝까지 구분합니다. 따라서 `force-liquidate`의 `include_external=false` 기본값에서도 위임분은 **청산 대상에 포함**되며, 슬롯 자본 계산에도 산입됩니다.
+

@@ -12,7 +12,7 @@ from app.core.locks import (
 from app.core.holding_audit import delete_holding
 from app.core.models import (
     TradeLog, Holding, ActionLog, UserSettings, WatchList, User, AccountEquitySnapshot, UnfilledOrder,
-    MANAGEMENT_BOT_OWNED, MANAGEMENT_EXTERNAL, EXTERNAL_STRATEGY_TYPE,
+    MANAGEMENT_BOT_OWNED, MANAGEMENT_EXTERNAL, MANAGEMENT_DELEGATED, EXTERNAL_STRATEGY_TYPE,
     GUARD_ACTION_ALERT_ONLY, GUARD_ACTION_SHADOW, GUARD_ACTION_LIQUIDATE,
 )
 from datetime import datetime, timezone, timedelta
@@ -20,6 +20,7 @@ from decimal import Decimal
 from dataclasses import dataclass
 import asyncio
 import threading
+import time
 import socket
 import weakref
 import httpx
@@ -73,6 +74,8 @@ from app.bot.trade_calculations import (
     GUARD_SUSTAIN_MINUTES,
     get_harvest_arm_pct,
     get_harvest_trailing_pct,
+    EXIT_NOISE_BUFFER_CYCLES,
+    EXIT_NOISE_BUFFER_MINUTES,
     HARVEST_SUSTAIN_CYCLES,
     HARVEST_SUSTAIN_MINUTES,
     GUARD_ALERT_COOLDOWN_HOURS,
@@ -168,6 +171,26 @@ LOG_COOLDOWN_SECONDS = 1800.0
 BREACH_COUNT_CACHE = {}
 _breach_count_lock = threading.Lock()
 
+
+def _clear_exit_breach_clock(ctx, h) -> None:
+    """봇 소유 손절 노이즈 버퍼의 이탈 시작 시각을 되돌린다.
+
+    관측 횟수(BREACH_COUNT_CACHE)를 되돌리는 곳에서는 반드시 시각도 함께 되돌려야 한다.
+    둘 중 하나만 지우면 다음 이탈이 남은 축을 이미 충족한 상태로 시작한다 - 방어 게이트에서
+    실제로 겪은 결함이라 같은 실수를 반복하지 않도록 한 함수로 묶는다.
+
+    version_id 낙관적 잠금을 건드리지 않도록 ORM flush가 아닌 Core UPDATE를 쓴다.
+    """
+    if not (isinstance(h, Holding) and getattr(h, "id", None) is not None):
+        return
+    if getattr(h, "exit_breach_started_at", None) is None:
+        return
+    with micro_session(ctx) as db:
+        db.query(Holding).filter(Holding.id == h.id).update(
+            {Holding.exit_breach_started_at: None}, synchronize_session=False,
+        )
+        db.commit()
+
 _scanner_refresh_lock = threading.Lock()
 _scanner_refresh_in_progress = False
 
@@ -189,6 +212,18 @@ scheduler = BackgroundScheduler()
 is_processing = False # 중복 실행 방지용 플래그
 is_manual_scanning = False # 💡 수동 스캔 실행 상태 추적용 전역 플래그
 _processing_lock = threading.Lock()  # 💡 is_processing 레이스 컨디션 방지용 스레드 락
+
+# 매매 사이클의 실제 주기를 코드가 스스로 기록한다.
+#
+# main_trade_job은 interval 1분으로 등록되어 있으나 실제 간격은 그보다 길다. APScheduler의
+# interval 트리거는 "직전 완료"가 아니라 "직전 예정 시각"에서 다음 시각을 뽑고, 잡 기본값이
+# max_instances=1이라 사이클이 60초를 넘기면 그 사이에 낀 틱이 통째로 버려진다. 즉 사이클이
+# 61초 걸리면 다음 실행은 60초 뒤가 아니라 120초 뒤다.
+#
+# 이 값을 추정이 아니라 관측으로 다루려고 사이클마다 직전 시작 시각과의 간격을 남긴다.
+# 사이클 수를 시간처럼 쓰는 코드는 전부 이 간격만큼 조용히 늘어지므로, 그런 게이트를
+# 벽시계로 바꿀지 판단하려면 실측값이 있어야 한다.
+_last_cycle_started_at: float | None = None
 latest_scanned_signals = [] # 글로벌 실시간 마켓 스캔 시그널 캐시용
 latest_watchlist_signals = {} # 사용자별 라우팅 전에만 사용하는 관심종목 분석 캐시
 
@@ -698,12 +733,28 @@ async def sync_broker_holdings(ctx: TradingFlowContext) -> None:
                     elif diff < 0:
                         # 감소분의 기본 해석은 "사용자가 앱 밖에서 매도했다"이므로 EXTERNAL부터 깎는다.
                         # 봇 주문이 미해결이면 봇 매도의 반영 지연이므로 봇 슬라이스부터 깎는다.
-                        deduction_order = sorted(
-                            db_hs,
-                            key=lambda h: (h.management != MANAGEMENT_EXTERNAL)
-                            if not bot_order_pending
-                            else (h.management == MANAGEMENT_EXTERNAL),
-                        )
+                        # 차감 순서는 EXTERNAL -> DELEGATED -> BOT_OWNED다.
+                        # 사용자가 앱 밖에서 판 물량은 사용자가 직접 관리하는 슬라이스에서
+                        # 나갔다고 보는 것이 가장 그럴듯하고, 봇이 산 슬라이스를 먼저 깎으면
+                        # 봇의 성과 원장이 실제로 하지 않은 매도로 오염된다.
+                        # 위임분이 가운데인 이유는 소유는 사용자, 관할은 봇이기 때문이다.
+                        #
+                        # 봇 주문이 미해결이면 해석이 뒤집힌다. 그 감소는 봇 매도의 반영 지연일
+                        # 가능성이 높으므로 봇 슬라이스부터 깎는다.
+                        _deduction_rank = {
+                            MANAGEMENT_EXTERNAL: 0,
+                            MANAGEMENT_DELEGATED: 1,
+                            MANAGEMENT_BOT_OWNED: 2,
+                        }
+
+                        def _deduction_key(h):
+                            rank = _deduction_rank.get(
+                                h.management or MANAGEMENT_BOT_OWNED,
+                                _deduction_rank[MANAGEMENT_BOT_OWNED],
+                            )
+                            return -rank if bot_order_pending else rank
+
+                        deduction_order = sorted(db_hs, key=_deduction_key)
                         remaining_deduction = abs(diff)
                         for h in deduction_order:
                             if remaining_deduction <= 0:
@@ -1634,6 +1685,22 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                 continue
 
             profit_rate = calculate_profit_rate(current_price_dec, h.avg_price)
+
+            # 리스크 판정의 앵커는 실제 매수가가 아니라 리스크 기준가다.
+            #
+            # 위임(DELEGATED) 포지션은 사용자가 이미 물려 있던 것을 봇이 넘겨받은 것이라
+            # avg_price 기준으로 손절을 재면 인수 즉시 청산된다. 반토막 종목을 맡겼는데
+            # 손절선 -8%가 이미 -50%로 뚫려 있기 때문이다. 트레일링·롤링박스의 하한 가드
+            # (highest_price > 기준가)도 같은 이유로 영원히 거짓이 되어 발화하지 않는다.
+            # 수확 모드가 observed_base_price를 앵커로 삼은 것과 정확히 같은 구조다.
+            #
+            # 반대로 실현손익·스마트이그짓은 avg_price를 그대로 쓴다. 사용자가 실제로 얼마에
+            # 샀는지를 바꿔 기록하면 원장이 거짓말을 한다. 리스크만 분리하고 손익은 손대지 않는다.
+            # risk_basis_price가 NULL인 기존 BOT_OWNED 레코드는 avg_price로 폴백하므로
+            # 동작이 바뀌지 않는다.
+            risk_basis_price = getattr(h, "risk_basis_price", None) or h.avg_price
+            risk_profit_rate = calculate_profit_rate(current_price_dec, risk_basis_price)
+
             current_score = strategy_instance.calculate_score(current_data['details'] or current_data, sentiment, is_entry=False)
             is_smart_exit = current_data.get('details', {}).get('is_smart_exit', False)
 
@@ -1672,30 +1739,73 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
             is_breached = False
             breach_obj = None
 
-            if check_stop_loss_breach(profit_rate, stop_loss_pct):
+            # 판정에는 risk_profit_rate/risk_basis_price를, 표시에는 profit_rate를 쓴다.
+            # 사용자가 보는 손익률은 언제나 자기 매수가 기준이어야 한다.
+            if check_stop_loss_breach(risk_profit_rate, stop_loss_pct):
                 is_breached = True
                 breach_obj = SellReason("stop_loss", {"stop_loss_pct": stop_loss_pct, "profit_rate": profit_rate})
-            elif check_trailing_stop_breach(current_price_dec, dec_highest_price, trailing_stop_pct, h.avg_price):
+            elif check_trailing_stop_breach(current_price_dec, dec_highest_price, trailing_stop_pct, risk_basis_price):
                 is_breached = True
                 breach_obj = SellReason("trailing_stop", {"highest_price": float(dec_highest_price), "trailing_stop_pct": trailing_stop_pct, "profit_rate": profit_rate})
-            elif use_rolling_box and check_rolling_box_breach(current_price_dec, dec_rolling_stop, dec_highest_price, h.avg_price):
+            elif use_rolling_box and check_rolling_box_breach(current_price_dec, dec_rolling_stop, dec_highest_price, risk_basis_price):
                 is_breached = True
                 breach_obj = SellReason("rolling_box", {"rolling_stop": float(dec_rolling_stop), "profit_rate": profit_rate})
 
+            cache_key = (user_id, h.ticker, h.strategy_type)
+
+            def _write_exit_breach_clock(value):
+                """이탈 시작 시각을 DB에 기록한다.
+
+                version_id 낙관적 잠금을 건드리지 않도록 ORM flush가 아닌 Core UPDATE를 쓴다.
+                이 경로의 holding은 Part B 매도에서 db.merge(h)(load=True)로 다시 병합되므로,
+                매핑 컬럼을 detached 객체에 직접 세팅하면 version이 올라 StaleDataError로
+                사이클이 통째로 죽는다(last_price·highest_price와 동일한 사유).
+                """
+                if not (isinstance(h, Holding) and h.id is not None):
+                    return
+                with micro_session(ctx) as db:
+                    db.query(Holding).filter(Holding.id == h.id).update(
+                        {Holding.exit_breach_started_at: value}, synchronize_session=False,
+                    )
+                    db.commit()
+
             if is_breached:
-                cache_key = (user_id, h.ticker, h.strategy_type)
+                # 노이즈 버퍼 - 손절선을 순간적으로 찔렀다 돌아오는 꼬리에 털리지 않는다.
+                #
+                # 관측 횟수와 경과 시간을 모두 요구한다. 사이클 수만 쓰면 주기 변동(실측 104~846초)에
+                # 따라 같은 2사이클이 3분일 수도 28분일 수도 있다. 횟수는 표본이 성긴 구간에서
+                # 한 번에 파는 것을 막고, 시간은 주기가 빨라졌을 때의 하한을 준다.
+                #
+                # 시각을 DB에 두는 이유는 재기동 때문이다. 카운터만 인메모리로 두면 재기동 후
+                # 한 사이클을 더 관측하는 비용으로 끝나지만, 시각까지 인메모리면 진행 중이던
+                # 대기가 통째로 0이 되어 손절이 처음부터 다시 미뤄진다.
                 with _breach_count_lock:
                     BREACH_COUNT_CACHE[cache_key] = BREACH_COUNT_CACHE.get(cache_key, 0) + 1
                     count = BREACH_COUNT_CACHE[cache_key]
 
-                if count >= 2:
+                now = utc_now_aware()
+                breach_started_at = getattr(h, "exit_breach_started_at", None) or now
+                if getattr(h, "exit_breach_started_at", None) is None:
+                    _write_exit_breach_clock(breach_started_at)
+                breach_minutes = (now - breach_started_at).total_seconds() / 60.0
+
+                if count >= EXIT_NOISE_BUFFER_CYCLES and breach_minutes >= EXIT_NOISE_BUFFER_MINUTES:
                     breach_obj.confirmed = True
                     sell_reason_obj = breach_obj
                 else:
-                    _log(f"[Noise Buffer] {h.ticker} ({h.strategy_type}) first breach detected ({render_sell_reason(breach_obj, 'ko')}). Delaying sell for noise protection (Count: {count}/2).", "INFO")
+                    _log(
+                        f"[Noise Buffer] {h.ticker} ({h.strategy_type}) breach detected "
+                        f"({render_sell_reason(breach_obj, 'ko')}). Delaying sell for noise protection "
+                        f"({count}/{EXIT_NOISE_BUFFER_CYCLES} checks, "
+                        f"{breach_minutes:.1f}/{EXIT_NOISE_BUFFER_MINUTES}min).",
+                        "INFO",
+                    )
             else:
+                # 회복하면 관측 횟수와 시각을 함께 되돌린다. 둘 중 하나만 지우면 다음 이탈에서
+                # 남은 축이 이미 충족된 상태로 시작한다(방어 게이트에서 실제로 겪은 결함이다).
                 with _breach_count_lock:
-                    BREACH_COUNT_CACHE.pop((user_id, h.ticker, h.strategy_type), None)
+                    BREACH_COUNT_CACHE.pop(cache_key, None)
+                _clear_exit_breach_clock(ctx, h)
 
             if not sell_reason_obj and profit_rate >= strategy_instance.min_smart_exit_profit and is_smart_exit:
                 sell_reason_obj = SellReason("smart_exit", {"profit_rate": profit_rate})
@@ -1819,6 +1929,7 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                     calc_return_rate = application.return_rate or 0.0
                     remaining_qty = application.remaining_qty or 0
                     BREACH_COUNT_CACHE.pop((user_id, h.ticker, h.strategy_type), None)
+                    _clear_exit_breach_clock(ctx, h)
                     fill_label = "sold" if remaining_qty == 0 else f"partially sold ({filled_qty} filled, {remaining_qty} remaining)"
                     _log(f"SUCCESS: {h.ticker} {fill_label} via {sell_reason} | Order: {res['order_no']}", "INFO")
 
@@ -1902,6 +2013,10 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                         ctx.holdings = [x for x in ctx.holdings if getattr(x, "id", None) != holding_id]
 
                 BREACH_COUNT_CACHE.pop((user_id, h.ticker, h.strategy_type), None)
+                if not is_full_fill:
+                    # 전량 매도면 holding 자체가 사라지므로 시각을 지울 대상이 없다.
+                    # 부분 체결로 잔량이 남은 경우에만 다음 이탈을 처음부터 세게 한다.
+                    _clear_exit_breach_clock(ctx, h)
 
                 pnl_sign = "+" if realized_pnl >= 0 else "-"
                 pnl_emoji = "📈" if realized_pnl >= 0 else "📉"
@@ -2654,12 +2769,22 @@ async def async_trading_loop():
     3-Mode 통합 자율 트레이딩 루프 (멀티유저 동시 기동 지원).
     스캔은 별도 10분 주기 잡에서 수행되며, 여기서는 캐시된 시그널만 사용합니다.
     """
-    global is_processing
+    global is_processing, _last_cycle_started_at
     with _processing_lock:
         if is_processing:
             logger.info("[Scheduler] Previous loop still running. Skipping this cycle.")
             return
         is_processing = True
+
+    cycle_started_at = time.monotonic()
+    previous_started_at = _last_cycle_started_at
+    _last_cycle_started_at = cycle_started_at
+    if previous_started_at is not None:
+        gap_seconds = cycle_started_at - previous_started_at
+        # 등록값 60초를 크게 벗어나면 사이클이 자기 주기를 잡아먹고 있다는 뜻이다.
+        # 이 한 줄이 없으면 게이트가 늘어지는 것을 사후에 알 방법이 없다.
+        level = logger.warning if gap_seconds >= 90 else logger.info
+        level(f"[Cycle] Interval since previous start: {gap_seconds:.1f}s (registered 60s)")
 
     db = SessionLocal()
     try:
@@ -2732,6 +2857,10 @@ async def async_trading_loop():
             except Exception:
                 pass
         is_processing = False
+        duration_seconds = time.monotonic() - cycle_started_at
+        # 60초를 넘긴 사이클은 다음 틱을 스킵시킨다. 주기가 늘어나는 원인이 바로 여기다.
+        level = logger.warning if duration_seconds >= 60 else logger.info
+        level(f"[Cycle] Duration: {duration_seconds:.1f}s")
 
 CYCLE_DRAIN_TIMEOUT_SECONDS = 10.0
 
@@ -2984,7 +3113,26 @@ def start_scheduler():
         # ③ 스캐너 캐시 갱신: 10분 주기 (yfinance 대규모 API 호출 - Rate Limit 안전)
         scheduler.add_job(scanner_cache_wrapper, 'interval', minutes=10, id='scanner_cache_job', next_run_time=datetime.now())
         # ④ 자동매매 루프: 1분 주기 (캐시된 시그널로 봇 실행 사용자 처리)
-        scheduler.add_job(trading_loop_wrapper, 'interval', minutes=1, id='main_trade_job', next_run_time=datetime.now() + timedelta(seconds=20))
+        #
+        # max_instances=1과 coalesce=True는 APScheduler 기본값과 같지만 일부러 명시한다.
+        # 이 잡은 주문을 낸다. 기본값에 기대고 있다가 job_defaults가 바뀌면 매매 사이클이
+        # 동시에 두 개 도는 상황이 조용히 열린다(애플리케이션 쪽 is_processing 가드가
+        # 2차 방어로 남아 있긴 하다). 의도는 상속이 아니라 선언으로 남긴다.
+        #
+        # 실제 실행 간격은 등록값 1분이 아니다. interval 트리거는 다음 시각을 직전 예정
+        # 시각에서 뽑고, 사이클이 60초를 넘기면 그 사이에 낀 틱은 뒤로 밀리는 것이 아니라
+        # 버려진다. 그래서 실측 중앙값이 124초였다(재현: tests/test_scheduler_cycle_interval.py).
+        # 사이클 수를 시간 단위로 쓰면 안 되는 이유가 이것이며, 방어·수확 게이트는 그래서
+        # 벽시계 기준이다.
+        scheduler.add_job(
+            trading_loop_wrapper,
+            'interval',
+            minutes=1,
+            id='main_trade_job',
+            next_run_time=datetime.now() + timedelta(seconds=20),
+            max_instances=1,
+            coalesce=True,
+        )
         # ⑤ 주문 응답 저장 전 장애로 남은 고아 주문 탐색: 1분 주기
         scheduler.add_job(
             discover_orphan_orders_wrapper,

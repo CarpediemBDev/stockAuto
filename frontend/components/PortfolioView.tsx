@@ -4,7 +4,7 @@ import React, { useRef, useState } from 'react';
 import {
   Target, MessageSquare, ExternalLink,
   TrendingUp, TrendingDown, Newspaper, ArrowUpRight, ArrowDownRight, Info, ShieldAlert, Sprout,
-  SlidersHorizontal
+  SlidersHorizontal, HandCoins
 } from 'lucide-react';
 import useSWR, { mutate as globalMutate } from 'swr';
 import { pollInterval } from '@/lib/sse';
@@ -13,6 +13,7 @@ import { cn, usdToKrw, formatKrw } from '@/lib/utils';
 import { getProfitColor } from '@/lib/theme';
 import { Modal } from '@/components/ui';
 import { useTranslations } from "next-intl";
+import { useStrategyCatalog } from "@/hooks/useStrategyCatalog";
 
 interface Holding {
   id: number;
@@ -27,8 +28,13 @@ interface Holding {
   fx_rate?: number;
   strategy_type?: string;
   strategy_name?: string;
-  /** 봇 관할권. EXTERNAL은 봇이 사지 않은 보유분이라 매도·추가매수 대상이 아니다. */
-  management?: "BOT_OWNED" | "EXTERNAL";
+  /**
+   * 봇 관할권.
+   *  - BOT_OWNED: 봇이 산 포지션
+   *  - EXTERNAL: 봇이 사지 않은 보유분. 매도·추가매수 대상이 아니다
+   *  - DELEGATED: 사용자가 봇에 넘긴 보유분. 봇 규칙을 그대로 받되 원장은 분리된다
+   */
+  management?: "BOT_OWNED" | "EXTERNAL" | "DELEGATED";
   /** 수확 모드 - EXTERNAL 전용 opt-in. 급등 후 고점 이탈 시에만 자동 매도한다. */
   harvest_enabled?: boolean;
   /** 급등 임계를 넘겨 추적이 시작됐는지. 무장 전에는 아무 동작도 하지 않는다. */
@@ -40,7 +46,9 @@ interface Holding {
   guard_action?: 'ALERT_ONLY' | 'SHADOW' | 'LIQUIDATE';
   guard_sell_ratio?: number;
   /** 매도 대상 지정용 슬라이스 목록. id는 브로커마다 의미가 달라 키로 쓸 수 없다. */
-  slices?: { strategy_type: string; management: string; quantity: number }[];
+  slices?: { strategy_type: string; management: string; quantity: number; risk_basis_price?: number | null }[];
+  /** 위임 시점가. 위임분의 손절선은 매수가가 아니라 이 값을 기준으로 잡힌다. */
+  risk_basis_price?: number | null;
 }
 
 /** 서버가 confirm=false 프리뷰로 돌려주는 예상 결과. 이 값을 보여준 뒤에만 실제 매도를 보낸다. */
@@ -48,7 +56,7 @@ interface SellPreview {
   ticker: string;
   ticker_name: string;
   strategy_type?: string;
-  management?: "BOT_OWNED" | "EXTERNAL";
+  management?: "BOT_OWNED" | "EXTERNAL" | "DELEGATED";
   held_quantity: number;
   sell_quantity: number;
   estimated_price: number;
@@ -96,6 +104,9 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
   // 위임 스위치는 카드 푸터가 아니라 전용 모달에서 다룬다. 방어를 켜면 조치 모드 3개가
   // 더 붙어 버튼이 6개가 되는데, 415px 카드 한 줄에 넣으면 글자가 줄바꿈되어 읽을 수 없다.
   const [delegationTarget, setDelegationTarget] = useState<Holding | null>(null);
+  // 위임할 전략 슬롯. 카탈로그가 오기 전에는 비어 있고, 사용자가 고르면 채워진다.
+  const [delegateSlot, setDelegateSlot] = useState<string>("");
+  const { strategies } = useStrategyCatalog();
 
   const toggleSwitch = async (
     h: Holding,
@@ -120,6 +131,34 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
     } catch (err) {
       const detail = (err as { response?: { data?: { message?: string; detail?: string } } })?.response?.data;
       setSellError(detail?.message || detail?.detail || t(failKey));
+    } finally {
+      setTogglingTicker(null);
+      releaseLatch();
+    }
+  };
+
+  // 관할권 이전. 스위치와 달리 되돌릴 수 있는 값 하나가 아니라 리스크 기준가·고점·
+  // 추가매수 단계를 함께 재설정하므로 전용 엔드포인트를 쓴다.
+  const changeDelegation = async (h: Holding, action: 'DELEGATE' | 'REVOKE') => {
+    const cleanTicker = h.ticker.replace(/^[A-Z0-9]+_/, "");
+    if (action === 'DELEGATE' && !delegateSlot) {
+      setSellError(t("portfolio.delegate_slot_required"));
+      return;
+    }
+    if (!acquireLatch()) return;
+    setTogglingTicker(cleanTicker);
+    setSellError(null);
+    try {
+      await accountAPI.changeHoldingDelegation(cleanTicker, {
+        action,
+        strategy_type: h.strategy_type,
+        ...(action === 'DELEGATE' ? { delegate_slot: delegateSlot } : {}),
+      });
+      globalMutate('/account/holdings');
+      setDelegationTarget(null);
+    } catch (err) {
+      const detail = (err as { response?: { data?: { message?: string; detail?: string } } })?.response?.data;
+      setSellError(detail?.message || detail?.detail || t("portfolio.delegation_change_failed"));
     } finally {
       setTogglingTicker(null);
       releaseLatch();
@@ -220,6 +259,7 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
         {holdings.map((h) => {
           const cleanTicker = h.ticker.replace(/^[A-Z0-9]+_/, "");
           const isExternal = h.management === "EXTERNAL";
+          const isDelegated = h.management === "DELEGATED";
           const strategyLabel = h.strategy_name || h.strategy_type?.replaceAll("_", " ") || "";
           // 봇이 건드리지 않는 보유분은 전략 뱃지와 색을 달리해, 자동 매도를 기대하지 않도록 구분한다.
           const strategyBadgeClass = isExternal
@@ -254,6 +294,16 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                         title={t("portfolio.external_badge_tip")}
                       >
                         {t("portfolio.external_badge")}
+                      </span>
+                    )}
+                    {/* 위임분은 전략 배지와 함께 뜬다. 어느 전략에 맡겼는지가 사용자가
+                        알아야 할 정보이고, 관할권이 넘어갔다는 사실은 이 배지가 알린다. */}
+                    {isDelegated && (
+                      <span
+                        className="text-[8px] font-black px-1.5 py-0.5 rounded border tracking-wider uppercase bg-amber-500/15 text-amber-400 border-amber-500/30"
+                        title={t("portfolio.delegated_badge_tip")}
+                      >
+                        {t("portfolio.delegated_badge")}
                       </span>
                     )}
                     {/* 켜진 위임 스위치는 배지로만 알린다. 조작은 위임 설정 모달에서 한다. */}
@@ -408,10 +458,10 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                     </span>
                   </div>
                   <div className="flex items-center gap-3">
-                    {isExternal && (
+                    {(isExternal || isDelegated) && (
                       <button
                         type="button"
-                        onClick={() => setDelegationTarget(h)}
+                        onClick={() => { setDelegateSlot(""); setDelegationTarget(h); }}
                         className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg border border-zinc-700 text-zinc-400 hover:bg-zinc-800 transition-colors"
                       >
                         <SlidersHorizontal size={12} />
@@ -452,8 +502,67 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
               {t("portfolio.delegation_intro", { ticker: delegationHolding.ticker.replace(/^[A-Z0-9]+_/, "") })}
             </p>
 
+            {/* 관할권 이전 — 스위치보다 위에 둔다. 위임하면 아래 스위치는 의미가 없어진다. */}
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-1.5 font-bold text-slate-200">
+                  <HandCoins size={14} className="text-amber-400" />
+                  {t("portfolio.delegate_title")}
+                </span>
+                {delegationHolding.management === "DELEGATED" ? (
+                  <button
+                    type="button"
+                    onClick={() => changeDelegation(delegationHolding, "REVOKE")}
+                    disabled={togglingTicker !== null}
+                    className="text-[11px] font-bold px-2.5 py-1 rounded-lg border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-40 shrink-0"
+                  >
+                    {t("portfolio.delegate_revoke")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => changeDelegation(delegationHolding, "DELEGATE")}
+                    disabled={togglingTicker !== null || !delegateSlot}
+                    className="text-[11px] font-bold px-2.5 py-1 rounded-lg border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-40 shrink-0"
+                  >
+                    {t("portfolio.delegate_action")}
+                  </button>
+                )}
+              </div>
+              {delegationHolding.management === "DELEGATED" ? (
+                <p className="text-[11px] text-zinc-500 leading-relaxed">
+                  {t("portfolio.delegate_active_tip", {
+                    strategy: delegationHolding.strategy_name || delegationHolding.strategy_type || "",
+                    price: delegationHolding.risk_basis_price != null
+                      ? `$${delegationHolding.risk_basis_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                      : "-",
+                  })}
+                </p>
+              ) : (
+                <>
+                  <select
+                    value={delegateSlot}
+                    onChange={(e) => setDelegateSlot(e.target.value)}
+                    disabled={togglingTicker !== null}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-200 disabled:opacity-40"
+                  >
+                    <option value="">{t("portfolio.delegate_slot_placeholder")}</option>
+                    {(strategies || []).map((strategy) => (
+                      <option key={strategy.id} value={strategy.id}>{strategy.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-zinc-500 leading-relaxed">
+                    {t("portfolio.delegate_tip")}
+                  </p>
+                </>
+              )}
+            </div>
+
             {/* 수확 */}
-            <div className="rounded-xl border border-zinc-800 p-3 space-y-2">
+            <div className={cn(
+              "rounded-xl border border-zinc-800 p-3 space-y-2",
+              delegationHolding.management === "DELEGATED" && "opacity-40 pointer-events-none",
+            )}>
               <div className="flex items-center justify-between gap-3">
                 <span className="flex items-center gap-1.5 font-bold text-slate-200">
                   <Sprout size={14} className="text-emerald-400" />
@@ -481,7 +590,10 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
             </div>
 
             {/* 방어 */}
-            <div className="rounded-xl border border-zinc-800 p-3 space-y-2">
+            <div className={cn(
+              "rounded-xl border border-zinc-800 p-3 space-y-2",
+              delegationHolding.management === "DELEGATED" && "opacity-40 pointer-events-none",
+            )}>
               <div className="flex items-center justify-between gap-3">
                 <span className="flex items-center gap-1.5 font-bold text-slate-200">
                   <ShieldAlert size={14} className="text-sky-400" />
