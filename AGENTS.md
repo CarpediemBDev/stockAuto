@@ -267,6 +267,12 @@ npm run build   # 프로덕션 빌드 무결성 확인
 npm run lint    # ESLint 정적 분석 통과 검증
 ```
 
+> **🚨 dist 삭제 금지선(`.next` / `.next-e2e`)**: Next 서버가 살아 있는 동안 그 dist 디렉터리를 지우면 안 됩니다.
+> Turbopack 색인(`.meta`)이 사라진 조각(`.sst`)을 계속 참조해 `Unable to open static sorted file … (os error 3)`로 앱 전체가 깨집니다(2026-09-08 사고).
+> 반드시 **서버 종료 → dist 삭제 → 재기동** 순서로 하고, 프로세스는 `taskkill /F /T /PID <PID>`로 정리합니다.
+> 하네스(`verify_harness.py`)는 `.next`를 건드리지 않으므로(E2E는 `.next-e2e` 사용) **하네스 전 캐시 청소는 불필요**합니다.
+> `scripts/guard_next_dist.py`(PreToolUse 훅)가 이를 보조합니다 — 서버가 살아 있는 상태의 dist 삭제를 감지하면 점유 PID와 종료 명령을 보여주고 **승인을 요구(ask)**합니다. 차단(deny)이 아닌 이유는, 2026-09-08 사고가 승인 절차의 부재가 아니라 승인하는 쪽이 서버 가동 사실을 몰라서 났기 때문입니다. 워크트리·새 클론에서는 `.claude/settings.json`에 훅을 다시 연결해야 적용됩니다.
+
 ---
 
 ## 👥 9. 멀티 에이전트 협업 프로토콜 (Multi-Agent Collaboration Protocol)
