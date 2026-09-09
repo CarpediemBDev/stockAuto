@@ -187,9 +187,50 @@ def isolate_default_database(monkeypatch, isolated_session_factory):
             monkeypatch.setattr(module, "SessionLocal", isolated_session_factory)
 
 
+# 실행 중인 봇이 계속 쓰는 테이블(trade_logs, action_logs, account_equity_snapshots)은
+# 감시하지 않는다. 개발 서버가 떠 있는 상태에서 테스트를 돌리면 봇의 정상 매매가
+# "테스트가 개발 DB를 오염시켰다"로 오탐된다(2026-08-24 실제 발생: 테스트 실행 중
+# user 13의 체결 1건이 기록돼 세션이 실패했다).
+STRICT_WATCHED_TABLES = ("users", "strategies")
+
+# 봇이 평시에 append 하는 테이블. 행 수 동일성으로 보면 오탐한다.
+# 2026-09-09 실측: 하네스 실행 중 stock_translations 가 2417 -> 2418 로 늘어
+# teardown 이 실패했다. 테스트는 574건 전량 통과했고 삽입 주체는 스캐너였다
+# (scanner.get_ticker_name -> Translator.translate: 처음 보는 티커면
+# db.add(StockTranslation); db.commit() 로 자가학습 캐시에 적재한다. 실제 추가된
+# 행은 id 2419 'MDU'). 그래서 이 테이블은 "늘었는가"가 아니라 "이미 있던 행이
+# 사라지거나 바뀌었는가"만 본다. 오염 사고의 실제 피해 양상은 유실이고, 봇의
+# append 는 기존 행을 건드리지 않으므로 이 판정은 오탐 없이 유실만 잡는다.
+APPEND_TOLERANT_WATCHED_TABLES = ("stock_translations",)
+
+
+def detect_dev_db_pollution(before: dict | None, after: dict | None) -> dict:
+    """스냅샷 두 개를 비교해 오염으로 볼 변화만 추린다.
+
+    strict 테이블은 행 수가 달라지면 오염. append 관용 테이블은 스냅샷 시점에
+    이미 존재하던 id 구간(id <= baseline_max_id)의 행 수가 줄어야만 오염이다.
+    """
+    if not before or not after:
+        return {}
+
+    polluted = {}
+    for table in STRICT_WATCHED_TABLES:
+        if table in before and table in after and before[table] != after[table]:
+            polluted[table] = (before[table], after[table])
+
+    for table in APPEND_TOLERANT_WATCHED_TABLES:
+        if table not in before or table not in after:
+            continue
+        baseline_before = before[table]["baseline_rows"]
+        baseline_after = after[table]["baseline_rows"]
+        if baseline_after != baseline_before:
+            polluted[table] = (baseline_before, baseline_after)
+    return polluted
+
+
 @pytest.fixture(scope="session", autouse=True)
 def guard_dev_database_untouched():
-    """세션 전후로 개발 DB 주요 테이블의 행 수를 비교해 오염을 즉시 드러낸다.
+    """세션 전후로 개발 DB 주요 테이블을 비교해 오염을 즉시 드러낸다.
 
     격리 픽스처가 커버하지 못하는 새 경로(직접 engine 생성 등)로 개발 DB에 쓰기가
     발생하면 조용히 넘어가지 않고 테스트 세션 자체를 실패시킨다.
@@ -198,35 +239,37 @@ def guard_dev_database_untouched():
 
     from app.core.database import IS_SQLITE_DATABASE, db_path
 
-    # 실행 중인 봇이 계속 쓰는 테이블(trade_logs, action_logs, account_equity_snapshots)은
-    # 넣지 않는다. 개발 서버가 떠 있는 상태에서 테스트를 돌리면 봇의 정상 매매가
-    # "테스트가 개발 DB를 오염시켰다"로 오탐된다(2026-08-24 실제 발생: 테스트 실행 중
-    # user 13의 체결 1건이 기록돼 세션이 실패했다). 여기 남기는 것은 봇이 평시에
-    # 건드리지 않는 테이블뿐이다.
-    watched_tables = ("users", "stock_translations", "strategies")
+    baseline_max_id: dict[str, int] = {}
 
-    def _snapshot():
+    def _snapshot(first: bool):
         if not IS_SQLITE_DATABASE or not os.path.exists(db_path):
             return None
         try:
             with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5) as conn:
-                return {
+                snapshot: dict = {
                     table: conn.execute(f"select count(*) from {table}").fetchone()[0]
-                    for table in watched_tables
+                    for table in STRICT_WATCHED_TABLES
                 }
+                for table in APPEND_TOLERANT_WATCHED_TABLES:
+                    if first:
+                        baseline_max_id[table] = (
+                            conn.execute(f"select coalesce(max(id), 0) from {table}").fetchone()[0]
+                        )
+                    max_id = baseline_max_id.get(table, 0)
+                    snapshot[table] = {
+                        "baseline_rows": conn.execute(
+                            f"select count(*) from {table} where id <= ?", (max_id,)
+                        ).fetchone()[0],
+                    }
+                return snapshot
         except sqlite3.Error:
             return None
 
-    before = _snapshot()
+    before = _snapshot(first=True)
     yield
-    after = _snapshot()
-    if before is not None and after is not None:
-        changed = {
-            table: (before[table], after[table])
-            for table in watched_tables
-            if before[table] != after[table]
-        }
-        assert not changed, (
-            f"테스트가 개발 DB를 변경했다(테이블: 실행 전 -> 실행 후): {changed}. "
-            "기본 SessionLocal을 우회해 개발 DB에 쓰는 경로가 있는지 확인하라."
-        )
+    after = _snapshot(first=False)
+    polluted = detect_dev_db_pollution(before, after)
+    assert not polluted, (
+        f"테스트가 개발 DB를 변경했다(테이블: 실행 전 -> 실행 후): {polluted}. "
+        "기본 SessionLocal을 우회해 개발 DB에 쓰는 경로가 있는지 확인하라."
+    )
