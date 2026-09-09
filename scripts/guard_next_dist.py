@@ -119,11 +119,19 @@ def owned_dist(cmdline: str) -> str:
     return E2E_DIST if ".next-e2e" in cmdline.replace("\\", "/").lower() else DEV_DIST
 
 
-def emit_deny(reason: str) -> None:
+def emit_ask(reason: str) -> None:
+    """차단이 아니라 '승인 요구'로 내보낸다.
+
+    2026-09-08 사고는 승인 절차가 없어서가 아니라, 승인하는 쪽이 그 시점에 dev 서버가
+    살아 있다는 사실을 몰라서 났다. 그래서 필요한 것은 금지가 아니라 정보다. deny 로
+    두면 삭제 의도가 아닌 문장(테스트 문자열·사고 경위를 적은 커밋 메시지)까지 막혀
+    실제로 정상 작업이 두 번 중단됐다. ask 는 점유 PID 와 종료 명령을 보여준 뒤
+    사람이 판단하게 하므로, 오탐이어도 승인 한 번으로 진행된다.
+    """
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
+            "permissionDecision": "ask",
             "permissionDecisionReason": reason,
         }
     }))  # ensure_ascii=True(기본) 유지: Windows 콘솔 코드페이지(cp949)로 인코딩돼
@@ -151,15 +159,16 @@ def main() -> None:
 
     pids = " ".join(str(pid) for pid in sorted(p for p, _ in blockers))
     detail = "\n".join(f"  PID {pid} ({owned_dist(cmd)} 점유): {cmd[:160]}" for pid, cmd in blockers)
-    emit_deny(
-        "살아있는 Next 서버 밑의 dist 삭제 차단 (guard_next_dist).\n"
+    emit_ask(
+        "살아있는 Next 서버 밑의 dist 삭제입니다 (guard_next_dist). 승인 여부를 확인하세요.\n"
         f"삭제 대상: {', '.join(sorted(targets))}\n{detail}\n"
         "서버를 살려둔 채 dist 를 지우면 Turbopack 색인(.meta)이 사라진 .sst 를 계속 참조해 "
         "'Unable to open static sorted file ... (os error 3)' 로 앱 전체가 깨진다(2026-09-08 사고). "
-        "지우기 전에 서버를 먼저 종료하라:\n"
+        "지우려면 서버를 먼저 종료하라:\n"
         f"  taskkill /F /T /PID {pids}\n"
         "이 서버가 다른 세션 것일 수 있으니 종료 전에 사용자에게 확인할 것. "
-        "하네스(verify_harness.py)는 .next 를 건드리지 않으므로 하네스 전 청소는 대개 불필요하다."
+        "하네스(verify_harness.py)는 .next 를 건드리지 않으므로 하네스 전 청소는 대개 불필요하다.\n"
+        "삭제 의도가 없는 명령(문장 안에 명령어와 dist 이름이 함께 등장한 경우)이면 그대로 승인해도 된다."
     )
 
 
