@@ -113,7 +113,7 @@ HTTP 상태 코드: `4xx` 또는 `5xx`
 - **대상 제한**: `BOT_OWNED` 보유분에 호출하면 `400`입니다. 봇이 자기 규칙으로 산 포지션을 규칙에서 빼면 계좌에 좀비 포지션이 쌓이고 전략 성과 측정이 깨지기 때문입니다.
 - **끄면 무장도 해제**: `harvest_enabled=false`는 `harvest_armed`도 함께 `false`로 되돌립니다. 다시 켰을 때 예전 무장 상태를 물려받으면 급등 판정 없이 곧바로 매도 판정 구간에 들어갑니다.
 - **응답**: `ticker`, `strategy_type`, `management`, `harvest_enabled`, `harvest_armed`, `observed_base_price`.
-- **`GET /holdings` 추가 필드**: `EXTERNAL` 행이 있는 티커에는 `harvest_enabled`, `harvest_armed`, `observed_base_price`가 함께 반환됩니다.
+- **`GET /holdings` 추가 필드**: `EXTERNAL` 행이 있는 티커에는 `harvest_enabled`, `harvest_armed`, `observed_base_price`가 함께 반환됩니다. 여기에 임계값 스냅샷 `harvest_arm_pct`(무장까지 필요한 상승률 %)와 `harvest_trailing_pct`(무장 후 고점 대비 이탈 허용폭 %)가 더해집니다. 두 값은 ATR 파생이라 서버가 응답 시점에 계산하지 않고 스케줄러가 관측해 영속화한 값을 그대로 내려줍니다 - 응답 시 계산하려면 외부 시세 호출이 필요해 유저 대면 경로 외부 호출 0건 원칙에 어긋나기 때문입니다. 아직 관측되지 않았으면 `null`이며, 이때 클라이언트는 값을 감춰야 합니다. 추정치로 대신 채우면 실제 판정과 어긋난 숫자를 사용자가 기준으로 삼게 됩니다. `harvest_enabled`가 꺼져 있어도 채워지므로 스위치를 켜기 전에 기준을 보여줄 수 있습니다. `PATCH /holdings/{ticker}/management` 응답에도 같은 두 필드가 포함됩니다.
 
 - **수확·방어 상태의 부착 기준**: `harvest_*`와 `guard_*` 필드는 그 티커에 `EXTERNAL` 행이 하나라도 있으면 붙습니다. 합쳐진 항목의 `management`가 `BOT_OWNED`로 표시되는 혼합 티커(같은 종목을 봇 슬롯과 `EXTERNAL`로 동시 보유)에도 붙으며, 이는 의도된 동작입니다. 스위치는 티커가 아니라 `EXTERNAL` 슬라이스에 속하기 때문입니다. 클라이언트는 스위치 노출 여부를 항목의 `management`가 아니라 `slices`에 `EXTERNAL` 원소가 있는지로 판정하고, `PATCH` 요청에는 그 슬라이스의 `strategy_type`을 실어야 합니다.
 
@@ -186,3 +186,15 @@ HTTP 상태 코드: `4xx` 또는 `5xx`
 
 **`DELEGATED`는 `BOT_OWNED`로 승격되지 않습니다.** 성과 원장을 분리하기 위해 끝까지 구분합니다. 따라서 `force-liquidate`의 `include_external=false` 기본값에서도 위임분은 **청산 대상에 포함**되며, 슬롯 자본 계산에도 산입됩니다.
 
+
+## 7. 거래 원장 조회 계약 (Trade Ledger Query Contract)
+
+체결 원장의 SSOT는 `trade_logs` 테이블 하나입니다. `holdings`에는 매수 시각 컬럼이 없고 `updated_at`은 트레일링 고점·최근가 관측마다 덮여쓰므로 매수일 대용으로 쓸 수 없습니다. "이 종목을 언제 얼마에 샀는가"의 답은 항상 이 엔드포인트에서 나옵니다.
+
+- **`GET /api/v1/trades`**: 쿼리 파라미터 `ticker`(string, 생략 가능)로 종목별 체결 이력을 조회합니다. `skip`·`limit`의 기존 의미는 그대로이며, 티커를 주지 않으면 종전과 동일하게 전 종목 최신순을 반환합니다.
+- **필터는 DB에서 적용되며 `limit`보다 먼저 걸립니다.** 클라이언트가 전체 목록을 받아 화면에서 거르는 방식과 결과가 다릅니다 - 거래가 잦은 종목들에 밀려 조용한 보유분의 매수 기록이 응답 창 밖으로 나가면 화면이 "이력 없음"을 보여주게 됩니다. `skip`·`limit`은 필터된 결과 위에서 동작하므로 한 종목의 이력을 끝까지 넘길 수 있습니다.
+- **티커 표기는 관대하게 받습니다.** 대소문자와 거래소 접두사를 정규화하므로 `AAPL`·`aapl`·`NAS_AAPL`이 모두 같은 원장을 가리킵니다. 저장되는 정본은 접두사 없는 대문자 심볼이며, 이는 `Holding.ticker` 및 매도 경로의 키(6절)와 같은 형태입니다. 다만 정규화 결과가 빈 문자열이면(공백만 전달) 필터를 걸지 않고 전체를 반환합니다 - 어떤 행과도 매칭되지 않는 필터는 "이력 없음"으로 오인되기 때문입니다.
+- **사용자 격리는 필터 유무와 무관하게 유지됩니다.** 항상 `user_id`로 먼저 좁힌 뒤 티커를 겁니다.
+- **응답 항목**은 `TradeLog` 컬럼 전체입니다: `ticker`, `ticker_name`, `trade_type`(`BUY`/`SELL`), `price`(체결가), `quantity`, `executed_at`, `strategy_type`, `regime_mode`, `signal_score`, `realized_pnl`, `return_rate`, `order_no`. `realized_pnl`·`return_rate`는 매도 행에만 채워집니다.
+- **체결 없음은 오류가 아닙니다.** 봇이 매수하지 않은 보유분(`management = EXTERNAL`)은 원장에 행이 없는 것이 정상이므로 빈 배열이 반환됩니다. 클라이언트는 이를 "기록 유실"이 아니라 "봇이 사지 않은 종목"으로 안내해야 합니다.
+- **포지션 시작 시각은 서버가 계산하지 않습니다.** 클라이언트가 슬라이스(`strategy_type`)별로 시간순 수량을 걸어 수량이 0에서 처음 양수가 된 체결을 시작으로 삼습니다. 팔았다 다시 산 종목은 마지막 재진입 시점이 시작입니다. 이 계산은 조회한 창(`limit`) 안에서만 유효하므로, 응답이 `limit`에 닿으면 화면이 그 사실을 밝혀야 합니다.

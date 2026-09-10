@@ -14,6 +14,11 @@ export interface TradeLog {
   executed_at: string;
   realized_pnl?: number;
   return_rate?: number;
+  /** 체결이 속한 전략 슬롯. 같은 티커를 여러 슬롯으로 보유할 수 있어 이력을 가르는 키다. */
+  strategy_type?: string;
+  /** 매수 당시의 스캔 점수·장세 레짐. 서버가 체결과 함께 남긴 판단 근거다. */
+  signal_score?: number;
+  regime_mode?: string;
 }
 
 interface TradeLogsProps {

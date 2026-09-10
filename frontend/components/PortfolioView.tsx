@@ -4,7 +4,7 @@ import React, { useRef, useState } from 'react';
 import {
   Target, MessageSquare, ExternalLink,
   TrendingUp, TrendingDown, Newspaper, ArrowUpRight, ArrowDownRight, Info, ShieldAlert, Sprout,
-  SlidersHorizontal, HandCoins
+  SlidersHorizontal, HandCoins, History
 } from 'lucide-react';
 import useSWR, { mutate as globalMutate } from 'swr';
 import { pollInterval } from '@/lib/sse';
@@ -14,6 +14,7 @@ import { getProfitColor } from '@/lib/theme';
 import { Modal } from '@/components/ui';
 import { useTranslations } from "next-intl";
 import { useStrategyCatalog } from "@/hooks/useStrategyCatalog";
+import { HoldingHistory } from "@/components/HoldingHistory";
 
 interface Holding {
   id: number;
@@ -40,6 +41,13 @@ interface Holding {
   /** 급등 임계를 넘겨 추적이 시작됐는지. 무장 전에는 아무 동작도 하지 않는다. */
   harvest_armed?: boolean;
   observed_base_price?: number | null;
+  /**
+   * 수확 임계값. ATR 파생이라 시점마다 다르며 스케줄러가 관측해 저장한 값이다.
+   * 아직 관측되지 않았으면 null이고 이때는 표시하지 않는다 - 추정치를 보여주면
+   * 실제 판정과 어긋난 숫자를 사용자가 기준으로 삼게 된다.
+   */
+  harvest_arm_pct?: number | null;
+  harvest_trailing_pct?: number | null;
   /** 방어 경보 - EXTERNAL 전용 opt-in. 기본값에서는 알림만 보내고 매도는 하지 않는다. */
   guard_enabled?: boolean;
   /** 방어 조건 충족 시 동작. 기본 ALERT_ONLY. LIQUIDATE만 실제로 매도한다. */
@@ -104,6 +112,9 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
   // 위임 스위치는 카드 푸터가 아니라 전용 모달에서 다룬다. 방어를 켜면 조치 모드 3개가
   // 더 붙어 버튼이 6개가 되는데, 415px 카드 한 줄에 넣으면 글자가 줄바꿈되어 읽을 수 없다.
   const [delegationTarget, setDelegationTarget] = useState<Holding | null>(null);
+  // 체결 이력 모달의 대상. 카드가 보여주는 값(평단가·수량)은 브로커 잔고의 현재 상태일 뿐
+  // "언제 얼마에 샀는지"를 담지 않는다. 그 답은 trade_logs에만 있어 별도로 조회한다.
+  const [historyTarget, setHistoryTarget] = useState<Holding | null>(null);
   // 위임할 전략 슬롯. 카탈로그가 오기 전에는 비어 있고, 사용자가 고르면 채워진다.
   const [delegateSlot, setDelegateSlot] = useState<string>("");
   const { strategies } = useStrategyCatalog();
@@ -249,6 +260,14 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
       ) ?? null
     : null;
 
+  // 이력 모달도 같은 규칙을 따른다. 전량 매도로 보유분이 사라지면 요약(평단가·수량)이
+  // 실재하지 않는 포지션을 가리키게 되므로 닫는다. 지나간 체결은 대시보드의 전체 거래 로그에 남는다.
+  const historyHolding = historyTarget
+    ? holdings.find(
+        (x) => x.ticker === historyTarget.ticker && x.strategy_type === historyTarget.strategy_type,
+      ) ?? null
+    : null;
+
   const selectedNews = activeNewsItem?.news;
   const isPositive = selectedNews?.sentiment === 'POSITIVE';
   const isNegative = selectedNews?.sentiment === 'NEGATIVE';
@@ -280,7 +299,17 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
               <div className="flex justify-between items-start mb-4">
                 <div className="min-w-0 flex-1 mr-3">
                   <h4 className="text-xs font-bold text-zinc-400 tracking-wider uppercase flex items-center gap-1.5 flex-wrap">
-                    {cleanTicker}
+                    {/* 티커 자체가 이력 진입점이다 - 사용자가 "이 종목을 언제 샀나"를 물을 때
+                        가장 먼저 누르는 곳이 종목 코드다. 아래 푸터에도 같은 진입점을 둔다. */}
+                    <button
+                      type="button"
+                      onClick={() => setHistoryTarget(h)}
+                      title={t("portfolio.history_action")}
+                      className="inline-flex items-center gap-1 text-zinc-300 hover:text-indigo-300 hover:underline underline-offset-2 decoration-dotted transition-colors cursor-pointer"
+                    >
+                      {cleanTicker}
+                      <History size={10} className="text-zinc-600 group-hover:text-indigo-400 transition-colors" />
+                    </button>
                     {/* EXTERNAL은 서버가 strategy_name을 "봇 관리 안 함"으로 치환해 내려주므로
                         아래 전용 배지와 문구가 겹친다. 관할권 표시는 전용 배지 하나로만 한다. */}
                     {strategyLabel && !isExternal && (
@@ -458,6 +487,14 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                     </span>
                   </div>
                   <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setHistoryTarget(h)}
+                      className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg border border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-slate-200 transition-colors"
+                    >
+                      <History size={12} />
+                      {t("portfolio.history_action")}
+                    </button>
                     {(isExternal || isDelegated) && (
                       <button
                         type="button"
@@ -483,6 +520,38 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
           );
         })}
       </div>
+
+      {/* 종목별 체결 이력 모달 — "언제 얼마에 샀나"의 답은 trade_logs에만 있다 */}
+      <Modal
+        isOpen={!!historyHolding}
+        onClose={() => setHistoryTarget(null)}
+        maxWidth="4xl"
+        title={
+          historyHolding ? (
+            <span className="flex items-center gap-2">
+              <History size={16} className="text-indigo-400" />
+              <span className="font-mono">{historyHolding.ticker.replace(/^[A-Z0-9]+_/, "")}</span>
+              <span className="text-zinc-400 font-normal text-sm">{historyHolding.ticker_name}</span>
+            </span>
+          ) : undefined
+        }
+        description={t("portfolio.history_description")}
+      >
+        {historyHolding && (
+          <HoldingHistory
+            // 티커가 바뀌면 모달 내부 상태를 새로 만든다. 이전 종목의 이력이 잠깐 비치지 않게 한다.
+            key={historyHolding.ticker}
+            displayCurrency={displayCurrency}
+            target={{
+              ticker: historyHolding.ticker.replace(/^[A-Z0-9]+_/, ""),
+              ticker_name: historyHolding.ticker_name,
+              avg_price: historyHolding.avg_price,
+              quantity: historyHolding.quantity,
+              fx_rate: historyHolding.fx_rate,
+            }}
+          />
+        )}
+      </Modal>
 
       {/* 봇 위임 설정 모달 — 스위치와 조치 모드를 카드 밖으로 뺀다 */}
       <Modal
@@ -587,6 +656,50 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
               <p className="text-[11px] text-zinc-500 leading-relaxed">
                 {delegationHolding.harvest_armed ? t("portfolio.harvest_armed_tip") : t("portfolio.harvest_tip")}
               </p>
+              {/*
+                임계값은 퍼센트만으로는 읽히지 않는다. "+35.5%"가 얼마인지 암산하게 만들지 않도록
+                도달가를 함께 낸다. 무장 전에는 관측 시작가 기준의 무장 도달가를, 무장 뒤에는
+                고점 기준의 매도 발동가를 보여준다 - 각 단계에서 실제로 감시 중인 선이 다르다.
+                스케줄러가 아직 관측하지 않아 값이 없으면 통째로 감춘다.
+              */}
+              {(delegationHolding.harvest_arm_pct != null || delegationHolding.harvest_trailing_pct != null) && (
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px] border-t border-zinc-800 pt-2">
+                  {!delegationHolding.harvest_armed && delegationHolding.harvest_arm_pct != null && (
+                    <>
+                      <dt className="text-zinc-500">{t("portfolio.harvest_arm_threshold")}</dt>
+                      <dd className="text-right font-mono text-slate-300">
+                        +{delegationHolding.harvest_arm_pct.toFixed(1)}%
+                        {(delegationHolding.observed_base_price ?? delegationHolding.current_price) != null && (
+                          <span className="text-zinc-500">
+                            {" · "}
+                            {`$${(
+                              (delegationHolding.observed_base_price ?? delegationHolding.current_price ?? 0) *
+                              (1 + delegationHolding.harvest_arm_pct / 100)
+                            ).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                          </span>
+                        )}
+                      </dd>
+                    </>
+                  )}
+                  {delegationHolding.harvest_trailing_pct != null && (
+                    <>
+                      <dt className="text-zinc-500">{t("portfolio.harvest_trailing_width")}</dt>
+                      <dd className="text-right font-mono text-slate-300">
+                        -{delegationHolding.harvest_trailing_pct.toFixed(1)}%
+                        {delegationHolding.harvest_armed && delegationHolding.highest_price > 0 && (
+                          <span className="text-zinc-500">
+                            {" · "}
+                            {`$${(
+                              delegationHolding.highest_price *
+                              (1 - delegationHolding.harvest_trailing_pct / 100)
+                            ).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                          </span>
+                        )}
+                      </dd>
+                    </>
+                  )}
+                </dl>
+              )}
             </div>
 
             {/* 방어 */}

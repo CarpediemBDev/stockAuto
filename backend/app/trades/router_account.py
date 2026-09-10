@@ -296,6 +296,11 @@ def get_holdings(
                 if external_row.observed_base_price is not None
                 else None
             )
+            # 수확 임계값 스냅샷. 스케줄러가 관측한 값을 그대로 내려준다 - 여기서 계산하지
+            # 않는 이유는 ATR을 얻으려면 외부 시세 호출이 필요해서다(유저 대면 경로 외부
+            # 호출 0건 원칙). 아직 관측되지 않았으면 null이며 클라이언트는 값을 감춘다.
+            holding["harvest_arm_pct"] = external_row.harvest_arm_pct
+            holding["harvest_trailing_pct"] = external_row.harvest_trailing_pct
             holding["guard_enabled"] = bool(external_row.guard_enabled)
             holding["guard_baseline_score"] = external_row.guard_baseline_score
             holding["guard_baseline_low"] = (
@@ -647,6 +652,8 @@ def update_holding_management(
             if holding.observed_base_price is not None
             else None
         ),
+        "harvest_arm_pct": holding.harvest_arm_pct,
+        "harvest_trailing_pct": holding.harvest_trailing_pct,
         "guard_enabled": bool(holding.guard_enabled),
         "guard_baseline_score": holding.guard_baseline_score,
         "guard_baseline_low": (

@@ -1380,6 +1380,58 @@ async def _evaluate_guard(
     )
 
 
+def _persist_harvest_thresholds(
+    ctx: TradingFlowContext,
+    h,
+    current_data: dict,
+    current_price_dec: Decimal,
+) -> None:
+    """EXTERNAL 보유분의 수확 임계값을 화면 표시용으로 DB에 남긴다.
+
+    판정에는 관여하지 않는다. _evaluate_harvest는 종전대로 자기 사이클의 값을 다시 계산해
+    쓰며, 여기 저장된 값이 낡거나 NULL이어도 판정 결과는 달라지지 않는다. 표시 전용이므로
+    실패해도 사이클을 중단시키지 않는다.
+
+    version_id를 건드리지 않는 Core UPDATE를 쓰는 이유는 last_price·highest_price와 같다 -
+    공유 detached holding의 매핑 컬럼을 세팅하면 다음 micro_session의 auto-merge가 이를
+    flush하며 version을 올리고, Part B 매도의 db.merge(h)가 StaleDataError로 사이클을 깬다.
+    """
+    if not isinstance(h, Holding) or h.id is None:
+        return
+
+    atr = current_data.get("details", {}).get("atr", 0.0)
+    current_price = float(current_price_dec)
+    arm_pct = round(get_harvest_arm_pct(atr, current_price), 2)
+    trailing_pct = round(get_harvest_trailing_pct(atr, current_price), 2)
+
+    # 값이 그대로면 쓰지 않는다. ATR은 사이클마다 미세하게 흔들리므로 소수점 2자리로 끊어
+    # 비교해야 의미 없는 UPDATE가 매 사이클 쌓이지 않는다.
+    def _same(stored, computed) -> bool:
+        return stored is not None and round(float(stored), 2) == computed
+
+    if _same(getattr(h, "harvest_arm_pct", None), arm_pct) and _same(
+        getattr(h, "harvest_trailing_pct", None), trailing_pct
+    ):
+        return
+
+    try:
+        with micro_session(ctx) as db:
+            db.query(Holding).filter(Holding.id == h.id).update(
+                {
+                    Holding.harvest_arm_pct: arm_pct,
+                    Holding.harvest_trailing_pct: trailing_pct,
+                },
+                synchronize_session=False,
+            )
+            db.commit()
+    except Exception as exc:  # noqa: BLE001 - 표시용 값이므로 사이클을 깨뜨리지 않는다
+        logger.warning(f"[Harvest] 임계값 기록 실패 {h.ticker}: {exc}")
+        return
+
+    h.harvest_arm_pct = arm_pct
+    h.harvest_trailing_pct = trailing_pct
+
+
 async def _evaluate_harvest(
     ctx: TradingFlowContext,
     h,
@@ -1668,6 +1720,17 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
 
             # ---- 공통 관측 구간 끝. 아래부터는 전략 판정이므로 봇 관할 보유분만 진입한다 ----
             if is_external:
+                # 수확 임계값을 화면이 읽을 수 있도록 남긴다. 판정에는 쓰지 않는다 - 각 판정은
+                # 종전대로 그 사이클에 계산한 값을 쓰고, 여기 저장하는 것은 관측 기록일 뿐이다.
+                #
+                # 잔고 API가 직접 계산하지 않는 이유는 ATR을 얻으려면 외부 시세 호출이 필요해서다
+                # ("유저 대면 경로 외부 호출 0건" 원칙). 스케줄러는 어차피 매 사이클 이 값을
+                # 계산하므로 결과만 옮겨 담는다.
+                #
+                # harvest_enabled와 무관하게 채우는 이유 - 켜기 전에 기준을 볼 수 있어야 켤지
+                # 말지 판단할 수 있다. 켰을 때만 채우면 화면이 "켜봐야 알 수 있다"가 된다.
+                _persist_harvest_thresholds(ctx, h, current_data, current_price_dec)
+
                 # 두 스위치는 독립이다. 같이 켜면 위로 갔다 꺾이면 수확, 아래로 무너지면 방어다.
                 # 방어가 먼저인 이유는 하락 국면에서 수확 조건이 성립할 수 없어 순서가 무해하고,
                 # 반대로 상승 국면에서는 방어 조건이 성립할 수 없기 때문이다(둘은 배타적으로 발동한다).
