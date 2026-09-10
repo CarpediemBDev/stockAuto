@@ -68,6 +68,8 @@ erDiagram
         int buy_stage
         string strategy_type
         string management
+        float harvest_arm_pct
+        float harvest_trailing_pct
         datetime updated_at
     }
 
@@ -184,6 +186,7 @@ erDiagram
     * `EXTERNAL`: 봇이 사지 않은 외부 유입 포지션. 매도·추가매수 대상이 아니고 슬롯 자본에서도 제외되며, 전량 청산(`/force-liquidate`)에서도 기본 제외된다. 다만 수량 동기화와 관측(`last_price`·`highest_price`)은 계속된다.
     * 값 후보를 Boolean이 아닌 문자열로 여는 이유는 위임(`DELEGATED`) 추가 시 마이그레이션을 두 번 하지 않기 위함이다. 상세 설계는 [plans/holding_management_modes.md](plans/holding_management_modes.md)가 소유한다.
 * `risk_basis_price` (NUMERIC(20,4), Nullable): **위임 포지션의 리스크 기준가.** 손절선과 트레일링·롤링박스의 하한 가드가 이 값을 앵커로 쓴다. NULL이면 `avg_price`로 폴백하므로 기존 `BOT_OWNED` 레코드는 영향을 받지 않는다. `avg_price`와 분리하는 이유는 용도가 둘로 갈리기 때문이다 - 실현손익은 사용자의 실제 매수가로 계산해야 정직하고, 손절선은 위임 시점가를 기준으로 잡아야 봇이 물려받은 과거 손실에 즉시 청산당하지 않는다. 위임 시 `avg_price`를 현재가로 덮어쓰면 손절은 정상화되지만 원장이 거짓말을 한다. 표시용 손익률과 실현손익은 계속 `avg_price` 기준이다.
+* `harvest_arm_pct` / `harvest_trailing_pct` (FLOAT, Nullable): **수확 임계값의 관측 스냅샷.** 각각 무장까지 필요한 상승률(`min(40, max(15, ATR% x4))`)과 무장 후 고점 대비 이탈 허용폭(`max(5, ATR% x2)`)이다. 판정의 입력이 아니라 판정 결과의 기록이며 화면 표시가 유일한 소비자다 - 각 판정은 종전대로 그 사이클에 계산한 값을 쓰므로 이 컬럼이 낡거나 NULL이어도 동작이 달라지지 않는다. 두 값은 ATR 파생이라 시점마다 다르고 DB 어디에도 남지 않아 사용자가 자기 종목의 기준을 알 수 없었는데, 잔고 API가 직접 계산하려면 ATR을 얻으려 외부 시세를 호출해야 해서(유저 대면 경로 외부 호출 0건 원칙) 스케줄러의 계산 결과를 옮겨 담는 방식을 택했다. `management='EXTERNAL'`인 행에 대해 `harvest_enabled`와 무관하게 채운다 - 스위치를 켜기 전에 기준을 볼 수 있어야 켤지 말지 판단할 수 있기 때문이다. 봇 소유분은 수확 대상이 아니므로 NULL로 남는다.
 * `updated_at` (DATETIME): 마지막 보유 현황 동기화 일시
 * *제약 조건:* 복합 유니크 제약(`user_id`, `ticker`, `strategy_type`). 전략 슬롯이 다르면 같은 티커를 동시에 보유할 수 있으며, 이 덕분에 같은 종목을 봇 슬롯과 `EXTERNAL`로 나눠 들 수 있다.
 

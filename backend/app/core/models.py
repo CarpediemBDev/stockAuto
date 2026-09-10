@@ -234,6 +234,18 @@ class Holding(Base):
     harvest_enabled = Column(Boolean, nullable=False, server_default="0", default=False)
     harvest_armed = Column(Boolean, nullable=False, server_default="0", default=False)
     harvest_breach_started_at = Column(AwareDateTime, nullable=True)  # 트레일링 이탈이 시작된 시각
+    # 수확 임계값의 관측 스냅샷. 판정의 입력이 아니라 판정 결과의 기록이며, 화면 표시가 유일한 소비자다.
+    #
+    # 두 값은 ATR에서 파생되므로 시점마다 다르고 DB 어디에도 남지 않았다. 그래서 사용자는
+    # 자기 종목이 몇 % 올라야 무장되는지 알 수 없었다. 잔고 API가 직접 계산하려면 ATR을 얻으려
+    # 외부 시세를 호출해야 하는데, 이는 "유저 대면 경로 외부 호출 0건" 원칙에 정면으로 어긋난다
+    # (simulated_broker.get_holdings가 last_price를 DB에서 읽는 것과 같은 이유다).
+    #
+    # 스케줄러는 이 두 값을 매 사이클 이미 계산하고 있다. 계산을 옮기지 않고 결과만 남긴다.
+    # EXTERNAL 보유분이면 harvest_enabled와 무관하게 채운다 - 스위치를 켜기 전에 기준을 볼 수
+    # 있어야 켤지 말지 판단할 수 있고, 계산은 어차피 사이클마다 돌기 때문이다.
+    harvest_arm_pct = Column(Float, nullable=True)       # 무장까지 필요한 상승률(%) = min(40, max(15, ATR% x4))
+    harvest_trailing_pct = Column(Float, nullable=True)  # 무장 후 고점 대비 이탈 허용폭(%) = max(5, ATR% x2)
     # 방어 경보 (EXTERNAL 보유분의 opt-in 하위 옵션). 경보만 보내고 주문은 내지 않는다.
     # 판정은 상태가 아니라 전이를 본다 - 이미 물린 종목은 절대 점수선을 상시 만족하므로,
     # 켠 시점의 점수·저가를 기준선으로 박고 거기서 추가로 악화될 때만 울린다.

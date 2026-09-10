@@ -427,3 +427,91 @@ def test_restart_does_not_reset_the_breach_clock(monkeypatch):
 
     assert db.query(Holding).one().harvest_breach_started_at == started
     db.close()
+
+
+# ---------------------------------------------------------------------------
+# 임계값 화면 표시 (harvest_arm_pct / harvest_trailing_pct)
+#
+# 두 값은 ATR 파생이라 시점마다 다르고 DB 어디에도 남지 않아, 사용자는 자기 종목이 몇 %
+# 올라야 무장되는지 알 수 없었다. 잔고 API가 직접 계산하려면 ATR을 얻으려 외부 시세를
+# 호출해야 하므로("유저 대면 경로 외부 호출 0건" 원칙), 스케줄러가 이미 계산하는 값을
+# 영속화하고 API는 읽기만 한다.
+# ---------------------------------------------------------------------------
+
+
+def test_thresholds_are_recorded_even_while_harvest_is_off(monkeypatch):
+    """스위치를 켜기 전에도 임계가 보여야 한다 - 켤지 말지의 판단 근거이기 때문이다.
+
+    켰을 때만 기록하면 화면이 "켜봐야 알 수 있다"가 되고, 그것은 되돌릴 수 있다 해도
+    사용자에게 스위치를 눌러보게 강요하는 설계다.
+    """
+    db = _make_db()
+    user = _make_user(db)
+    holding = _add_holding(db, user, harvest_enabled=False)
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+
+    _run_cycle(db, user, _Broker(), holding, price=50.0, atr=1.0)
+
+    refreshed = db.query(Holding).filter_by(id=holding.id).one()
+    # ATR% = 1.0/50.0 = 2% → 무장 min(40, max(15, 8)) = 15, 트레일링 max(5, 4) = 5
+    assert refreshed.harvest_arm_pct == pytest.approx(get_harvest_arm_pct(1.0, 50.0))
+    assert refreshed.harvest_trailing_pct == pytest.approx(get_harvest_trailing_pct(1.0, 50.0))
+    assert refreshed.harvest_enabled is False  # 기록이 스위치를 켜지는 않는다
+    db.close()
+
+
+def test_thresholds_follow_volatility_across_cycles(monkeypatch):
+    """기록은 스냅샷이다 - ATR이 바뀌면 다음 사이클에 따라 바뀐다."""
+    db = _make_db()
+    user = _make_user(db)
+    holding = _add_holding(db, user, harvest_enabled=True, observed_base_price=50.0)
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+
+    _run_cycle(db, user, _Broker(), holding, price=50.0, atr=1.0)
+    calm = db.query(Holding).filter_by(id=holding.id).one().harvest_arm_pct
+
+    _run_cycle(db, user, _Broker(), holding, price=50.0, atr=5.0)
+    volatile = db.query(Holding).filter_by(id=holding.id).one()
+
+    # ATR% 2% → 무장 15%(하한). ATR% 10% → 40%(상한에 걸림).
+    assert calm == pytest.approx(15.0)
+    assert volatile.harvest_arm_pct == pytest.approx(40.0)
+    assert volatile.harvest_trailing_pct == pytest.approx(20.0)
+    db.close()
+
+
+def test_bot_owned_holding_gets_no_thresholds(monkeypatch):
+    """봇 소유분에는 기록하지 않는다 - 수확 모드가 적용되지 않는 포지션이다."""
+    db = _make_db()
+    user = _make_user(db)
+    holding = _add_holding(
+        db, user, management=MANAGEMENT_BOT_OWNED, strategy_type="regime_switching",
+    )
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+
+    _run_cycle(db, user, _Broker(), holding, price=50.0, atr=1.0)
+
+    refreshed = db.query(Holding).filter_by(id=holding.id).one()
+    assert refreshed.harvest_arm_pct is None
+    assert refreshed.harvest_trailing_pct is None
+    db.close()
+
+
+def test_threshold_record_does_not_bump_version_id(monkeypatch):
+    """version_id를 올리면 안 된다.
+
+    올리면 같은 사이클 Part B의 db.merge(h)가 StaleDataError로 터져 사이클이 통째로
+    중단된다. last_price·highest_price가 Core UPDATE를 쓰는 것과 같은 이유이며,
+    표시용 값 때문에 매매가 멎는 것은 용납할 수 없는 맞바꿈이다.
+    """
+    db = _make_db()
+    user = _make_user(db)
+    holding = _add_holding(db, user)
+    before = db.query(Holding).filter_by(id=holding.id).one().version_id
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+
+    _run_cycle(db, user, _Broker(), holding, price=50.0, atr=1.0)
+    _run_cycle(db, user, _Broker(), holding, price=50.0, atr=1.0)
+
+    assert db.query(Holding).filter_by(id=holding.id).one().version_id == before
+    db.close()
