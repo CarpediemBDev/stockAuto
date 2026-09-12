@@ -1,14 +1,17 @@
 # CLAUDE.md — StockAuto 세션 부트스트랩 (Claude Code 진입점)
 
+@AGENTS.md
+
 > 이 파일은 **Claude Code가 세션 시작 시 자동 로딩**하는 진입점입니다.
-> 규칙의 **단일 원장(SSOT)은 [`AGENTS.md`](AGENTS.md)** 이며, 이 파일은 Claude 세션이
-> 그 규칙에 곧바로 도달·집행하도록 요약·연결·번역하는 브리지입니다.
+> 위 `@AGENTS.md`는 **링크가 아니라 import**이므로, 규칙 원장(SSOT) 전문이
+> 매 세션 컨텍스트에 **자동으로 함께 주입**됩니다. 별도로 열어 읽을 필요가 없습니다.
+> 이 파일은 그중 우선순위가 가장 높은 항목을 앞에 세우는 요약·집행 레이어이며,
 > 상세·최신 규칙이 충돌하면 항상 `AGENTS.md`가 우선합니다.
 
 ## 1. 시작하면 이 순서로 읽는다 (Cold Start)
 
-1. **[`docs/README.md`](docs/README.md)** — 문서 지도(SSOT 인덱스). 어디에 뭐가 있는지 먼저 파악.
-2. **[`AGENTS.md`](AGENTS.md)** — 프로젝트 절대 수칙 전문.
+1. **`AGENTS.md`** — 프로젝트 절대 수칙 전문. **이미 위 `@AGENTS.md`로 로딩되어 있다.** 다시 열지 말고 컨텍스트의 내용을 그대로 따른다.
+2. **[`docs/README.md`](docs/README.md)** — 문서 지도(SSOT 인덱스). 어디에 뭐가 있는지 파악.
 3. **최신 [`docs/tasks/`](docs/tasks)`/YYYY-MM-DD.md`** — 오늘/직전 현황판. 진행 중(`[/]`)·승인대기(`[R]`) 항목, 인수인계, 미해결 위험 확인.
 4. 변경할 **실제 코드와 계약 문서**(`docs/SCHEMA.md`, `docs/API_STANDARD.md` 등)를 직접 열어 확인. 추측 금지.
 
@@ -26,32 +29,14 @@
 - **SSOT 우선:** 새 로직 작성 전 `rg`로 동일·유사 기능(손익·수수료·수량 계산, API, 캐시, 스케줄러)을 전수 검색해 중복 구현을 막는다.
 - **Zero-Complacency 감사관:** 코드 검토 시 "괜찮다" 식 통과 금지. 엣지 케이스·소수점/금융 오차·레이스 컨디션을 최소 3개 비판적으로 찾는다.
 
-## 3. 런타임 도구 번역표 (Codex/Antigravity → Claude Code)
-
-`AGENTS.md §9`, `docs/AI_WORKFLOW.md §6`, `skills/multi-agent-collaboration/SKILL.md`는
-Antigravity/Codex 도구 이름으로 쓰여 있다. **Claude 세션은 아래로 치환해 실행한다:**
-
-| 문서상 표기 (Codex) | Claude Code 실제 도구 |
-| :--- | :--- |
-| `view_file`, `list_dir` | `Read`, `Glob` |
-| `grep_search` | `Grep` |
-| `run_command` | `Bash` (또는 `PowerShell`) |
-| `define_subagent` + `invoke_subagent` | `Task` 도구 (`subagent_type` 지정) |
-| `enable_write_tools: false` | 읽기 전용 서브에이전트(예: `Explore`) 선택 |
-| 3대 협업 역할(Researcher/Critical Auditor/QA) | `Task`로 역할별 프롬프트 위임, 또는 메인 세션이 순차 수행 |
-| 커밋 서명 `Co-authored-by: Antigravity <noreply@google.com>` | `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>` |
-
-> 커밋 서명은 **그 커밋을 실제로 만든 세션**을 기록하는 값이다(`AGENTS.md §2`). Claude 세션이 안티그래비티 서명을 대신 붙이거나 그 반대로 하지 않는다. 다른 세션이 워킹트리에 남긴 변경을 함께 커밋하면 서명이 사실과 달라지므로, 커밋 전 `git status`로 내 슬라이스만 스테이징한다.
-
-> 즉 멀티 에이전트 파이프라인의 **의도(분석→비판감사→하네스 검증)는 그대로 따르되**, 호출은 Claude의 `Task` 도구로 한다. `.codex/skills` 개인 설치본은 참조하지 않고 이 저장소의 `skills/`를 기준으로 한다.
-
-## 4. 세션 연속성 (여러 세션이 같은 상태를 공유)
+## 3. 세션 연속성 (여러 세션이 같은 상태를 공유)
 
 - **모든 작업 상태의 SSOT는 `docs/tasks/YYYY-MM-DD.md`**다. 다른 세션이 무엇을 했는지는 여기(+인수인계 섹션)와 `git status`로 파악한다. 세션 메모리에 의존하지 않는다.
 - 작업 종료 시 현황판 인수인계에 **마지막 검증 결과·미해결 위험·다음 시작 지점**을 남긴다. 다음 세션은 그걸 읽고 이어간다.
 - 규칙 상세는 언제나 `AGENTS.md` → `docs/AI_WORKFLOW.md` → `skills/` 순으로 확인한다.
+- **같은 폴더에서 쓰기 세션이 둘 이상 돌면 충돌한다.** 작업 전 `git status --short`로 내가 만들지 않은 미커밋 변경이 있는지 확인하고, 있으면 `git add -A` 금지 — 내 파일만 명시적으로 스테이징한다 (`AGENTS.md §9-1`).
 
-## 5. 자주 쓰는 명령
+## 4. 자주 쓰는 명령
 
 ```bash
 python scripts/new_task.py            # 오늘 현황판 표준 양식 생성
