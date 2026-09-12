@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect as sa_inspect
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -194,6 +194,9 @@ def _run_cycle(db, user, broker, holding, price, atr=1.0):
         first_slot_key="regime_switching", signal_map=signal_map, all_signals=[],
     )
     asyncio.run(scheduler.process_exit_signals(ctx, signal_map))
+    # 사이클이 만진 바로 그 인스턴스를 돌려준다. 공유 객체를 더럽히지 않았는지 검사하려면
+    # 호출자가 이 객체를 들여다볼 수 있어야 한다.
+    return fresh
 
 
 def _logs(db, user):
@@ -514,4 +517,32 @@ def test_threshold_record_does_not_bump_version_id(monkeypatch):
     _run_cycle(db, user, _Broker(), holding, price=50.0, atr=1.0)
 
     assert db.query(Holding).filter_by(id=holding.id).one().version_id == before
+    db.close()
+
+
+def test_threshold_record_leaves_the_shared_holding_clean(monkeypatch):
+    """기록은 DB에만 남기고 공유 holding 객체는 깨끗한 상태로 둬야 한다.
+
+    매핑 컬럼을 detached 객체에 세팅하면 dirty가 되고, 그 상태가 auto-merge에 실려 가면
+    version_id가 올라 Part B 매도의 db.merge(h)가 StaleDataError로 사이클을 통째 중단시킨다.
+    last_price·highest_price·observed_base_price가 모두 비영속 스냅샷으로 우회하는 이유이며,
+    _persist_harvest_thresholds도 같은 규칙을 따라야 한다.
+
+    version_id 단언(test_threshold_record_does_not_bump_version_id)만으로는 이것이 고정되지
+    않는다. micro_session이 빠져나가며 expunge_all로 객체를 떼어내므로, 더럽혀진 객체가
+    그 사이클에서는 flush되지 않고 다음 사이클에 새 객체로 교체돼 증상이 가려지기 때문이다.
+    그래서 version이 아니라 dirty 여부 자체를 본다.
+    """
+    db = _make_db()
+    user = _make_user(db)
+    holding = _add_holding(db, user)
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+
+    tracked = _run_cycle(db, user, _Broker(), holding, price=50.0, atr=1.0)
+
+    assert sa_inspect(tracked).modified is False
+    # 값은 DB에 정상적으로 남아 있어야 한다 - 깨끗함을 얻자고 기록을 포기한 것이 아니다.
+    stored = db.query(Holding).filter_by(id=holding.id).one()
+    assert stored.harvest_arm_pct == pytest.approx(get_harvest_arm_pct(1.0, 50.0))
+    assert stored.harvest_trailing_pct == pytest.approx(get_harvest_trailing_pct(1.0, 50.0))
     db.close()

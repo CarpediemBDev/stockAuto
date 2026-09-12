@@ -1428,8 +1428,10 @@ def _persist_harvest_thresholds(
         logger.warning(f"[Harvest] 임계값 기록 실패 {h.ticker}: {exc}")
         return
 
-    h.harvest_arm_pct = arm_pct
-    h.harvest_trailing_pct = trailing_pct
+    # 여기서 h.harvest_arm_pct에 같은 값을 덧쓰지 않는다. 매핑 컬럼을 세팅하면 공유 detached
+    # holding이 dirty가 되어 위 독스트링이 경고한 경로(auto-merge의 version 상승)로 들어간다.
+    # 덧쓸 이득도 없다 - 위의 중복 쓰기 방지 비교는 사이클마다 DB에서 새로 읽은 값을 보고,
+    # 한 사이클 안에서 같은 보유분을 두 번 처리하지 않는다.
 
 
 async def _evaluate_harvest(
