@@ -10,6 +10,14 @@ from app.core.locks import (
     acquire_user_operation_lock,
 )
 from app.core.holding_audit import delete_holding
+from app.bot.cycle_profiler import (
+    current_profile,
+    end_cycle_profile,
+    monitor_loop_lag,
+    phase as profile_phase,
+    start_cycle_profile,
+    stop_loop_lag_monitor,
+)
 from app.core.models import (
     TradeLog, Holding, ActionLog, UserSettings, WatchList, User, AccountEquitySnapshot, UnfilledOrder,
     MANAGEMENT_BOT_OWNED, MANAGEMENT_EXTERNAL, MANAGEMENT_DELEGATED, EXTERNAL_STRATEGY_TYPE,
@@ -508,6 +516,11 @@ def micro_session(ctx: TradingFlowContext):
     증권사 API 네트워크 대기 시간 동안 DB 커넥션을 점유하지 않도록,
     DB 접근이 필요한 찰나의 순간(0.01초)에만 커넥션을 풀에서 빌려오고 즉시 반납합니다.
     """
+    # DB 구간 계측. 이 세션 안의 작업은 설계상 "찰나의 DB 접근"뿐이므로 전체 시간이 곧 DB
+    # 점유·대기 시간이다. SQLite 쓰기 락 경합이나 병합 비용이 사이클을 늘리는지 여기서 드러난다.
+    # 호출 횟수도 함께 남아, 사이클당 세션을 몇 번 여는지(왕복 수다스러움)를 볼 수 있다.
+    profile = current_profile()
+    session_started = time.perf_counter() if profile is not None else 0.0
     db = SessionLocal()
     # 커밋 후에도 ctx.db_settings/holdings의 속성값을 세션 밖(Detached)에서 계속 읽어야 한다.
     # 기본값(expire_on_commit=True)이면 커밋 시 병합 인스턴스가 만료되고, expunge/close 이후
@@ -532,6 +545,8 @@ def micro_session(ctx: TradingFlowContext):
                 # 죽인다. load=False는 이 재조정 flush를 원천 제거한다. 병합 이후 객체에 가한 실제 변경
                 # (sync guard의 quantity 증감·delete 등)은 그대로 dirty 추적·flush되어 정상 영속된다.
                 ctx.holdings = [db.merge(h, load=False) for h in ctx.holdings]
+        if profile is not None:
+            profile.add("db.micro_session.setup", time.perf_counter() - session_started)
         yield db
     except Exception as e:
         db.rollback()  # 💡 예외 발생 시 트랜잭션 롤백 및 커넥션 오염 방지
@@ -541,6 +556,8 @@ def micro_session(ctx: TradingFlowContext):
             db.expunge_all()
         db.close()
         ctx.db = old_db
+        if profile is not None:
+            profile.add("db.micro_session.total", time.perf_counter() - session_started)
 
 
 def build_user_signal_context(
@@ -1279,10 +1296,10 @@ async def _evaluate_guard(
     if action == GUARD_ACTION_ALERT_ONLY:
         return None
 
-    # 지속 요구 - 수확의 2사이클보다 훨씬 엄격하다. 조치의 최악은 되돌릴 수 없는 손실 확정이다.
-    # 사이클 수와 실제 경과 시간을 모두 요구한다. 사이클만 쓰면 주기 변동(실측 104~846초)에
-    # 따라 같은 10사이클이 20분일 수도 두 시간일 수도 있고, 시간만 쓰면 관측이 성긴 구간에서
-    # 한두 번의 판정으로 조치가 나간다.
+    # 지속 요구 - 조치의 최악은 되돌릴 수 없는 손실 확정이라 수확보다 오래 확인한다.
+    # 사이클 수와 실제 경과 시간을 모두 요구하되 시간이 주도한다(GUARD_SUSTAIN_MINUTES).
+    # 횟수는 관측이 성긴 구간에서 한두 번의 판정으로 조치가 나가지 않게 하는 하한일 뿐이다.
+    # 횟수를 크게 잡으면 주기가 느려질 때 횟수가 시간을 압도해 "20분"이 한 시간 넘게 늘어난다.
     if new_streak < GUARD_SUSTAIN_CYCLES:
         return None
     sustained_minutes = (
@@ -1324,7 +1341,7 @@ async def _evaluate_guard(
         )
         # 기록을 로그에만 남기면 사용자가 볼 방법이 없다 - 이 모드를 볼 수 있는 화면이
         # 저장소에 없기 때문이다(ActionLog는 관리자 패널에만 노출된다). 측정 결과가
-        # 손에 들어와야 모드가 쓸모를 갖는다. 조치 시점은 10사이클 지속 + 일일 1회로
+        # 손에 들어와야 모드가 쓸모를 갖는다. 조치 시점은 20분 지속 + 일일 1회로
         # 이미 좁혀져 있으므로 알림이 잦아지지 않는다.
         send_message_async(
             ctx.user_id,
@@ -1640,7 +1657,10 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
 
             current_data = target_signal_map.get(clean_ticker) or ctx.signal_map.get(clean_ticker)
             if not current_data:
-                current_data = await analyze_single_ticker(clean_ticker)
+                # 시그널 캐시에 없는 보유 종목만 여기로 온다. 사용자마다 따로 조회하므로 같은
+                # 티커를 여러 계정이 들고 있으면 사이클당 그만큼 반복된다(중복 제거 없음).
+                with profile_phase("exit.analyze_single_ticker"):
+                    current_data = await analyze_single_ticker(clean_ticker)
 
             if not current_data:
                 _log(f"No technical data available for owned ticker {clean_ticker}. Skipping monitoring in this cycle.", "WARNING")
@@ -2667,7 +2687,8 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
     """Runs one user's automated trading flow using cycle-level market context."""
     operation_id = str(uuid4())
     try:
-        user_lease = await acquire_user_operation_lock(user_id, operation_id)
+        with profile_phase("user.lock_acquire"):
+            user_lease = await acquire_user_operation_lock(user_id, operation_id)
     except RedisLockUnavailable:
         logger.exception(
             "[TradingLock] Redis unavailable; failing closed for user=%s",
@@ -2687,6 +2708,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         # 이후 expunge_all로 Detached된 상태에서 속성을 읽으면 refresh 실패한다. 만료를 끈다.
         # (micro_session과 동일 정책 — 상세 근거는 micro_session 주석 참조.)
         db.expire_on_commit = False
+        prepare_started = time.perf_counter()
         try:
             ctx = prepare_trading_flow_context(
                 db=db,
@@ -2704,29 +2726,39 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
             db.expunge_all()
         finally:
             db.close()
+            profile = current_profile()
+            if profile is not None:
+                profile.add("user.prepare_context", time.perf_counter() - prepare_started)
 
         try:
-            await sync_broker_holdings(ctx)
+            with profile_phase("user.sync_broker_holdings"):
+                await sync_broker_holdings(ctx)
 
             # 선행 micro_session 커밋으로 만료(Detached-expired)된 보유 ORM을 신선한 로드 상태로 교체.
             # 이 재적재가 없으면 보유가 생긴 뒤 calculate_slots_allocation의 세션 밖 속성 접근이
             # DetachedInstanceError로 사이클 전체를 침묵 실패시킨다.
-            refresh_db = SessionLocal()
-            try:
-                ctx.holdings = refresh_db.query(Holding).filter(Holding.user_id == user_id).all()
-                refresh_db.expunge_all()
-            finally:
-                refresh_db.close()
+            with profile_phase("user.refresh_holdings"):
+                refresh_db = SessionLocal()
+                try:
+                    ctx.holdings = refresh_db.query(Holding).filter(Holding.user_id == user_id).all()
+                    refresh_db.expunge_all()
+                finally:
+                    refresh_db.close()
 
-            slot_allocations = await calculate_slot_allocations(ctx)
-            await process_autonomous_slots(ctx, slot_allocations)
-            target_signals = await build_target_signals(ctx)
+            with profile_phase("user.slot_allocations"):
+                slot_allocations = await calculate_slot_allocations(ctx)
+            with profile_phase("user.autonomous_slots"):
+                await process_autonomous_slots(ctx, slot_allocations)
+            with profile_phase("user.target_signals"):
+                target_signals = await build_target_signals(ctx)
             if target_signals is None:
                 return
 
             target_signal_map = {s['ticker']: s for s in target_signals}
-            await process_exit_signals(ctx, target_signal_map)
-            entries_processed = await process_entry_signals(ctx, target_signals, slot_allocations)
+            with profile_phase("user.exit_signals"):
+                await process_exit_signals(ctx, target_signal_map)
+            with profile_phase("user.entry_signals"):
+                entries_processed = await process_entry_signals(ctx, target_signals, slot_allocations)
             if not entries_processed:
                 return
 
@@ -2747,7 +2779,8 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
         except Exception as e:
             logger.exception(f"[run_user_trading_flow] Error for user {user_id}")
     finally:
-        await user_lease.release()
+        with profile_phase("user.lock_release"):
+            await user_lease.release()
 
 
 def is_scanner_refresh_in_progress() -> bool:
@@ -2851,71 +2884,91 @@ async def async_trading_loop():
         level = logger.warning if gap_seconds >= 90 else logger.info
         level(f"[Cycle] Interval since previous start: {gap_seconds:.1f}s (registered 60s)")
 
+    # 구간별 계측을 켠다. 총합(Duration)만으로는 어느 구간에서 시간이 새는지 알 수 없어
+    # 2026-09 회귀의 원인을 확정하지 못했다(app/bot/cycle_profiler.py 모듈 주석).
+    # 이 프로파일은 gather가 만드는 사용자별 태스크까지 ContextVar로 전파된다.
+    profile, profile_token = start_cycle_profile()
+    lag_monitor = asyncio.create_task(monitor_loop_lag(profile))
+    active_user_count = 0
+
     db = SessionLocal()
     try:
         # 1. 자동매매 기동 중인 활성 유저 리스트 로드
-        active_users = db.query(UserSettings).filter(UserSettings.is_running == True).all()
+        with profile_phase("cycle.load_active_users"):
+            active_users = db.query(UserSettings).filter(UserSettings.is_running == True).all()
         if not active_users:
             return
+        active_user_count = len(active_users)
 
         # SIMULATED 모드인 유저들의 미체결 지정가 주문(UnfilledOrder)을 주기적으로 평가/체결 처리합니다.
-        for u in active_users:
-            trade_mode = getattr(u, "trade_mode", "SIMULATED") or "SIMULATED"
-            if trade_mode.upper() == "SIMULATED":
-                from app.brokers.simulated_broker import LocalSimulatedBroker
-                sim_broker = LocalSimulatedBroker(db_settings=u)
-                sim_broker.process_unfilled_orders(db)
+        # 가동 유저 전원을 이벤트 루프 위에서 동기로 순회하므로 사용자 수에 비례해 루프를 붙잡는다.
+        with profile_phase("cycle.simulated_unfilled_orders"):
+            for u in active_users:
+                trade_mode = getattr(u, "trade_mode", "SIMULATED") or "SIMULATED"
+                if trade_mode.upper() == "SIMULATED":
+                    from app.brokers.simulated_broker import LocalSimulatedBroker
+                    sim_broker = LocalSimulatedBroker(db_settings=u)
+                    sim_broker.process_unfilled_orders(db)
 
-        active_user_ids = [u.user_id for u in active_users]
-        holding_user_ids = {
-            row[0]
-            for row in db.query(Holding.user_id)
-            .filter(Holding.user_id.in_(active_user_ids))
-            .distinct()
-            .all()
-        }
+        with profile_phase("cycle.prepare_market_context"):
+            active_user_ids = [u.user_id for u in active_users]
+            holding_user_ids = {
+                row[0]
+                for row in db.query(Holding.user_id)
+                .filter(Holding.user_id.in_(active_user_ids))
+                .distinct()
+                .all()
+            }
 
-        session = get_market_session()
-        if session == MarketSession.CLOSED:
-            if not holding_user_ids:
-                if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, "scheduler_closed_no_holdings"):
-                    logger.info("[Scheduler] Market is closed and no active users have holdings. Skipping all user flows.")
-                return
-        exchange_rate = FXRateCache.get_rate()
+            session = get_market_session()
+            if session == MarketSession.CLOSED:
+                if not holding_user_ids:
+                    if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, "scheduler_closed_no_holdings"):
+                        logger.info("[Scheduler] Market is closed and no active users have holdings. Skipping all user flows.")
+                    return
+            exchange_rate = FXRateCache.get_rate()
 
-        watchlists_by_user = load_watchlist_tickers_by_user(db, active_user_ids)
+            watchlists_by_user = load_watchlist_tickers_by_user(db, active_user_ids)
 
         # Eagerly close db session before starting remote / async calls
         db.close()
         db = None
 
-        sentiment = await check_market_sentiment()
+        with profile_phase("cycle.market_sentiment"):
+            sentiment = await check_market_sentiment()
         market_signals = latest_scanned_signals
 
         # 3. 각 활성 유저별 자동매매 시나리오 병렬 실행
         tasks = []
-        for user_id in active_user_ids:
-            signal_map, all_signals = build_user_signal_context(
-                user_id,
-                market_signals,
-                watchlists_by_user,
-                latest_watchlist_signals,
-            )
-            tasks.append(
-                run_user_trading_flow(
+        with profile_phase("cycle.build_user_signal_context"):
+            for user_id in active_user_ids:
+                signal_map, all_signals = build_user_signal_context(
                     user_id,
-                    signal_map,
-                    all_signals,
-                    exchange_rate,
-                    sentiment,
-                    session,
+                    market_signals,
+                    watchlists_by_user,
+                    latest_watchlist_signals,
                 )
-            )
-        await asyncio.gather(*tasks)
+                tasks.append(
+                    run_user_trading_flow(
+                        user_id,
+                        signal_map,
+                        all_signals,
+                        exchange_rate,
+                        sentiment,
+                        session,
+                    )
+                )
+        # 사용자 흐름 전체의 벽시계 시간. user.* 구간 합이 이 값을 크게 넘으면 실제로 병렬로
+        # 돌고 있는 것이고, 비슷하거나 loop.blocked가 이 값에 육박하면 병렬이 무너진 것이다.
+        with profile_phase("cycle.user_flows_wall"):
+            await asyncio.gather(*tasks)
 
     except Exception:
         logger.exception("[Scheduler] CRITICAL ERROR in trading loop")
     finally:
+        # 감시 태스크는 반드시 여기서 거둔다. 남겨 두면 _run_cycle_with_drain이 후속 태스크를
+        # 기다리느라 사이클마다 최대 CYCLE_DRAIN_TIMEOUT_SECONDS를 잃는다.
+        await stop_loop_lag_monitor(lag_monitor)
         if db is not None:
             try:
                 db.close()
@@ -2926,6 +2979,14 @@ async def async_trading_loop():
         # 60초를 넘긴 사이클은 다음 틱을 스킵시킨다. 주기가 늘어나는 원인이 바로 여기다.
         level = logger.warning if duration_seconds >= 60 else logger.info
         level(f"[Cycle] Duration: {duration_seconds:.1f}s")
+        # 매매 흐름이 실제로 돈 사이클에만 구간 요약을 남긴다. 휴장·조기 반환 사이클의
+        # 요약은 비교 가치가 없고, 휴장 표본이 기준선을 오염시켜 회귀를 가린 전례가 있다.
+        if profile.has_user_flows():
+            level(
+                f"[Cycle] Profile ({active_user_count} users, {duration_seconds:.1f}s): "
+                f"{profile.summary()}"
+            )
+        end_cycle_profile(profile_token)
 
 CYCLE_DRAIN_TIMEOUT_SECONDS = 10.0
 
