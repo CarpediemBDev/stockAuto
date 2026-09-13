@@ -11,7 +11,7 @@
   1. 기본값 ALERT_ONLY. 청산은 사용자가 명시적으로 켜야 한다.
   2. SHADOW는 절대 주문을 내지 않는다. 기록만 남긴다.
   3. LIQUIDATE는 부분 청산이다. 포지션 전체를 확정하지 않는다.
-  4. 연속 충족(10사이클)을 요구한다. 수확의 2사이클보다 훨씬 엄격하다.
+  4. 20분 지속을 요구하고, 그 사이 최소 3회 연속 확인한다. 시간이 게이트를 주도한다.
   5. 하루 한 번만 조치한다.
 
 설계 정본은 docs/plans/holding_management_modes.md 5.4절.
@@ -399,7 +399,7 @@ def test_shadow_sends_the_record_to_the_user(monkeypatch, evaluator):
     """섀도 기록은 로그로만 남기면 안 된다 - 사용자가 볼 수 있어야 모드가 쓸모를 갖는다.
 
     ActionLog는 관리자 패널에만 노출되므로, 측정 결과가 사용자 손에 들어오는 경로는
-    현재 텔레그램뿐이다. 조치 시점은 10사이클 지속 + 일일 1회로 좁혀져 있어 잦지 않다.
+    현재 텔레그램뿐이다. 조치 시점은 20분 지속 + 일일 1회로 좁혀져 있어 잦지 않다.
     """
     db = _make_db()
     user = _make_user(db)
@@ -435,7 +435,7 @@ def test_enough_cycles_without_enough_time_does_not_act(monkeypatch, evaluator):
     """사이클 수만 채워도 실제 시간이 안 지났으면 조치하지 않는다.
 
     스케줄러는 1분 간격으로 등록돼 있지만 실측 주기는 중앙값 124초에 편차가 104~846초다
-    (2026-09-06 admin action_logs 40표본). 사이클 수만 게이트로 쓰면 같은 10사이클이
+    (2026-09-06 admin action_logs 40표본). 사이클 수만 게이트로 쓰면 같은 N사이클이
     20분일 수도 두 시간일 수도 있고, 반대로 주기가 빨라지면 순식간에 조치가 나간다.
     되돌릴 수 없는 매도의 조건이 그렇게 흔들려서는 안 된다.
     """
@@ -464,6 +464,44 @@ def test_enough_cycles_without_enough_time_does_not_act(monkeypatch, evaluator):
     assert broker.sell_calls == [("HCTI", 50)]
     db.close()
 
+
+
+def test_slow_cadence_acts_once_twenty_minutes_pass_with_three_checks(monkeypatch, evaluator):
+    """관측이 성긴 정규장에서도 20분이 지나고 3회 확인되면 조치한다 - 시간이 주도한다.
+
+    2026-09 W37 NY 정규장의 사이클 간격 중앙값은 426초(약 7분)였다. 이 주기에서 20분이면
+    대략 세 번 관측된다. 횟수를 10으로 요구하던 때에는 같은 상황에서 약 71분을 더 기다려야
+    했고, 화면이 말하는 "20분"과 실제 대기가 3배 넘게 벌어졌다.
+
+    숫자를 상수가 아니라 리터럴(3회·21분)로 적는 이유는 이 테스트가 계약 자체를 고정하기
+    때문이다. 누군가 GUARD_SUSTAIN_CYCLES를 다시 크게 올리면 상수를 따라가는 다른 테스트는
+    전부 통과하지만 이 테스트는 깨진다.
+    """
+    db = _make_db()
+    user = _make_user(db)
+    holding = _add(db, user, guard_action=GUARD_ACTION_LIQUIDATE)
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+    broker = _Broker()
+
+    evaluator.score = 50.0
+    _cycle(db, user, broker, holding, 10.0)
+    _age(db, holding.id, 60)
+
+    # 첫 확인에서 연속이 시작되고, 정규장 주기로 21분이 흐른 것으로 둔다.
+    _collapse(db, user, broker, holding, evaluator, 1, start=7.0, age_streak=False)
+    _age_streak(db, holding.id, 21)
+    assert broker.sell_calls == []
+
+    # 두 번째 확인 - 시간은 충족했지만 아직 2회라 하한에 걸린다.
+    _collapse(db, user, broker, holding, evaluator, 1, start=6.9, age_streak=False)
+    assert broker.sell_calls == [], "2회 확인만으로 조치했다 - 횟수 하한이 동작하지 않는다"
+
+    # 세 번째 확인 - 20분 경과와 3회 확인이 모두 충족되어 조치한다.
+    _collapse(db, user, broker, holding, evaluator, 1, start=6.8, age_streak=False)
+    assert broker.sell_calls == [("HCTI", 50)], (
+        "20분이 지나고 3회 확인됐는데 조치하지 않았다 - 횟수가 시간을 압도하고 있다"
+    )
+    db.close()
 
 def _switch(user, db, **kwargs):
     return account_router.update_holding_management(
