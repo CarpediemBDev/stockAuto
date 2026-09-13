@@ -78,6 +78,7 @@ classDiagram
 *   **핵심 메서드**:
     *   `get_stop_loss_pct(atr, price)`: ATR 변동성 대비 동적 손절 폭(%)을 산출합니다.
     *   `get_trailing_stop_pct(atr, price)`: ATR 변동성 대비 동적 트레일링 스탑 폭(%)을 산출합니다.
+    *   ⚠️ 두 메서드는 일 단위 ATR을 전제로 한 배수를 쓰지만, 실제 매매에서는 스캐너의 **5분봉 ATR**이 들어가 사실상 각 전략의 base 값으로 고정됩니다. 일봉 백테스트에서만 실제로 움직입니다. 신규 전략에서 mult를 조정해도 실제 매매 결과는 base만 바뀝니다. 상세: [`strategy_specification.md`](strategy_specification.md) 3장 E절.
     *   `get_pyramid_trigger(stage)`: 피라미딩 불타기 추가 매수 진입을 위한 수익률 허들을 산출합니다.
     *   `get_initial_entry_factor(regime)`: 신규 진입 시 정찰병 비중 배분 비율을 리턴합니다.
     *   `is_signal_collapsed(score, regime)`: 보유 중 세력 지지선 붕괴 등에 따른 즉시 청산 여부를 리턴합니다.
