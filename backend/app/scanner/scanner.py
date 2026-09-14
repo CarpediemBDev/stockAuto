@@ -560,6 +560,7 @@ async def scan_market_expert(bypass_tickers: set = None) -> list:
                 else:
                     sig_type = "STRONG_BUY" if final_score >= 95 else "BUY" if final_score >= 75 else "WATCH"
                 
+                # 5분봉 ATR이라 소비처(손절·트레일링·수확 임계·매수 수량)에서는 실제로 하한/상한 상수로 동작한다 - docs/strategy_specification.md 3장 E절.
                 atr_series = calculate_atr(df_5m, period=14)
                 latest_atr = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
                 
