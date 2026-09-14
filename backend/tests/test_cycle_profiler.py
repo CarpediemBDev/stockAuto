@@ -7,7 +7,8 @@
   2. ContextVar로 gather의 사용자별 태스크와 to_thread 작업까지 같은 프로파일에 모인다
   3. 이벤트 루프를 붙잡은 동기 작업은 loop.blocked로 드러난다
   4. 감시 태스크는 사이클이 끝나면 반드시 회수된다 - 남으면 drain이 사이클마다 수 초를 잃는다
-  5. 매매 흐름이 돈 사이클에만 요약을 남긴다 - 휴장 표본이 기준선을 오염시킨 전례가 있다
+  5. 요약 줄에 시장 세션을 싣는다 - 휴장이어도 보유 유저가 있으면 사용자 흐름이 시작되어
+     줄이 남으므로, 세션 표기 없이는 휴장 표본이 정규장 표본과 섞인다(2026-09 전례)
 """
 
 import asyncio
@@ -81,7 +82,7 @@ def test_summary_orders_by_total_time():
 
 
 def test_has_user_flows_distinguishes_early_return_cycles():
-    """휴장 등으로 사용자 흐름이 돌지 않은 사이클은 요약 대상이 아니다."""
+    """사용자 흐름이 한 번도 시작되지 않은 사이클은 요약 대상이 아니다(휴장 여부와는 별개)."""
     profile = CycleProfile()
     profile.add("cycle.load_active_users", 0.01)
     assert profile.has_user_flows() is False
@@ -142,15 +143,17 @@ async def test_loop_lag_monitor_ignores_a_healthy_loop():
 # 2. 매매 루프 통합
 # ======================================================================================
 
-def _install_loop_fakes(monkeypatch, active_users, flow):
-    fake_db = FakeSession(active_users=active_users, holding_user_ids=[], watchlist_rows=[])
+def _install_loop_fakes(monkeypatch, active_users, flow, session="REGULAR_MARKET", holding_user_ids=()):
+    fake_db = FakeSession(
+        active_users=active_users, holding_user_ids=list(holding_user_ids), watchlist_rows=[],
+    )
     logged: list[str] = []
 
     async def fake_sentiment():
         return "BULLISH"
 
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: fake_db)
-    monkeypatch.setattr(scheduler, "get_market_session", lambda: "REGULAR_MARKET")
+    monkeypatch.setattr(scheduler, "get_market_session", lambda: session)
     monkeypatch.setattr(scheduler, "check_market_sentiment", fake_sentiment)
     monkeypatch.setattr(scheduler.FXRateCache, "get_rate", lambda: 1400.0)
     monkeypatch.setattr(scheduler, "run_user_trading_flow", flow)
@@ -179,7 +182,13 @@ async def test_trading_loop_logs_profile_with_user_phases_and_loop_blocking(monk
     profile_lines = [line for line in logged if line.startswith("[Cycle] Profile")]
     assert len(profile_lines) == 1, f"요약 줄이 정확히 한 번 남아야 한다: {logged}"
     line = profile_lines[0]
+    assert "session=REGULAR_MARKET" in line, "요약 줄에 시장 세션이 없다 - 휴장 표본을 거를 수 없다"
     assert "2 users" in line
+    duration_lines = [l for l in logged if l.startswith("[Cycle] Duration")]
+    assert duration_lines and duration_lines[0].endswith("(session=REGULAR_MARKET)")
+    # 기존 파싱 형식("Duration: 12.3s")은 그대로여야 한다.
+    import re
+    assert re.search(r"Duration: ([\d.]+)s", duration_lines[0])
     assert "user.exit_signals=" in line and "/2회" in line
     assert "cycle.user_flows_wall=" in line
     assert "cycle.load_active_users=" in line
@@ -200,10 +209,57 @@ async def test_trading_loop_skips_profile_line_when_no_user_flow_runs(monkeypatc
     await scheduler.async_trading_loop()
 
     assert not any(line.startswith("[Cycle] Profile") for line in logged)
-    assert any(line.startswith("[Cycle] Duration") for line in logged)
+    duration_lines = [line for line in logged if line.startswith("[Cycle] Duration")]
+    assert duration_lines
+    # 세션을 판정하기 전에 끝난 사이클은 세션 표기가 없다(모르는 값을 지어내지 않는다).
+    assert "session=" not in duration_lines[0]
     leftovers = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     assert leftovers == [], f"조기 반환 경로에서 감시 태스크가 회수되지 않았다: {leftovers}"
 
+
+
+@pytest.mark.asyncio
+async def test_closed_market_cycle_with_holdings_still_logs_profile_labeled_closed(monkeypatch):
+    """휴장이어도 보유 유저가 있으면 사용자 흐름이 시작되어 요약 줄이 남는다 - CLOSED로 표기된다.
+
+    2026-09-13 PR #126의 주석·문서는 "휴장 사이클은 요약을 남기지 않는다"고 적었는데 틀렸다.
+    루프는 "휴장 AND 보유 유저 0명"일 때만 조기 반환하고, 보유 유저가 있으면 흐름을 시작해
+    매도·매수 판정 단계에서만 빠진다. 이 테스트는 그 실제 동작을 고정하고, 그래서 세션
+    표기가 반드시 필요하다는 사실을 계약으로 남긴다.
+    """
+    active_users = [SimpleNamespace(user_id=1, is_running=True)]
+
+    async def flow(user_id, signal_map, all_signals, exchange_rate, sentiment, session):
+        with phase("user.lock_acquire"):
+            await asyncio.sleep(0)
+
+    logged = _install_loop_fakes(
+        monkeypatch, active_users, flow, session="CLOSED", holding_user_ids=[1],
+    )
+    await scheduler.async_trading_loop()
+
+    profile_lines = [line for line in logged if line.startswith("[Cycle] Profile")]
+    assert len(profile_lines) == 1, "휴장·보유 유저 있음 사이클에서 요약 줄이 남지 않았다"
+    assert "session=CLOSED" in profile_lines[0], (
+        "휴장 사이클의 요약 줄이 CLOSED로 표기되지 않았다 - 정규장 표본과 섞인다"
+    )
+
+
+@pytest.mark.asyncio
+async def test_closed_market_cycle_without_holdings_returns_early_but_labels_duration(monkeypatch):
+    """휴장이고 보유 유저도 없으면 조기 반환해 요약은 없지만, Duration에는 세션이 붙는다."""
+    async def never_called(*args, **kwargs):
+        raise AssertionError("보유 유저가 없는 휴장 사이클에서 사용자 흐름이 돌면 안 된다")
+
+    logged = _install_loop_fakes(
+        monkeypatch, [SimpleNamespace(user_id=1, is_running=True)], never_called,
+        session="CLOSED", holding_user_ids=[],
+    )
+    await scheduler.async_trading_loop()
+
+    assert not any(line.startswith("[Cycle] Profile") for line in logged)
+    duration_lines = [line for line in logged if line.startswith("[Cycle] Duration")]
+    assert duration_lines and duration_lines[0].endswith("(session=CLOSED)")
 
 @pytest.mark.asyncio
 async def test_real_user_flow_records_its_phases(monkeypatch):
