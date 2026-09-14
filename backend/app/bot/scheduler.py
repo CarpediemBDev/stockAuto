@@ -2890,6 +2890,9 @@ async def async_trading_loop():
     profile, profile_token = start_cycle_profile()
     lag_monitor = asyncio.create_task(monitor_loop_lag(profile))
     active_user_count = 0
+    # 사이클 시작 시점의 시장 세션. 요약 줄에 함께 남겨 휴장 표본을 줄 단위로 걸러낼 수 있게 한다.
+    # 조기 반환으로 세션을 판정하기 전에 끝난 사이클은 None으로 남는다.
+    cycle_session = None
 
     db = SessionLocal()
     try:
@@ -2921,6 +2924,7 @@ async def async_trading_loop():
             }
 
             session = get_market_session()
+            cycle_session = session
             if session == MarketSession.CLOSED:
                 if not holding_user_ids:
                     if should_log_with_cooldown(MARKET_CLOSED_LOG_CACHE, "scheduler_closed_no_holdings"):
@@ -2978,13 +2982,21 @@ async def async_trading_loop():
         duration_seconds = time.monotonic() - cycle_started_at
         # 60초를 넘긴 사이클은 다음 틱을 스킵시킨다. 주기가 늘어나는 원인이 바로 여기다.
         level = logger.warning if duration_seconds >= 60 else logger.info
-        level(f"[Cycle] Duration: {duration_seconds:.1f}s")
-        # 매매 흐름이 실제로 돈 사이클에만 구간 요약을 남긴다. 휴장·조기 반환 사이클의
-        # 요약은 비교 가치가 없고, 휴장 표본이 기준선을 오염시켜 회귀를 가린 전례가 있다.
+        # 세션을 괄호로 뒤에 붙인다. "Duration: 12.3s"까지의 앞부분 형식은 그대로 두어
+        # 기존 파싱(정규식 `Duration: ([\d.]+)s`)을 깨지 않는다.
+        session_suffix = f" (session={cycle_session})" if cycle_session is not None else ""
+        level(f"[Cycle] Duration: {duration_seconds:.1f}s{session_suffix}")
+        # 사용자 흐름이 한 번이라도 시작된 사이클에만 구간 요약을 남긴다.
+        #
+        # ⚠️ 이것이 휴장 사이클을 걸러 주지는 않는다. 휴장이어도 보유 종목이 있는 유저가
+        # 한 명이라도 있으면 사용자 흐름이 시작되고(잠금·보유 동기화까지 돈다) 매도·매수
+        # 판정 단계에서만 빠진다. 그래서 요약 줄에 세션을 반드시 싣는다 - 휴장 표본이
+        # 정규장 표본과 섞여 기준선을 오염시키고 회귀를 가린 전례(2026-09)가 있다.
+        # 세션은 사이클 시작 시점 기준이며, 개장·폐장 경계를 걸친 사이클은 시작 세션으로 표기된다.
         if profile.has_user_flows():
             level(
-                f"[Cycle] Profile ({active_user_count} users, {duration_seconds:.1f}s): "
-                f"{profile.summary()}"
+                f"[Cycle] Profile (session={cycle_session}, {active_user_count} users, "
+                f"{duration_seconds:.1f}s): {profile.summary()}"
             )
         end_cycle_profile(profile_token)
 
