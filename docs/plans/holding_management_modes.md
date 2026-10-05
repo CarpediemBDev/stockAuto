@@ -241,6 +241,10 @@ Y는 기존 `get_trailing_stop_pct`(`max(2.0%, ATR x 1.0)`)보다 넓다. 급등
 
 `_evaluate_guard`는 청산이 필요하다고 판단해도 직접 주문을 내지 않고 Part B 인자만 반환한다. 판정 로직 안에 되돌릴 수 없는 주문이 숨으면 안 되기 때문이다. 부분 수량은 Part B의 `sell_qty` 파라미터로 전달되며, 이 값이 None인 기존 모든 경로는 전량 매도로 동작한다.
 
+#### 갭상승 조치 (2026-10-04)
+
+`enable_gap_exit_ab` 스위치가 켜져 있으면 방어를 켠 외부 보유분은 점수·신저가 조건과 별개로 **정규장 시가 갭 +15% 이상**에서도 판정합니다. 수위는 기존 계약을 그대로 따릅니다. `ALERT_ONLY`/`SHADOW`는 `[Guard][GAP][{mode}] ... would_sell_qty=... | no order placed`를 거래일당 1회 기록만 하고, `LIQUIDATE`는 `guard_sell_ratio`만큼 부분 청산(사유 `guard_gap_liquidate`)하며 `guard_last_action_at` 24시간 캡을 점수 방어와 공유합니다. 오늘 장중 매수분은 대상이 아닙니다. 근거와 봇 보유분 A/B는 `docs/strategy_specification.md` 3장 F절에 있습니다.
+
 ### 5.5 6단계 - 위임 시 동작
 
 > **구현 완료 (2026-09-08).** 계약은 `docs/API_STANDARD.md` 6.5절, 회귀 테스트는

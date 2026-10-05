@@ -23,6 +23,7 @@ class SystemSettingSpec:
 
 SETTING_ENABLE_GEMINI_NEWS_ANALYSIS = "enable_gemini_news_analysis"
 SETTING_ENABLE_SCANNER_RELAY = "enable_scanner_relay"
+SETTING_ENABLE_GAP_EXIT_AB = "enable_gap_exit_ab"
 
 SYSTEM_SETTING_SPECS: dict[str, SystemSettingSpec] = {
     SETTING_ENABLE_GEMINI_NEWS_ANALYSIS: SystemSettingSpec(
@@ -44,6 +45,19 @@ SYSTEM_SETTING_SPECS: dict[str, SystemSettingSpec] = {
         value_type="bool",
         category="scanner",
         description="Enable the scanner relay that feeds after-hours and swing-prediction candidates into the intraday scan universe.",
+        is_runtime=True,
+        is_public=False,
+    ),
+    # 갭상승 청산 A/B 킬 스위치. 되돌릴 수 없는 매도를 늘리는 규칙이므로 기본값은 OFF이고
+    # 운영자가 명시적으로 켜야 한다. 배정은 저장하지 않고 user_id 홀짝으로 고정한다
+    # (app/bot/gap_exit.py) - 관리자 화면이 모든 설정을 토글로 그리므로 json 배정표를 두면
+    # 토글 한 번에 bool로 덮어써진다.
+    SETTING_ENABLE_GAP_EXIT_AB: SystemSettingSpec(
+        key=SETTING_ENABLE_GAP_EXIT_AB,
+        default=False,
+        value_type="bool",
+        category="bot",
+        description="Gap-up exit A/B: even user_id accounts sell bot-owned holdings when the regular-session open gaps up 15%+; odd user_id accounts only log what they would have sold.",
         is_runtime=True,
         is_public=False,
     ),

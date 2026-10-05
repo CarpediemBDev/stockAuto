@@ -53,7 +53,9 @@
       "smart_exit": "스마트 조기 익절 (RSI-MACD 조건 충족 | 수익률: {profit_rate:.2f}%)",
       "signal_collapse": "강세 시그널 붕괴 ({current_score}점 도달)",
       "harvest": "수확 (고점 ${highest_price:.2f} 대비 {trailing_stop_pct:.2f}% 하락 | 관측 시작가 ${observed_base_price:.2f})",
-      "guard_liquidate": "방어 청산 (설정 시점 대비 시그널 {baseline_score:.0f}→{current_score:.0f} 악화 + 신저가 지속 | {sell_qty}주 부분 청산)"
+      "guard_liquidate": "방어 청산 (설정 시점 대비 시그널 {baseline_score:.0f}→{current_score:.0f} 악화 + 신저가 지속 | {sell_qty}주 부분 청산)",
+      "gap_exit": "갭상승 청산 (정규장 시가 갭 +{gap_pct:.1f}% | 갭상승일 하락 경향 대응)",
+      "guard_gap_liquidate": "방어 청산 (정규장 시가 갭 +{gap_pct:.1f}% | {sell_qty}주 부분 청산)"
     },
     "buy_skip_reason": {
       "budget_exceeded": {
@@ -690,6 +692,7 @@
     "settings": {
       "label_gemini": "Gemini 뉴스 분석",
       "label_relay": "스캐너 릴레이",
+      "label_gap_exit_ab": "갭상승 청산 A/B (짝수 계정 매도 · 홀수 계정 기록만)",
       "default_value": "기본값",
       "runtime_applied": "런타임 반영",
       "last_changed": "마지막 변경",

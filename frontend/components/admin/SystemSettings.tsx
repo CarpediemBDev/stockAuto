@@ -27,13 +27,15 @@ interface SystemSettingsResponse {
 
 const GEMINI_NEWS_SETTING_KEY = 'enable_gemini_news_analysis';
 const SCANNER_RELAY_SETTING_KEY = 'enable_scanner_relay';
+const GAP_EXIT_AB_SETTING_KEY = 'enable_gap_exit_ab';
 
 // 화면에 노출할 설정과 그 한글 제목. 백엔드 스펙의 description은 영문이라 제목만 여기서 관리한다.
 // 설정이 늘어나면 이 맵 대신 목록 순회 렌더링으로 일반화할 것(i18n 라벨 전략 확정 후).
-const MANAGED_SETTING_KEYS = [GEMINI_NEWS_SETTING_KEY, SCANNER_RELAY_SETTING_KEY];
+const MANAGED_SETTING_KEYS = [GEMINI_NEWS_SETTING_KEY, SCANNER_RELAY_SETTING_KEY, GAP_EXIT_AB_SETTING_KEY];
 const SETTING_TITLES: Record<string, string> = {
   [GEMINI_NEWS_SETTING_KEY]: 'label_gemini',
   [SCANNER_RELAY_SETTING_KEY]: 'label_relay',
+  [GAP_EXIT_AB_SETTING_KEY]: 'label_gap_exit_ab',
 };
 
 function formatBool(value: SystemSettingItem['value']) {
