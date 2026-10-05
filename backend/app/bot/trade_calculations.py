@@ -463,3 +463,47 @@ def resolve_guard_sell_qty(quantity: int, sell_ratio: float | Decimal | None) ->
         return quantity
     qty = int((to_decimal(quantity) * ratio).to_integral_value(rounding=ROUND_DOWN))
     return max(1, min(qty, quantity))
+
+# ---------------------------------------------------------------------------
+# 갭상승 청산 (2026-10-04 A/B)
+#
+# 헬스케어 소형·페니주 53종목 일봉(2019~2026)에서 정규장 시가가 전일 종가보다 15% 이상
+# 높게 열린 날은 시가→종가 중앙값이 학습 구간 -8.2%(n=219), 검증 구간 -8.4%(n=252)로
+# 두 구간이 같은 방향이었다. 롱 전용 시스템은 이 하락을 공매도로 먹을 수 없으므로
+# "들고 있던 종목이 갭상승하면 그날 판다"는 청산 규칙으로만 쓴다.
+#
+# 갭은 정규장 기준이어야 한다. 프리마켓 첫 체결가로 재면 리서치와 다른 값을 보게 된다.
+# ---------------------------------------------------------------------------
+
+GAP_EXIT_THRESHOLD_PCT = 15.0
+
+
+def compute_session_gap_pct(
+    prev_close: float | Decimal | None,
+    session_open: float | Decimal | None,
+) -> Decimal | None:
+    """정규장 시가의 전일 종가 대비 갭(%)을 구한다. 계산할 수 없으면 None.
+
+    0을 돌려주지 않고 None을 돌려주는 이유 - 시세를 못 받은 것과 갭이 없는 것을 구분해야
+    호출부가 "판정 보류"와 "해당 없음"을 다르게 다룰 수 있다.
+    """
+    if prev_close is None or session_open is None:
+        return None
+    dec_prev = to_decimal(prev_close)
+    dec_open = to_decimal(session_open)
+    if dec_prev <= 0 or dec_open <= 0:
+        return None
+    return ((dec_open / dec_prev) - Decimal("1")) * Decimal("100")
+
+
+def check_gap_exit(
+    gap_pct: float | Decimal | None,
+    threshold_pct: float | Decimal = GAP_EXIT_THRESHOLD_PCT,
+) -> bool:
+    """갭상승 청산 조건 충족 여부. 갭을 모르면(None) 거짓이다."""
+    if gap_pct is None:
+        return False
+    dec_threshold = to_decimal(threshold_pct)
+    if dec_threshold <= 0:
+        return False
+    return to_decimal(gap_pct) >= dec_threshold

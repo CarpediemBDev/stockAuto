@@ -53,7 +53,9 @@
       "smart_exit": "Smart early take-profit (RSI-MACD condition met | return: {profit_rate:.2f}%)",
       "signal_collapse": "Bullish signal collapse (reached {current_score} pts)",
       "harvest": "Harvest (down {trailing_stop_pct:.2f}% from peak ${highest_price:.2f} | observed base ${observed_base_price:.2f})",
-      "guard_liquidate": "Defense liquidation (signal {baseline_score:.0f}→{current_score:.0f} and sustained new lows | partial sell of {sell_qty} shares)"
+      "guard_liquidate": "Defense liquidation (signal {baseline_score:.0f}→{current_score:.0f} and sustained new lows | partial sell of {sell_qty} shares)",
+      "gap_exit": "Gap-up exit (regular-session open gapped +{gap_pct:.1f}% | gap-up days tend to fade)",
+      "guard_gap_liquidate": "Defense liquidation (regular-session open gapped +{gap_pct:.1f}% | partial sell of {sell_qty} shares)"
     },
     "buy_skip_reason": {
       "budget_exceeded": {
@@ -690,6 +692,7 @@
     "settings": {
       "label_gemini": "Gemini News Analysis",
       "label_relay": "Scanner Relay",
+      "label_gap_exit_ab": "Gap-up Exit A/B (even accounts sell · odd accounts log only)",
       "default_value": "Default",
       "runtime_applied": "Runtime applied",
       "last_changed": "Last changed",

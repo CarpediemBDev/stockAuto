@@ -91,6 +91,16 @@ from app.bot.trade_calculations import (
     resolve_rolling_box_bars,
     fee_rate_for_trade_mode,
     to_decimal,
+    check_gap_exit,
+)
+from app.bot.gap_exit import (
+    GAP_EXIT_ARM_CONTROL,
+    get_session_gap_pct,
+    held_since_before_open,
+    mark_event_logged,
+    regular_open_utc,
+    resolve_gap_exit_arm,
+    session_date_et,
 )
 from app.bot.order_discovery import discover_orphan_orders_once
 from app.bot.equity_gate import get_equity_gate_factor
@@ -1615,6 +1625,128 @@ async def _evaluate_harvest(
     )
 
 
+async def _probe_gap_up(ctx: TradingFlowContext, clean_ticker: str):
+    """정규장 갭상승 청산 조건을 확인한다. 충족하면 (갭%, 거래일, 개장 후 경과분)을, 아니면 None.
+
+    정규장에서만 본다. 프리마켓 갭은 아직 시가가 아니고, 애프터마켓은 이미 그날이 끝났다.
+    시세 조회는 조건이 맞을 수 있는 경우에만 일어나며 (티커, 거래일)당 한 번 캐시된다.
+    """
+    if ctx.session != MarketSession.REGULAR:
+        return None
+    now = utc_now_aware()
+    session_day = session_date_et(now)
+    gap_pct = await get_session_gap_pct(clean_ticker, session_day)
+    if not check_gap_exit(gap_pct):
+        return None
+    session_open = regular_open_utc(session_day)
+    with micro_session(ctx) as db:
+        if not held_since_before_open(db, ctx.user_id, clean_ticker, session_open):
+            return None
+    minutes_since_open = (now - session_open).total_seconds() / 60.0
+    return gap_pct, session_day, minutes_since_open
+
+
+async def _evaluate_gap_exit(ctx: TradingFlowContext, h, arm: str | None, current_price_dec: Decimal, _log):
+    """봇 보유분의 갭상승 청산 A/B 판정. 처치군이면 SellReason을, 아니면 None을 돌려준다.
+
+    대조군도 같은 판정을 끝까지 돌리고 "팔았다면"을 남긴다. 그래야 두 군의 사건 수와
+    사건 시점 가격이 같은 잣대로 쌓여, 처치군 매도가 실제로 이득이었는지를 대조군의 이후
+    가격으로 직접 비교할 수 있다.
+    """
+    if arm is None:
+        return None
+    probe = await _probe_gap_up(ctx, h.ticker)
+    if probe is None:
+        return None
+    gap_pct, session_day, minutes_since_open = probe
+
+    if mark_event_logged(ctx.user_id, h.ticker, session_day):
+        verb = "would_sell" if arm == GAP_EXIT_ARM_CONTROL else "selling"
+        _log(
+            f"[GapExit][{arm}] {h.ticker} gap=+{float(gap_pct):.1f}% {verb}_qty={int(h.quantity or 0)} "
+            f"price={float(current_price_dec):.4f} min_since_open={minutes_since_open:.0f} "
+            f"strategy={h.strategy_type}"
+            + (" | no order placed" if arm == GAP_EXIT_ARM_CONTROL else ""),
+            "WARNING",
+        )
+    if arm == GAP_EXIT_ARM_CONTROL:
+        return None
+    return SellReason("gap_exit", {"gap_pct": float(gap_pct)})
+
+
+async def _evaluate_guard_gap(ctx: TradingFlowContext, h, current_price_dec: Decimal, _log):
+    """방어를 켠 외부 보유분의 갭상승 판정. 조치가 필요하면 Part B 인자 튜플을 돌려준다.
+
+    기존 방어와 같은 계약을 따른다 - guard_action이 조치 수준을, guard_sell_ratio가 매도
+    비율을, guard_last_action_at이 24시간 1회 캡을 정한다. 사용자가 켜 둔 방어의 수위를
+    이 규칙이 몰래 올리지 않는다(알림만 모드면 주문 없음).
+    """
+    if not getattr(h, "guard_enabled", False):
+        return None
+    if not isinstance(h, Holding) or h.id is None:
+        return None
+    probe = await _probe_gap_up(ctx, h.ticker)
+    if probe is None:
+        return None
+    gap_pct, session_day, minutes_since_open = probe
+
+    with micro_session(ctx) as db:
+        row = db.query(
+            Holding.guard_action, Holding.guard_sell_ratio, Holding.guard_last_action_at,
+        ).filter(Holding.id == h.id).first()
+    if row is None:
+        return None
+    guard_action, sell_ratio, last_action_at = row
+    action = (guard_action or GUARD_ACTION_ALERT_ONLY).upper()
+    sell_qty = resolve_guard_sell_qty(h.quantity or 0, sell_ratio)
+
+    first_today = mark_event_logged(ctx.user_id, h.ticker, session_day)
+    if action != GUARD_ACTION_LIQUIDATE:
+        if first_today:
+            _log(
+                f"[Guard][GAP][{action}] {h.ticker} gap=+{float(gap_pct):.1f}% would_sell_qty={sell_qty} "
+                f"price={float(current_price_dec):.4f} min_since_open={minutes_since_open:.0f} | no order placed",
+                "WARNING",
+            )
+        return None
+
+    now = utc_now_aware()
+    if last_action_at is not None:
+        if (now - last_action_at).total_seconds() / 3600.0 < GUARD_ACTION_COOLDOWN_HOURS:
+            return None
+    if sell_qty <= 0:
+        return None
+
+    with micro_session(ctx) as db:
+        db.query(Holding).filter(Holding.id == h.id).update(
+            {Holding.guard_last_action_at: now}, synchronize_session=False,
+        )
+        db.commit()
+
+    sell_reason_obj = SellReason("guard_gap_liquidate", {"gap_pct": float(gap_pct), "sell_qty": sell_qty})
+    _log(
+        f"[Guard][GAP] LIQUIDATE {h.ticker}: selling {sell_qty}/{h.quantity} shares "
+        f"(gap +{float(gap_pct):.1f}%, price {float(current_price_dec):.4f})",
+        "WARNING",
+    )
+    is_kis_order = (ctx.trade_mode or "").upper() in {"MOCK", "REAL"}
+    metadata = None
+    if is_kis_order:
+        metadata = await safe_broker_call(ctx.broker.get_order_metadata, h.ticker, ctx.session)
+    return (
+        h,
+        float(current_price_dec),
+        render_sell_reason(sell_reason_obj, "ko"),
+        sell_reason_obj,
+        h.ticker,
+        GUARD_PSEUDO_STRATEGY,
+        0,
+        h.strategy_type,
+        metadata,
+        sell_qty,
+    )
+
+
 async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict) -> None:
     user_id = ctx.user_id
     broker = ctx.broker
@@ -1636,6 +1768,8 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
     exchange_rate = ctx.exchange_rate
 
     sell_tasks_args = []
+    # 갭상승 청산 A/B 군. 사이클 안에서 바뀌지 않도록 루프 전에 한 번만 정한다.
+    gap_exit_arm = resolve_gap_exit_arm(user_id)
 
     # ------------------ (Part A) 매도 조건 판별 및 인텐트 생성 (순차) ------------------
     for h in holdings:
@@ -1761,6 +1895,13 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                 )
                 if guard_args is not None:
                     sell_tasks_args.append(guard_args)
+                    continue
+                # 갭 판정은 A/B 킬 스위치를 공유한다. 스위치가 꺼져 있으면(군 None) 시세 조회도 없다.
+                guard_gap_args = None
+                if gap_exit_arm is not None:
+                    guard_gap_args = await _evaluate_guard_gap(ctx, h, current_price_dec, _log)
+                if guard_gap_args is not None:
+                    sell_tasks_args.append(guard_gap_args)
                     continue
                 harvest_args = await _evaluate_harvest(
                     ctx, h, current_data, current_price_dec, dec_highest_price, _log,
@@ -1891,6 +2032,14 @@ async def process_exit_signals(ctx: TradingFlowContext, target_signal_map: dict)
                 with _breach_count_lock:
                     BREACH_COUNT_CACHE.pop(cache_key, None)
                 _clear_exit_breach_clock(ctx, h)
+
+            # 갭상승 청산은 손절·트레일링 다음 순위다. 이미 이탈로 팔리는 보유분에 사유를 덮어쓰지
+            # 않되, 익절·시그널 붕괴보다는 앞선다 - 갭상승일 시가가 그날의 고점인 경향이 판정의 근거라
+            # 장중 다른 조건을 기다리면 근거가 사라진다.
+            if not sell_reason_obj:
+                gap_reason = await _evaluate_gap_exit(ctx, h, gap_exit_arm, current_price_dec, _log)
+                if gap_reason is not None:
+                    sell_reason_obj = gap_reason
 
             if not sell_reason_obj and profit_rate >= strategy_instance.min_smart_exit_profit and is_smart_exit:
                 sell_reason_obj = SellReason("smart_exit", {"profit_rate": profit_rate})
