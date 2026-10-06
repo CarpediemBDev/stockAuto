@@ -3053,14 +3053,40 @@ async def async_trading_loop():
         active_user_count = len(active_users)
 
         # SIMULATED 모드인 유저들의 미체결 지정가 주문(UnfilledOrder)을 주기적으로 평가/체결 처리합니다.
-        # 가동 유저 전원을 이벤트 루프 위에서 동기로 순회하므로 사용자 수에 비례해 루프를 붙잡는다.
+        #
+        # 시세는 사이클당 한 번만 받는다. 예전에는 유저마다 자기 티커를 따로 받았고, 그 동기
+        # 네트워크 호출이 이벤트 루프 위에서 순차로 돌아 정규장 사이클 352초 중 241초(72%)를
+        # 썼다(2026-09-15 계측). 유저 54명이 같은 티커를 중복해서 받는 구조였다.
+        # 이제 고아 주문을 먼저 거른 뒤 남은 티커만 합쳐 한 번 받고, 그 결과를 모두가 나눠 쓴다.
         with profile_phase("cycle.simulated_unfilled_orders"):
-            for u in active_users:
-                trade_mode = getattr(u, "trade_mode", "SIMULATED") or "SIMULATED"
-                if trade_mode.upper() == "SIMULATED":
-                    from app.brokers.simulated_broker import LocalSimulatedBroker
-                    sim_broker = LocalSimulatedBroker(db_settings=u)
-                    sim_broker.process_unfilled_orders(db)
+            from app.brokers.simulated_broker import (
+                LocalSimulatedBroker,
+                collect_unfilled_tickers,
+                fetch_unfilled_prices,
+                purge_orphan_sell_orders,
+            )
+            sim_users = [
+                u for u in active_users
+                if (getattr(u, "trade_mode", "SIMULATED") or "SIMULATED").upper() == "SIMULATED"
+            ]
+            if sim_users:
+                sim_user_ids = [u.user_id for u in sim_users]
+                with profile_phase("cycle.unfilled_purge_orphans"):
+                    removed = purge_orphan_sell_orders(db, sim_user_ids)
+                    if removed:
+                        logger.info(
+                            f"[SimulatedBroker] Removed {removed} orphan SELL order(s) "
+                            "whose holding no longer exists."
+                        )
+                    tickers = collect_unfilled_tickers(db, sim_user_ids)
+                # 네트워크 조회는 스레드로 넘긴다. 루프 위에서 돌리면 그동안 모든 사용자
+                # 흐름이 함께 멈춘다(loop.blocked로 잡히던 구간).
+                with profile_phase("cycle.unfilled_price_fetch"):
+                    prices = await asyncio.to_thread(fetch_unfilled_prices, tickers) if tickers else {}
+                with profile_phase("cycle.unfilled_fill_check"):
+                    for u in sim_users:
+                        sim_broker = LocalSimulatedBroker(db_settings=u)
+                        sim_broker.process_unfilled_orders(db, prices=prices)
 
         with profile_phase("cycle.prepare_market_context"):
             active_user_ids = [u.user_id for u in active_users]
