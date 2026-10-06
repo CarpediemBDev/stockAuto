@@ -15,6 +15,7 @@ erDiagram
     users ||--o{ action_logs : "1:N Writes"
     users ||--o{ watch_lists : "1:N Tracks"
     users ||--o{ sim_cash_transfers : "1:N Deposits (SIMULATED)"
+    users ||--o{ autonomous_slot_states : "1:N Decides"
 
     users {
         int id PK
@@ -236,17 +237,6 @@ erDiagram
 * `captured_at` (DATETIME, Index): 기록 시각. API 응답에 포함되어 프론트 신선도 배지의 기준이 됩니다.
 * *보존 정책:* 사용자·모드별 최신 500건 유지, 평시 60초 dedup (체결·초기화·청산 직후에는 `force=True`로 즉시 기록).
 
-### ⑪ `sim_cash_transfers` (SIMULATED 입출금 원장)
-시뮬 계좌에 사용자별로 자본을 더하거나 빼는 원장입니다(2026-09-26 신설). **SIMULATED 전용**이며 KIS·Toss 실계좌는 증권사가 잔고·수익률을 계산하므로 읽지 않습니다. 오용을 막기 위해 거래 모드 컬럼을 두지 않습니다.
-* `user_id` (INTEGER, FK -> `users.id`, Index): 사용자 외래 키 (CASCADE 삭제)
-* `amount_krw` (NUMERIC(20,4)): 금액(원). 입금 +, 출금 -
-* `memo` (VARCHAR, Nullable): 사유 (예: "HCTI 입고 자금")
-* `created_at` (DATETIME): 기록 시각. 나중에 시간가중수익률로 재계산할 때의 구간 경계
-* *계산 규칙:* `LocalSimulatedBroker.get_account_balance`에서 **투입 자본 = `SIMULATED_INITIAL_CASH_KRW` + 원장 합계**로 두고, 현금 = 투입 자본 + 실현손익 - 보유 매입금, 손익·수익률 = (총자산 - 투입 자본) 기준. 입금이 수익으로 잡히지 않는다.
-* *기록 경로:* `app/trades/sim_cash.py`의 `record_sim_cash_transfer`(SIMULATED 사용자만 허용) 한 곳. 운영은 `scripts/sim_cash_transfer.py <username> <금액> "<메모>"`로 등록하며 등록 직후 잔고 스냅샷을 강제 갱신한다.
-* *초기화:* `POST /account/reset-balance`가 해당 사용자의 원장도 삭제한다.
-* *성과 비교 주의:* 단순 수익률이라 입금 시점에 수익률이 희석된다. 입금한 계정은 전략 성과 비교(관측 계정 A/B 등)에서 제외한다.
-
 ### ⑩ `swing_score_outcomes` (스윙 점수 캘리브레이션 관측)
 스윙 예측 점수와 **익일 실제 등락**을 짝지어 누적하는 사후 검증 원장입니다. "85점 종목이 실제로 다음날 올랐는가"를 데이터로 확인해 점수 인플레이션이나 예측력 없는 지표를 적발하기 위한 것으로, **매매 경로에는 일절 관여하지 않는 순수 관측 레이어**입니다.
 * `predicted_date` (VARCHAR, Index): 예측 스냅샷 기준일 (`YYYY-MM-DD`, UTC)
@@ -260,7 +250,30 @@ erDiagram
 * *제약 조건:* 같은 예측일에 스냅샷이 여러 번 생성돼도 종목당 1건만 남도록 복합 유니크 제약(`predicted_date`, `ticker`)을 적용해 잡 재실행 멱등성을 보장합니다.
 * *적재 주체:* `swing_score_calibration_job`(매일 08:30 cron)이 `swing_prediction_snapshots`를 읽어 미관측 예측만 백필합니다. 익일 종가가 아직 없으면 기록하지 않고 다음 실행에서 재시도하며, 예측일로부터 10일이 지나면 포기합니다.
 
+### ⑪ `autonomous_slot_states` (목표비중형 자율 슬롯 월별 판단 원장)
+`canary_allocation`처럼 **월 1회 판단해 목표 비중대로 리밸런싱하는 자율 슬롯**의 판단·집행 상태입니다. 판단 결과를 DB에 남겨 서버를 재기동해도 같은 달을 다시 판단하거나 이중 주문하지 않습니다. 설계 정본은 [`plans/canary_allocation_live_port.md`](plans/canary_allocation_live_port.md).
+* `user_id` (INTEGER, FK -> `users.id`, Index): 사용자 외래 키 (CASCADE 삭제)
+* `slot_key` (VARCHAR): 슬롯 키 (예: `canary_allocation`)
+* `decision_date` (VARCHAR): 판단에 쓴 월말 완결 거래일 (`YYYY-MM-DD`, 미국 동부 기준)
+* `target_json` (TEXT): 확정 목표 비중 JSON (예: `{"QQQ": 0.571429, "BIL": 0.428571}`). 밴드 유지(HELD) 시에는 직전 목표가 그대로 들어갑니다.
+* `signals_json` (TEXT, Nullable): 판단에 쓴 신호 7개(감사용)
+* `status` (VARCHAR): `DECIDED` → `EXECUTING` → `DONE`, 또는 `HELD`(밴드 안 변화로 매매 없음)
+* `updated_at` (DATETIME): 마지막 상태 변경 시각
+* *제약 조건:* (`user_id`, `slot_key`, `decision_date`) 복합 유니크 — 같은 달 중복 판단 차단.
+* *적재 주체:* `app/bot/target_weight_executor.py`(매매 루프, 정규장에서만). 신호 데이터 결측 시에는 **행을 만들지 않고** 다음 사이클에 재시도합니다.
+
 ---
+
+### ⑫ `sim_cash_transfers` (SIMULATED 입출금 원장)
+시뮬 계좌에 사용자별로 자본을 더하거나 빼는 원장입니다(2026-09-26 신설). **SIMULATED 전용**이며 KIS·Toss 실계좌는 증권사가 잔고·수익률을 계산하므로 읽지 않습니다. 오용을 막기 위해 거래 모드 컬럼을 두지 않습니다.
+* `user_id` (INTEGER, FK -> `users.id`, Index): 사용자 외래 키 (CASCADE 삭제)
+* `amount_krw` (NUMERIC(20,4)): 금액(원). 입금 +, 출금 -
+* `memo` (VARCHAR, Nullable): 사유 (예: "HCTI 입고 자금")
+* `created_at` (DATETIME): 기록 시각. 나중에 시간가중수익률로 재계산할 때의 구간 경계
+* *계산 규칙:* `LocalSimulatedBroker.get_account_balance`에서 **투입 자본 = `SIMULATED_INITIAL_CASH_KRW` + 원장 합계**로 두고, 현금 = 투입 자본 + 실현손익 - 보유 매입금, 손익·수익률 = (총자산 - 투입 자본) 기준. 입금이 수익으로 잡히지 않는다.
+* *기록 경로:* `app/trades/sim_cash.py`의 `record_sim_cash_transfer`(SIMULATED 사용자만 허용) 한 곳. 운영은 `scripts/sim_cash_transfer.py <username> <금액> "<메모>"`로 등록하며 등록 직후 잔고 스냅샷을 강제 갱신한다.
+* *초기화:* `POST /account/reset-balance`가 해당 사용자의 원장도 삭제한다.
+* *성과 비교 주의:* 단순 수익률이라 입금 시점에 수익률이 희석된다. 입금한 계정은 전략 성과 비교(관측 계정 A/B 등)에서 제외한다.
 
 ## 💾 3. 클라우드 배포 시 데이터 영속성 관리 (Data Persistence)
 

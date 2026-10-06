@@ -601,7 +601,7 @@ def _shape_autonomous_result(strategy_type: str, report: dict) -> dict:
 
 async def _run_autonomous_participant(start_date: str, end_date: str, cash: float,
                                       strategy_type: str, asset: str) -> tuple[dict, dict]:
-    """자율 슬롯 전략(레짐/벤치마크)을 일봉으로 별도 서브런하고 (참가자dict, 원본report)를 반환한다.
+    """자율 슬롯 전략(레짐/벤치마크/카나리아)을 일봉으로 별도 서브런하고 (참가자dict, 원본report)를 반환한다.
 
     스캐너 base_sim(1h)과 데이터축이 다르므로 자산 유니버스([asset])로 자체 prepare_data를 수행한다.
     엔진의 자율 경로(_run_autonomous)를 재사용하므로 상태기계·룩어헤드 차단은 라이브와 동일 SSOT다.
@@ -940,6 +940,8 @@ async def _run_dynamic_tournament_internal(start_date: str, end_date: str, ticke
     autonomous_specs = [
         ("leveraged_regime", "QLD"),
         ("benchmark_qqq_hold", "QQQ"),
+        # 목표비중형: 신호·보유 티커는 엔진이 전략 선언(data_tickers·hold_tickers)으로 보충한다.
+        ("canary_allocation", "QQQ"),
     ]
     autonomous_reports: dict = {}
     for auto_strategy_type, auto_asset in autonomous_specs:

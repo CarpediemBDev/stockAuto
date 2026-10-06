@@ -121,6 +121,36 @@ def fetch_macro_series(force_refresh: bool = False):
     return frame
 
 
+def fetch_fred_series(series_id: str, force_refresh: bool = False) -> pd.Series | None:
+    """FRED 단일 시리즈를 캐시와 함께 받아 돌려준다 (`canary_allocation`의 NFCI 공급 지점).
+
+    `fetch_macro_series`의 3종 묶음(MACRO_SERIES)과 분리한 이유 - 묶음은 하나라도 결손이면
+    전체를 None으로 버리는 계약이라, 다른 전략용 시리즈를 끼워 넣으면 서로의 가용성을 해친다.
+    캐시·실패 기억 규칙은 같다.
+    """
+    cache_key = f"series:{series_id}"
+    if not force_refresh:
+        with _cache_lock:
+            cached = _macro_cache.get(cache_key)
+            if cached:
+                age = time.time() - cached[0]
+                series = cached[1]
+                if series is None:
+                    if age < MACRO_FAILURE_TTL_SECONDS:
+                        return None
+                elif age < MACRO_CACHE_TTL_SECONDS:
+                    return series.copy()
+
+    series = _fetch_series(series_id)
+    if series is None:
+        _remember_failure(cache_key)
+        return None
+    series = series.sort_index()
+    with _cache_lock:
+        _macro_cache[cache_key] = (time.time(), series.copy())
+    return series
+
+
 def macro_snapshot(macro_frame) -> dict:
     """매크로 프레임의 마지막 값에서 전략이 읽는 두 필드를 만든다.
 

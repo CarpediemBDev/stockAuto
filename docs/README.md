@@ -63,6 +63,7 @@
 | [plans/strategy_catalog_screen_and_subscription.md](plans/strategy_catalog_screen_and_subscription.md) | 전략 카탈로그 화면화·구독 티어 게이팅 설계안 |
 | [plans/strategy_catalog_antigravity_handoff.md](plans/strategy_catalog_antigravity_handoff.md) | 위 설계의 Antigravity 개발 실행 지시서(S0~S3, 구독 제외) |
 | [plans/holding_management_modes.md](plans/holding_management_modes.md) | 봇이 매수하지 않은 보유 종목의 관리 모드(격리·수확·방어·위임) 설계 정본 + 고점 판단 방법론 백로그 |
+| [plans/canary_allocation_live_port.md](plans/canary_allocation_live_port.md) | 크로스에셋 카나리아 배분 전략(`canary_allocation`) 라이브 이식 설계안 — 목표비중형 자율 슬롯·상태 테이블·백테스트 패리티 |
 
 ## 🗂️ 진행 중 계획 문서 (Living Plan)
 
