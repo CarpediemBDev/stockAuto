@@ -191,7 +191,18 @@ class BacktestSimulator:
         # 💡 [전략 패턴] 전략 팩토리를 통해 해당 전략 객체 로드 및 장착
         from app.strategies.strategy_factory import get_strategy
         self.strategy = get_strategy(strategy_type)
-        
+
+        # 목표비중형 자율 전략(canary_allocation)은 신호·보유 티커를 전략이 스스로 선언한다.
+        # 호출부가 무엇을 넘기든 판단에 필요한 유니버스를 빠짐없이 받도록 여기서 합친다.
+        self.raw_closes = {}  # {ticker: 워밍업 포함 전체 종가 Series} — 목표비중 경로 전용
+        self.nfci = None
+        if getattr(self.strategy, "is_target_weight", False):
+            self.tickers = sorted(
+                set(self.tickers)
+                | set(getattr(self.strategy, "data_tickers", ()))
+                | set(getattr(self.strategy, "hold_tickers", ()))
+            )
+
         # 💡 6대 변형 시나리오 제어 변수 설정
         self.variant = variant.upper().strip()
         
@@ -266,6 +277,9 @@ class BacktestSimulator:
         if getattr(self.strategy, "is_autonomous", False):
             sma_period = int(getattr(self.strategy, "sma_period", 200))
             warmup_days = max(warmup_days, int(sma_period * 1.6) + 30)
+        # 목표비중형은 13612U(252거래일) + 판단일 정렬 여유가 필요하다(≈ 1.2년 달력일).
+        if getattr(self.strategy, "is_target_weight", False):
+            warmup_days = max(warmup_days, 450)
         download_start = start_datetime - timedelta(days=warmup_days)
         download_end = end_datetime + timedelta(days=1)
         
@@ -308,6 +322,10 @@ class BacktestSimulator:
         # 수집 실패 시 None이며, 그러면 매크로 열이 만들어지지 않아 해당 전략은
         # 진입하지 않는다(틀린 값으로 매매하는 것보다 안전하다).
         self.macro_data = fetch_macro_series()
+        if getattr(self.strategy, "is_target_weight", False):
+            from app.scanner.macro_data import fetch_fred_series
+            from app.strategies.canary_allocation import NFCI_SERIES_ID
+            self.nfci = fetch_fred_series(NFCI_SERIES_ID)
         self.qqq_metrics = self._slice_requested_range(
             qqq_metrics,
             self.start_date,
@@ -361,7 +379,11 @@ class BacktestSimulator:
                     df = bulk_data[ticker].dropna()
                 else:
                     df = bulk_data.dropna()
-                
+
+                # 목표비중 경로는 지표가 아니라 원시 종가(워밍업 포함)만 쓴다. 지표 계산 실패와 무관하게 보존한다.
+                if getattr(self.strategy, "is_target_weight", False) and not df.empty and "Close" in df:
+                    self.raw_closes[ticker] = df["Close"].dropna()
+
                 if df.empty or len(df) < 50:
                     logger.warning(f"[Backtest] Ticker {ticker} has too few data points ({len(df)}). Skipping.")
                     continue
@@ -468,10 +490,83 @@ class BacktestSimulator:
         logger.info("[Backtest][Autonomous] Simulation loop complete.")
         return self.get_summary_report()
 
+    @staticmethod
+    def _naive_daily(series: pd.Series) -> pd.Series:
+        idx = pd.to_datetime(series.index)
+        if getattr(idx, "tz", None) is not None:
+            idx = idx.tz_localize(None)
+        return pd.Series(series.values, index=idx.normalize()).dropna().sort_index()
+
+    def _run_target_weight(self):
+        """목표비중형 자율 슬롯(canary_allocation) 전용 백테스트 경로.
+
+        전략의 compute_target_series(라이브와 같은 SSOT)로 월말 판단일마다 '확정 목표'를 한 번
+        계산하고, 매 봉에서 '그 봉 이전 마지막 판단일'의 목표를 현재 봉 종가로 집행한다
+        (판단은 close[d], 체결은 d 이후 봉 → 룩어헤드 없음). 수량은 라이브 집행부와 같은
+        plan_target_weight_orders로 계산하고, 매도를 먼저 체결한 뒤 매수한다.
+        """
+        if self.interval != "1d":
+            raise ValueError(
+                f"목표비중 자율 전략은 일봉(1d) 백테스트만 지원합니다(요청 인터벌: {self.interval})."
+            )
+        from app.bot.trade_calculations import plan_target_weight_orders
+        from app.strategies.canary_allocation import CALENDAR_TICKER, month_end_dates
+
+        closes = {t: self._naive_daily(s) for t, s in self.raw_closes.items()}
+        if "QQQ" not in closes and self.qqq_data is not None and "Close" in self.qqq_data:
+            closes["QQQ"] = self._naive_daily(self.qqq_data["Close"])
+        if CALENDAR_TICKER not in closes or not self.timeline:
+            raise ValueError(f"목표비중 백테스트에 필요한 달력 티커 '{CALENDAR_TICKER}' 데이터가 없습니다.")
+
+        hold = tuple(getattr(self.strategy, "hold_tickers", ()))
+        timeline_days = [pd.Timestamp(t).tz_localize(None).normalize() if pd.Timestamp(t).tzinfo else pd.Timestamp(t).normalize()
+                         for t in self.timeline]
+        first, last = timeline_days[0], timeline_days[-1]
+        calendar = closes[CALENDAR_TICKER].index
+        decisions = month_end_dates(calendar)
+        decisions = decisions[(decisions >= first - pd.Timedelta(days=40)) & (decisions <= last)]
+        targets = self.strategy.compute_target_series(closes, self.nfci, decisions)
+
+        logger.info(
+            f"[Backtest][TargetWeight] {self.strategy.name} | 판단일 {len(decisions)}개 중 확정 {len(targets)}개 | "
+            f"타임라인 {len(self.timeline)}봉"
+        )
+
+        executed: dict | None = None
+        for t, day in zip(self.timeline, timeline_days):
+            prices = {k: float(closes[k].loc[day]) for k in hold if k in closes and day in closes[k].index}
+            self.broker.update_equity(t, prices)
+
+            applicable = targets[targets.index < day]
+            if applicable.empty:
+                continue
+            weights = {k: float(v) for k, v in applicable.iloc[-1].items() if float(v) > 1e-9}
+            if executed is not None and weights == executed:
+                continue
+
+            current_qty = {k: h["quantity"] for k, h in self.broker.holdings.items()}
+            if any(k not in prices for k in set(weights) | set(current_qty)):
+                continue  # 가격이 비는 봉에서는 집행하지 않고 다음 봉에서 재시도
+            total = self.broker.cash + sum(q * prices[k] for k, q in current_qty.items())
+            plan = plan_target_weight_orders(total, weights, prices, current_qty)
+            if plan is None:
+                continue
+            for ticker, delta in sorted(plan.items(), key=lambda kv: kv[1]):  # 음수(매도) 먼저
+                if delta < 0:
+                    self.broker.sell_order(ticker, -delta, prices[ticker], "목표비중 리밸런싱", t)
+                elif delta > 0:
+                    self.broker.buy_order(ticker, delta, prices[ticker], buy_stage=3, timestamp=t, ticker_name=ticker)
+            executed = weights
+
+        logger.info("[Backtest][TargetWeight] Simulation loop complete.")
+        return self.get_summary_report()
+
     def run(self):
         """정렬된 시간축을 순차적으로 흘려보내며 매수실패/체결/익절/손절 시나리오를 구동합니다."""
         # 자율 슬롯 전략(레버리지 레짐 계열)은 종목 채점 파이프라인을 쓰지 않으므로 전용 경로로 분기한다.
         # 스캐너 경로(아래 로직)는 무변경으로 완전히 격리 보존된다.
+        if getattr(self.strategy, "is_target_weight", False):
+            return self._run_target_weight()
         if getattr(self.strategy, "is_autonomous", False):
             return self._run_autonomous()
 

@@ -1,12 +1,13 @@
 {
   "_comment": "전략별 라이브 진입 상태 스냅샷. 손으로 고치지 말고 python scripts/update_strategy_entry_states.py 로 갱신할 것. 차분이 생기면 사유를 당일 현황판 변경 영향 기록에 남긴다.",
-  "updated_at": "2026-09-01",
+  "updated_at": "2026-10-06",
   "states": {
     "antigravity_surge": "진입가능",
     "asqs": "진입가능",
     "bb_squeeze": "진입가능",
     "benchmark_qqq_hold": "자율",
     "bollinger_tr": "진입가능",
+    "canary_allocation": "자율",
     "chaikin_atr": "진입가능",
     "complex": "진입가능",
     "complex_aggressive": "진입가능",

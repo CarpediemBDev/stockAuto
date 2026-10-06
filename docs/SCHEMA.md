@@ -14,6 +14,7 @@ erDiagram
     users ||--o{ trade_logs : "1:N Generates"
     users ||--o{ action_logs : "1:N Writes"
     users ||--o{ watch_lists : "1:N Tracks"
+    users ||--o{ autonomous_slot_states : "1:N Decides"
 
     users {
         int id PK
@@ -247,6 +248,18 @@ erDiagram
 * `created_at` (DATETIME, Index): 관측 기록 시각
 * *제약 조건:* 같은 예측일에 스냅샷이 여러 번 생성돼도 종목당 1건만 남도록 복합 유니크 제약(`predicted_date`, `ticker`)을 적용해 잡 재실행 멱등성을 보장합니다.
 * *적재 주체:* `swing_score_calibration_job`(매일 08:30 cron)이 `swing_prediction_snapshots`를 읽어 미관측 예측만 백필합니다. 익일 종가가 아직 없으면 기록하지 않고 다음 실행에서 재시도하며, 예측일로부터 10일이 지나면 포기합니다.
+
+### ⑪ `autonomous_slot_states` (목표비중형 자율 슬롯 월별 판단 원장)
+`canary_allocation`처럼 **월 1회 판단해 목표 비중대로 리밸런싱하는 자율 슬롯**의 판단·집행 상태입니다. 판단 결과를 DB에 남겨 서버를 재기동해도 같은 달을 다시 판단하거나 이중 주문하지 않습니다. 설계 정본은 [`plans/canary_allocation_live_port.md`](plans/canary_allocation_live_port.md).
+* `user_id` (INTEGER, FK -> `users.id`, Index): 사용자 외래 키 (CASCADE 삭제)
+* `slot_key` (VARCHAR): 슬롯 키 (예: `canary_allocation`)
+* `decision_date` (VARCHAR): 판단에 쓴 월말 완결 거래일 (`YYYY-MM-DD`, 미국 동부 기준)
+* `target_json` (TEXT): 확정 목표 비중 JSON (예: `{"QQQ": 0.571429, "BIL": 0.428571}`). 밴드 유지(HELD) 시에는 직전 목표가 그대로 들어갑니다.
+* `signals_json` (TEXT, Nullable): 판단에 쓴 신호 7개(감사용)
+* `status` (VARCHAR): `DECIDED` → `EXECUTING` → `DONE`, 또는 `HELD`(밴드 안 변화로 매매 없음)
+* `updated_at` (DATETIME): 마지막 상태 변경 시각
+* *제약 조건:* (`user_id`, `slot_key`, `decision_date`) 복합 유니크 — 같은 달 중복 판단 차단.
+* *적재 주체:* `app/bot/target_weight_executor.py`(매매 루프, 정규장에서만). 신호 데이터 결측 시에는 **행을 만들지 않고** 다음 사이클에 재시도합니다.
 
 ---
 
