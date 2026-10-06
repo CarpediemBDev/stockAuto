@@ -14,6 +14,7 @@ erDiagram
     users ||--o{ trade_logs : "1:N Generates"
     users ||--o{ action_logs : "1:N Writes"
     users ||--o{ watch_lists : "1:N Tracks"
+    users ||--o{ sim_cash_transfers : "1:N Deposits (SIMULATED)"
 
     users {
         int id PK
@@ -234,6 +235,17 @@ erDiagram
 * `trade_mode` (VARCHAR): 기록 당시 모드 (`SIMULATED`/`MOCK`/`REAL`). **조회 시 반드시 현재 모드로 필터**하여 모드 전환 시 잔고가 섞이지 않게 합니다.
 * `captured_at` (DATETIME, Index): 기록 시각. API 응답에 포함되어 프론트 신선도 배지의 기준이 됩니다.
 * *보존 정책:* 사용자·모드별 최신 500건 유지, 평시 60초 dedup (체결·초기화·청산 직후에는 `force=True`로 즉시 기록).
+
+### ⑪ `sim_cash_transfers` (SIMULATED 입출금 원장)
+시뮬 계좌에 사용자별로 자본을 더하거나 빼는 원장입니다(2026-09-26 신설). **SIMULATED 전용**이며 KIS·Toss 실계좌는 증권사가 잔고·수익률을 계산하므로 읽지 않습니다. 오용을 막기 위해 거래 모드 컬럼을 두지 않습니다.
+* `user_id` (INTEGER, FK -> `users.id`, Index): 사용자 외래 키 (CASCADE 삭제)
+* `amount_krw` (NUMERIC(20,4)): 금액(원). 입금 +, 출금 -
+* `memo` (VARCHAR, Nullable): 사유 (예: "HCTI 입고 자금")
+* `created_at` (DATETIME): 기록 시각. 나중에 시간가중수익률로 재계산할 때의 구간 경계
+* *계산 규칙:* `LocalSimulatedBroker.get_account_balance`에서 **투입 자본 = `SIMULATED_INITIAL_CASH_KRW` + 원장 합계**로 두고, 현금 = 투입 자본 + 실현손익 - 보유 매입금, 손익·수익률 = (총자산 - 투입 자본) 기준. 입금이 수익으로 잡히지 않는다.
+* *기록 경로:* `app/trades/sim_cash.py`의 `record_sim_cash_transfer`(SIMULATED 사용자만 허용) 한 곳. 운영은 `scripts/sim_cash_transfer.py <username> <금액> "<메모>"`로 등록하며 등록 직후 잔고 스냅샷을 강제 갱신한다.
+* *초기화:* `POST /account/reset-balance`가 해당 사용자의 원장도 삭제한다.
+* *성과 비교 주의:* 단순 수익률이라 입금 시점에 수익률이 희석된다. 입금한 계정은 전략 성과 비교(관측 계정 A/B 등)에서 제외한다.
 
 ### ⑩ `swing_score_outcomes` (스윙 점수 캘리브레이션 관측)
 스윙 예측 점수와 **익일 실제 등락**을 짝지어 누적하는 사후 검증 원장입니다. "85점 종목이 실제로 다음날 올랐는가"를 데이터로 확인해 점수 인플레이션이나 예측력 없는 지표를 적발하기 위한 것으로, **매매 경로에는 일절 관여하지 않는 순수 관측 레이어**입니다.

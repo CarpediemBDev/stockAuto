@@ -88,6 +88,7 @@ class User(Base):
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     broker_orders = relationship("BrokerOrder", back_populates="user", cascade="all, delete-orphan")
     equity_snapshots = relationship("AccountEquitySnapshot", back_populates="user", cascade="all, delete-orphan")
+    sim_cash_transfers = relationship("SimCashTransfer", back_populates="user", cascade="all, delete-orphan")
 
 class SystemSetting(Base):
     """Service-wide runtime settings. Secrets must not be stored here."""
@@ -352,6 +353,25 @@ class AccountEquitySnapshot(Base):
     captured_at = Column(AwareDateTime, default=utc_now_aware, nullable=False, index=True)
 
     user = relationship("User", back_populates="equity_snapshots")
+
+class SimCashTransfer(Base):
+    """SIMULATED 계좌 입출금 원장. 투입 자본 = 초기자금(SIMULATED_INITIAL_CASH_KRW) + 이 원장의 합계.
+
+    시뮬 전용이다. KIS·Toss 실계좌는 잔고·수익률을 증권사가 계산해 주므로 이 원장을 읽지 않는다.
+    거래 모드 컬럼을 두지 않는 것도 그 때문이다 - 실계좌 잔고에 더해 쓰는 오용을 막는다.
+
+    합계 컬럼 하나가 아니라 원장으로 두는 이유는 언제, 얼마를, 왜 넣었는지 추적하기 위함이다.
+    입금한 계정은 단순 수익률이 희석되므로(투입 자본이 커진다) 전략 성과 비교에서 제외한다.
+    """
+    __tablename__ = "sim_cash_transfers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount_krw = Column(Numeric(precision=20, scale=4, asdecimal=True), nullable=False)  # 입금 +, 출금 -
+    memo = Column(String, nullable=True)
+    created_at = Column(AwareDateTime, default=utc_now_aware, nullable=False)
+
+    user = relationship("User", back_populates="sim_cash_transfers")
 
 class ActionLog(Base):
     """봇의 실시간 사용자별 활동 기록 (스캔, 판단, 시스템 메시지 등)"""

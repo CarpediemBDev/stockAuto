@@ -28,7 +28,7 @@ from decimal import Decimal
 
 from app.core.logging import logger
 from app.core.models import (
-    User, Holding, TradeLog, ActionLog, Strategy, utc_now_aware,
+    User, Holding, TradeLog, ActionLog, Strategy, SimCashTransfer, utc_now_aware,
     MANAGEMENT_BOT_OWNED, MANAGEMENT_EXTERNAL, MANAGEMENT_DELEGATED,
     EXTERNAL_STRATEGY_TYPE,
     GUARD_ACTIONS, GUARD_ACTION_ALERT_ONLY,
@@ -362,6 +362,8 @@ def reset_balance(
         db.query(Holding).filter(Holding.user_id == current_user.id).delete()
         db.query(TradeLog).filter(TradeLog.user_id == current_user.id).delete()
         db.query(ActionLog).filter(ActionLog.user_id == current_user.id).delete()
+        # 입출금 원장도 비운다. 남겨 두면 초기화 뒤에도 투입 자본이 초기자금보다 커져 있다.
+        db.query(SimCashTransfer).filter(SimCashTransfer.user_id == current_user.id).delete()
         db.commit()
 
         # 초기화 직후 대시보드에 낡은 스냅샷이 보이지 않도록 즉시 재계산·영속화 (dedup 우회)

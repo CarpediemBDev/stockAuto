@@ -256,7 +256,7 @@ graph TD
 
 - **`scanner/`**: 스캐너 도메인. 공용 시장 신호와 현재 사용자의 관심종목 신호를 안전하게 재결합하는 API(`router.py`), QQQ 나스닥 지수 기반의 단타 돌파 전용 2-Stage expert 필터 모듈(`scanner.py`), 그리고 120일 일봉 기반 스윙 예측 모듈(`swing_predictor.py`)을 포함하는 **투트랙(Two-track) 스캐닝 엔진**입니다. 공용·사용자 데이터 경계는 `docs/SCANNER_DATA_FLOW.md`를 단일 기준으로 사용합니다.
 
-- **`bot/`**: 자동매매 제어 도메인. 봇 구동 제어 API(`router.py`), 하이브리드 트레이딩 메인 루프 스케줄러(`scheduler.py`), 한국투자증권 API 클라이언트(`kis_api.py`), 공통 추상 브로커 인터페이스(`base_broker.py`), 한투 래퍼 브로커(`kis_broker.py`), 가상 예수금 및 실시간 가격 연동 시뮬레이터 브로커(`simulated_broker.py`), 이들을 설정에 따라 동적으로 생산 및 반환하는 팩토리(`broker_factory.py`).
+- **`bot/`**: 자동매매 제어 도메인. 봇 구동 제어 API(`router.py`), 하이브리드 트레이딩 메인 루프 스케줄러(`scheduler.py`), 한국투자증권 API 클라이언트(`kis_api.py`), 공통 추상 브로커 인터페이스(`base_broker.py`), 한투 래퍼 브로커(`kis_broker.py`), 가상 예수금 및 실시간 가격 연동 시뮬레이터 브로커(`simulated_broker.py`, 투입 자본 = 초기자금 1,000만 원 + 사용자별 입출금 원장 `sim_cash_transfers` 합계, 등록은 `scripts/sim_cash_transfer.py`), 이들을 설정에 따라 동적으로 생산 및 반환하는 팩토리(`broker_factory.py`).
 
 - **`trades/`**: 거래 및 계좌 도메인. 실시간 매매 및 시스템 활동 로그 API(`router_trades.py`), 브로커 팩토리를 통해 잔고/보유량을 통합 처리하는 초경량 라우터(`router_account.py`), 지수 및 시장 종합 센티먼트 API(`router_market.py`).
 

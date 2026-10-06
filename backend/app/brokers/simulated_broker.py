@@ -6,7 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from app.brokers.base_broker import BaseBroker
 from app.core.database import SessionLocal
 from app.core.holding_audit import delete_holding
-from app.core.models import Holding, TradeLog, UnfilledOrder, MANAGEMENT_BOT_OWNED
+from app.core.models import Holding, SimCashTransfer, TradeLog, UnfilledOrder, MANAGEMENT_BOT_OWNED
 from app.core.config import settings
 from app.bot.fx_cache import FXRateCache
 from app.bot.trade_calculations import to_decimal, calculate_realized_pnl, fee_rate_for_trade_mode
@@ -108,18 +108,26 @@ class LocalSimulatedBroker(BaseBroker):
                 TradeLog.trade_type == "SELL",
                 TradeLog.realized_pnl != None,
             )
+            # 입출금 원장 합계. 실현손익과 같은 범위(사용자 단위)로 집계한다.
+            transfers_query = db.query(func.sum(SimCashTransfer.amount_krw))
             if self.user_id:
                 holdings = db.query(Holding).filter(Holding.user_id == self.user_id).all()
                 realized_pnl_query = realized_pnl_query.filter(TradeLog.user_id == self.user_id)
+                transfers_query = transfers_query.filter(SimCashTransfer.user_id == self.user_id)
             else:
                 holdings = db.query(Holding).all()
             total_realized_pnl_usd = to_decimal(realized_pnl_query.scalar()).quantize(
                 Decimal('0.0001'), rounding=ROUND_HALF_UP
             )
+            total_transfers_krw = to_decimal(transfers_query.scalar()).quantize(
+                Decimal('0.0001'), rounding=ROUND_HALF_UP
+            )
         finally:
             db.close()
 
-        initial_cash = to_decimal(settings.SIMULATED_INITIAL_CASH_KRW)
+        # 투입 자본 = 초기자금 + 입출금 합계. 현금·손익·수익률이 모두 이 값을 기준으로 한다.
+        # 손익을 초기자금 기준으로 두면 1천만원 입금이 +100% 수익으로 잡힌다.
+        invested_capital = to_decimal(settings.SIMULATED_INITIAL_CASH_KRW) + total_transfers_krw
         if exchange_rate is None:
             exchange_rate = FXRateCache.get_rate()
         dec_exchange_rate = to_decimal(exchange_rate)
@@ -138,15 +146,15 @@ class LocalSimulatedBroker(BaseBroker):
                 total_eval_usd += (current_price * h.quantity)
 
         # 수익률은 외화 기준으로 계산합니다.
-        strategy_initial_cash_usd = initial_cash / to_decimal(settings.SIMULATED_INITIAL_FX_RATE)
-        cash_balance_usd = max(Decimal('0.0000'), strategy_initial_cash_usd + total_realized_pnl_usd - total_purchase_usd)
+        invested_capital_usd = invested_capital / to_decimal(settings.SIMULATED_INITIAL_FX_RATE)
+        cash_balance_usd = max(Decimal('0.0000'), invested_capital_usd + total_realized_pnl_usd - total_purchase_usd)
         cash_balance = cash_balance_usd * to_decimal(settings.SIMULATED_INITIAL_FX_RATE)
         stock_balance = total_eval_usd * to_decimal(settings.SIMULATED_INITIAL_FX_RATE)
         total_asset = cash_balance + stock_balance
-        profit_loss = total_asset - initial_cash
+        profit_loss = total_asset - invested_capital
 
         # 가상 수익률 계산
-        profit_rate = ((profit_loss / initial_cash) * Decimal('100.0')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if initial_cash > 0 else Decimal('0.0000')
+        profit_rate = ((profit_loss / invested_capital) * Decimal('100.0')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if invested_capital > 0 else Decimal('0.0000')
 
         return {
             "total_asset": int(total_asset.quantize(Decimal('1'), rounding=ROUND_HALF_UP)),
