@@ -505,3 +505,26 @@ class UnfilledOrder(Base):
     created_at = Column(AwareDateTime, default=utc_now_aware)
 
     user = relationship("User")
+
+
+class AutonomousSlotState(Base):
+    """목표비중형 자율 슬롯(canary_allocation)의 월별 판단·집행 상태.
+
+    판단 결과를 DB에 남겨 재기동해도 같은 달을 다시 판단하거나 이중 주문하지 않는다.
+    status: DECIDED(목표 확정) → EXECUTING(주문 진행) → DONE(완료) / HELD(데이터 결측·밴드 유지로 매매 없음)
+    설계: docs/plans/canary_allocation_live_port.md §3.1
+    """
+    __tablename__ = "autonomous_slot_states"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    slot_key = Column(String, nullable=False)
+    decision_date = Column(String, nullable=False)  # 판단에 쓴 월말 완결 거래일 (YYYY-MM-DD, ET)
+    target_json = Column(Text, nullable=False)       # 확정 목표 비중 {"QQQ": 0.571429, "BIL": 0.428571}
+    signals_json = Column(Text, nullable=True)       # 신호 7개 값(감사용). 결측 보류 시 NULL
+    status = Column(String, nullable=False)
+    updated_at = Column(AwareDateTime, default=utc_now_aware, onupdate=utc_now_aware)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "slot_key", "decision_date", name="uq_autonomous_slot_decision"),
+    )

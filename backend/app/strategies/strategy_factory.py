@@ -160,6 +160,10 @@ def _create_strategy(strategy_type: str) -> BaseStrategy:
         from app.strategies.core_satellite import CoreSatellite
         return CoreSatellite()
 
+    elif strategy_type == "canary_allocation":
+        from app.strategies.canary_allocation import CanaryAllocation
+        return CanaryAllocation()
+
     elif strategy_type in ["cross_sectional_momentum", "xsec_momentum"]:
         from app.strategies.cross_sectional_momentum import CrossSectionalMomentum
         return CrossSectionalMomentum()

@@ -93,6 +93,7 @@ from app.bot.trade_calculations import (
     to_decimal,
     check_gap_exit,
 )
+from app.bot.target_weight_executor import process_target_weight_slots
 from app.bot.gap_exit import (
     GAP_EXIT_ARM_CONTROL,
     get_session_gap_pct,
@@ -938,6 +939,9 @@ async def process_autonomous_slots(ctx: TradingFlowContext, slot_allocations: di
     for slot_key, slot_info in slot_allocations.items():
         strategy = ctx.ms_manager.strategies.get(slot_key)
         if not strategy or not getattr(strategy, "is_autonomous", False):
+            continue
+        # 목표비중형(canary_allocation)은 IN/OUT 단일 자산 모델이 아니므로 전용 집행부가 처리한다.
+        if getattr(strategy, "is_target_weight", False):
             continue
 
         if trade_mode != "SIMULATED":
@@ -2898,6 +2902,7 @@ async def run_user_trading_flow(user_id: int, signal_map: dict, all_signals: lis
                 slot_allocations = await calculate_slot_allocations(ctx)
             with profile_phase("user.autonomous_slots"):
                 await process_autonomous_slots(ctx, slot_allocations)
+                await process_target_weight_slots(ctx, slot_allocations)
             with profile_phase("user.target_signals"):
                 target_signals = await build_target_signals(ctx)
             if target_signals is None:

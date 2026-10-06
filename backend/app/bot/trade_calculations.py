@@ -507,3 +507,41 @@ def check_gap_exit(
     if dec_threshold <= 0:
         return False
     return to_decimal(gap_pct) >= dec_threshold
+
+
+# 목표비중형 자율 슬롯(canary_allocation)의 목표수량 버퍼. 수수료(0.10%)·지정가 여유(0.10%)·호가 변동을 덮는다.
+# 0.98(기존 IN/OUT 경로 값)을 쓰면 BIL·IEF까지 포함한 전 비중의 2%가 놀아 연 약 0.3%p를 잃었다
+# (2026-10-05 실데이터 패리티: 0.98 → CAGR 15.97%, 1.0 → 16.30%). 실제 매수는 집행부가 가용 현금으로 한 번 더 제한한다.
+TARGET_WEIGHT_CASH_BUFFER = 0.995
+
+
+def plan_target_weight_orders(
+    total_value: float | Decimal,
+    target_weights: dict[str, float],
+    prices: dict[str, float | Decimal],
+    current_qty: dict[str, int],
+    cash_buffer: float = TARGET_WEIGHT_CASH_BUFFER,
+) -> dict[str, int] | None:
+    """목표비중 → 티커별 '차이 수량'(양수=매수, 음수=매도). 라이브 집행부와 백테스트가 공유한다.
+
+    목표수량 = floor(총자산 × 비중 × 버퍼 / 가격). 목표에 없는 기존 보유 티커는 전량 매도 대상이다.
+    목표 티커의 가격을 모르면 None(판단 보류) — 가격 없이 수량을 추정하지 않는다.
+    """
+    dec_total = to_decimal(total_value)
+    if dec_total <= 0:
+        return None
+    buffer = to_decimal(cash_buffer)
+    plan: dict[str, int] = {}
+    for ticker, weight in target_weights.items():
+        price = prices.get(ticker)
+        if price is None or to_decimal(price) <= 0:
+            return None
+        budget = dec_total * to_decimal(weight) * buffer
+        target_qty = int((budget / to_decimal(price)).to_integral_value(rounding=ROUND_DOWN))
+        delta = target_qty - int(current_qty.get(ticker, 0) or 0)
+        if delta:
+            plan[ticker] = delta
+    for ticker, qty in current_qty.items():
+        if ticker not in target_weights and qty:
+            plan[ticker] = -int(qty)
+    return plan

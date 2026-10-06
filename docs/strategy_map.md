@@ -45,6 +45,7 @@
 | **regime_switching**| 마스터 레짐스위칭 | `regime_switching.py` | **📡 ALL** | • **티커**: `PLTR,SMCI,AMZN,MSFT`<br>• **기간**: `26-04-01` ~ `26-05-30`<br>• **주기**: `1h` (1시간봉)<br>• **예수금**: `$10,000` | **최상위 오케스트레이터**. QQQ 이평 정배열 상태(레짐)를 실시간 감시하여 단독 전략들의 기동 여부를 스위칭하는 마스터 기법 |
 | **antigravity_surge**| 안티그래비티 서지 | `antigravity_surge.py` | **🔥 BULLISH** | • **티커**: `PLTR,SMCI,AMZN,MSFT`<br>• **기간**: `26-04-01` ~ `26-05-30`<br>• **주기**: `15m` (15분봉)<br>• **예수금**: `$10,000` | **안티그래비티 수급합성**. OBV 지수가 20일 고점을 돌파한 상태(세력 매집)에서, 장초반 15분 이내에 쿨라매기식 거래량 폭발과 함께 $3\%$ 이상 급등 시 진입 |
 | **regime_sniper** | 레짐 스나이퍼 | `regime_sniper.py` | **📡 ALL** | • **티커**: `PLTR,SMCI,AMZN,MSFT`<br>• **기간**: `26-04-01` ~ `26-05-30`<br>• **주기**: `15m` (15분봉)<br>• **예수금**: `$10,000` | **상승장 변동성수축**. QQQ 상승 레짐 상태에서 볼린저 밴드 폭이 극도로 수축(Squeeze)했다가, 대량 거래량과 함께 밴드 상단을 강하게 돌파하는 찰나를 타격 |
+| **canary_allocation** | 🐤 크로스에셋 카나리아 배분 | `canary_allocation.py` | **📡 ALL** | • **유니버스**: 전략 자체 선언(신호 VWO·AGG·SMH·SPY·XHB·XLF·^SOX + NFCI, 보유 QQQ·IEF·BIL)<br>• **주기**: `1d` (일봉, 월말 판단)<br>• **예수금**: `$10,000` | **자율 목표비중 슬롯**(스캐너 미사용). 다른 자산 7개 조기경보의 양호 비율만큼 QQQ, 나머지 IEF/BIL. 월 1회·밴드 10%p. 명세: [strategy_specification.md §5-C](strategy_specification.md) |
 | **phoenix_bounce** | 피닉스 바운스 | `phoenix_bounce.py` | **🛡️ BEARISH** | • **티커**: `PLTR,SMCI,AMZN,MSFT`<br>• **기간**: `26-04-01` ~ `26-05-30`<br>• **주기**: `15m` (15분봉)<br>• **예수금**: `$10,000` | **주도주 기습낙주반등**. 12개월 상대강도가 강한 대장주가 단기 악재로 15분봉 RSI 20 이하의 과매도에 진입 시, 양봉 출현과 함께 OBV가 반등할 때 기습 진입 |
 
 
