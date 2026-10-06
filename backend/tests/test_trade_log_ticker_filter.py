@@ -149,3 +149,44 @@ def test_pagination_walks_a_single_ticker():
     assert [float(log.price) for log in first] == [104.0, 103.0]
     assert [float(log.price) for log in second] == [102.0, 101.0]
     assert all(log.ticker == "NVDA" for log in first + second)
+
+
+def test_strategy_filter_applies_before_limit():
+    """전략 필터도 limit보다 먼저 걸린다 - 한 종목을 두 전략이 나눠 들 때 카드 단위와 맞춘다.
+
+    같은 티커의 다른 전략 체결이 잦으면, 화면에서 거르는 방식으로는 조용한 슬라이스의
+    매수가 응답 창 밖으로 밀려난다. 카드는 슬라이스 단위인데 이력이 비어 보이게 된다.
+    """
+    db = _make_db()
+    user = _make_user(db, "sliced")
+
+    _add_log(db, user, "QLD", "BUY", 90.0, 7, minutes=0, strategy="leveraged_regime")
+    for i in range(150):
+        _add_log(db, user, "QLD", "BUY", 100.0 + i, 1, minutes=i + 1, strategy="external")
+
+    logs = get_trade_logs(ticker="QLD", strategy_type="leveraged_regime", current_user=user, db=db)
+    assert [(log.strategy_type, log.quantity) for log in logs] == [("leveraged_regime", 7)]
+
+    # 네거티브 대조 - 전략 필터 없이 같은 limit이면 이 슬라이스의 매수는 창 밖이다.
+    unfiltered = get_trade_logs(ticker="QLD", current_user=user, db=db)
+    assert "leveraged_regime" not in {log.strategy_type for log in unfiltered}
+
+
+def test_strategy_filter_is_scoped_by_ticker_and_user():
+    """전략 필터는 티커·사용자 필터와 AND로 걸린다. 공백 전략은 필터를 걸지 않는다."""
+    db = _make_db()
+    mine = _make_user(db, "mine_s")
+    other = _make_user(db, "other_s")
+
+    _add_log(db, mine, "QLD", "BUY", 100.0, 5, minutes=0, strategy="leveraged_regime")
+    _add_log(db, mine, "QLD", "BUY", 101.0, 2, minutes=1, strategy="benchmark")
+    # 같은 전략의 다른 종목 - 티커 필터가 빠지면 딸려 온다.
+    _add_log(db, mine, "TQQQ", "BUY", 50.0, 3, minutes=2, strategy="leveraged_regime")
+    # 다른 사용자의 같은 종목·전략 - 격리가 깨지면 딸려 온다.
+    _add_log(db, other, "QLD", "BUY", 999.0, 9, minutes=3, strategy="leveraged_regime")
+
+    logs = get_trade_logs(ticker="QLD", strategy_type="leveraged_regime", current_user=mine, db=db)
+    assert [(log.ticker, float(log.price)) for log in logs] == [("QLD", 100.0)]
+
+    blank = get_trade_logs(ticker="QLD", strategy_type="  ", current_user=mine, db=db)
+    assert len(blank) == 2

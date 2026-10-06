@@ -26,6 +26,7 @@ from app.core.models import (
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from dataclasses import dataclass
+from html import escape
 import asyncio
 import threading
 import time
@@ -81,6 +82,7 @@ from app.bot.trade_calculations import (
     GUARD_SUSTAIN_CYCLES,
     GUARD_SUSTAIN_MINUTES,
     get_harvest_arm_pct,
+    get_harvest_floor_price,
     get_harvest_trailing_pct,
     EXIT_NOISE_BUFFER_CYCLES,
     EXIT_NOISE_BUFFER_MINUTES,
@@ -188,6 +190,9 @@ LOG_COOLDOWN_SECONDS = 1800.0
 # 키: (user_id, ticker) -> 값: int (연속 이탈 횟수)
 BREACH_COUNT_CACHE = {}
 _breach_count_lock = threading.Lock()
+# 수확 매도를 본전가 하한 때문에 보류했다는 로그를 이탈 구간마다 한 번만 남기기 위한 표식.
+# 키: (user_id, ticker, strategy_type). _breach_count_lock으로 함께 보호한다.
+HARVEST_FLOOR_HOLD_LOGGED = set()
 
 
 def _clear_exit_breach_clock(ctx, h) -> None:
@@ -1429,7 +1434,7 @@ def _persist_harvest_thresholds(
     atr = current_data.get("details", {}).get("atr", 0.0)
     current_price = float(current_price_dec)
     arm_pct = round(get_harvest_arm_pct(atr, current_price), 2)
-    trailing_pct = round(get_harvest_trailing_pct(atr, current_price), 2)
+    trailing_pct = round(get_harvest_trailing_pct(), 2)
 
     # 값이 그대로면 쓰지 않는다. ATR은 사이클마다 미세하게 흔들리므로 소수점 2자리로 끊어
     # 비교해야 의미 없는 UPDATE가 매 사이클 쌓이지 않는다.
@@ -1494,6 +1499,14 @@ async def _evaluate_harvest(
     atr = current_data.get("details", {}).get("atr", 0.0)
     current_price = float(current_price_dec)
 
+    # 매도 하한은 관측 시작가와 수수료 포함 본전가 중 높은 값이다. 수확은 "올라갔을 때 판다"는
+    # 기능이라 매입가 아래에서는 팔지 않는다(2026-09-24 HCTI 손실 수확 매도). 무장은 종전대로
+    # 관측 시작가 기준이다 - 무장까지 본전 기준으로 올리면 물린 종목은 추적조차 시작되지 않는다.
+    # 평단을 모르면 하한이 0이 되고 check_harvest_breach가 False를 내므로 팔지 않는다.
+    sell_floor = get_harvest_floor_price(
+        observed_base, getattr(h, "avg_price", None), fee_rate_for_trade_mode(ctx.trade_mode)
+    )
+
     # --- 무장: 급등해야 감시가 시작된다. 그 전에는 아무것도 하지 않는다 ---
     if not armed:
         arm_pct = get_harvest_arm_pct(atr, current_price)
@@ -1503,7 +1516,7 @@ async def _evaluate_harvest(
         gain_pct = float(
             (current_price_dec - observed_base) / observed_base * Decimal("100")
         )
-        trailing_pct = get_harvest_trailing_pct(atr, current_price)
+        trailing_pct = get_harvest_trailing_pct()
         stop_price = float(current_price_dec * (Decimal("1") - to_decimal(trailing_pct) / Decimal("100")))
         # 무장 시점부터 새로 추적한다. 무장 전 고점을 물려받으면 무장 직후 이미 이탈 상태일 수 있다.
         if isinstance(h, Holding) and h.id is not None:
@@ -1524,19 +1537,31 @@ async def _evaluate_harvest(
             I18n.get_msg(
                 _resolve_lang(ctx.user_id),
                 "telegram.harvest_armed",
-                ticker=clean_ticker,
-                ticker_name=h.ticker_name or clean_ticker,
+                ticker=escape(clean_ticker),
+                ticker_name=escape(h.ticker_name or clean_ticker),
                 gain_pct=gain_pct,
                 base_price=float(observed_base),
                 current_price=current_price,
                 trailing_pct=trailing_pct,
                 stop_price=stop_price,
+                sustain_cycles=HARVEST_SUSTAIN_CYCLES,
+                sustain_minutes=HARVEST_SUSTAIN_MINUTES,
+                floor_note=(
+                    I18n.get_msg(
+                        _resolve_lang(ctx.user_id),
+                        "telegram.harvest_floor_known",
+                        floor_price=float(sell_floor),
+                    )
+                    if sell_floor > 0
+                    else I18n.get_msg(_resolve_lang(ctx.user_id), "telegram.harvest_floor_unknown")
+                ),
             ),
+            parse_mode="HTML",
         )
         return None
 
     # --- 추적: 무장 뒤에는 고점 대비 이탈만 본다 ---
-    trailing_pct = get_harvest_trailing_pct(atr, current_price)
+    trailing_pct = get_harvest_trailing_pct()
     now = utc_now_aware()
     cache_key = (ctx.user_id, h.ticker, h.strategy_type)
 
@@ -1550,13 +1575,41 @@ async def _evaluate_harvest(
             db.commit()
         h.harvest_breach_started_at = None
 
-    if not check_harvest_breach(current_price_dec, dec_highest_price, trailing_pct, observed_base):
+    if not check_harvest_breach(current_price_dec, dec_highest_price, trailing_pct, sell_floor):
+        # 트레일링은 이탈했는데 본전가 하한에 막힌 경우만 따로 알린다. 매 사이클 찍으면 로그가
+        # 도배되므로 이탈 구간마다 한 번만 남긴다. 관측 시작가 아래로 떨어진 경우는 종전과 같이 조용히 둔다.
+        blocked_by_floor = check_harvest_breach(
+            current_price_dec, dec_highest_price, trailing_pct, observed_base
+        )
+        with _breach_count_lock:
+            first_hold = blocked_by_floor and cache_key not in HARVEST_FLOOR_HOLD_LOGGED
+            if blocked_by_floor:
+                HARVEST_FLOOR_HOLD_LOGGED.add(cache_key)
+            else:
+                HARVEST_FLOOR_HOLD_LOGGED.discard(cache_key)
+        if first_hold:
+            if sell_floor > 0:
+                _log(
+                    f"[Harvest] {clean_ticker} sell withheld: ${current_price:.4f} is below trailing stop "
+                    f"(peak ${float(dec_highest_price):.2f}, -{trailing_pct:.1f}%) but not above "
+                    f"break-even floor ${float(sell_floor):.4f} (avg ${float(to_decimal(h.avg_price)):.4f} + fees). "
+                    "Harvest does not sell below cost.",
+                    "INFO",
+                )
+            else:
+                _log(
+                    f"[Harvest] {clean_ticker} sell withheld: avg price unknown, cannot verify break-even.",
+                    "WARNING",
+                )
         # 회복하면 관측 횟수와 시각을 함께 되돌린다. 둘 중 하나만 지우면 다음 이탈에서
         # 남은 축이 이미 충족된 상태로 시작한다(방어 게이트에서 실제로 겪은 결함이다).
         with _breach_count_lock:
             BREACH_COUNT_CACHE.pop(cache_key, None)
         _clear_breach_clock()
         return None
+
+    with _breach_count_lock:
+        HARVEST_FLOOR_HOLD_LOGGED.discard(cache_key)
 
     # 노이즈 버퍼 - 순간적으로 찔렀다 돌아오는 꼬리에 털리지 않는다.
     #
@@ -1598,6 +1651,7 @@ async def _evaluate_harvest(
             "highest_price": float(dec_highest_price),
             "trailing_stop_pct": trailing_pct,
             "observed_base_price": float(observed_base),
+            "sell_floor_price": float(sell_floor),
         },
     )
     sell_reason = "수확 (급등 후 고점 이탈)"

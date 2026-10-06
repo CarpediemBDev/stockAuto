@@ -66,6 +66,16 @@ export function formatKrw(krwAmount: number): string {
 }
 
 /**
+ * USD 원금액을 표시 통화로 포맷한다. USD면 "$1,234.56"(소수 2자리), KRW면 환산 후 formatKrw.
+ * 보유 종목 화면의 가격은 전부 USD로 저장·전달되므로 표시 직전에만 이 함수로 바꾼다.
+ */
+export function formatUsdAs(usdAmount: number, currency: "KRW" | "USD", fxRate?: number | null): string {
+  return currency === "USD"
+    ? `$${usdAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : formatKrw(usdToKrw(usdAmount, fxRate));
+}
+
+/**
  * 시그널 스코어에 따른 텍스트/보더 색상 테마 반환 (80점 이상: rose/indigo, 60점 이상: amber, 기타: blue/zinc 계열)
  */
 export function getScoreColor(score: number): string {

@@ -89,7 +89,7 @@
 | 손절 (D절, `BaseStrategy`) | `max(3.0%, ATR% × 1.5)` | ATR% > 2.0% | **3.0%** |
 | 트레일링 (B절, `BaseStrategy`) | `max(2.0%, ATR% × 1.0)` | ATR% > 2.0% | **2.0%** |
 | 매수 수량 배율 (`vol_factor`) | `clamp(2.0 ÷ ATR%, 0.5, 1.5)` | ATR% > 1.33% | **1.5배** |
-| 수확 무장 / 트레일링 | `plans/holding_management_modes.md` 참조 | ATR% > 3.75% / 2.5% | **15% / 5%** |
+| 수확 무장 / 트레일링 | `plans/holding_management_modes.md` 참조 | 무장만 ATR% > 3.75% (트레일링은 2026-09-26부터 5% 고정) | **15% / 5%** |
 
 *   **전략별 차이:** 하위 전략이 `get_stop_loss_pct`·`get_trailing_stop_pct`의 base를 덮어쓰면 그 전략의 base가 실제 값이 됩니다(예: `asqs` 손절 6.0%, `cross_sectional_momentum` 손절 10.0%·트레일링 12.0%, `vcp_breakout` 손절 2.5% 고정).
 *   **예외:** 5분봉 ATR%가 하한 조건을 넘는 초변동성 페니주에서는 드물게 실제로 폭이 넓어집니다.

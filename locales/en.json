@@ -67,7 +67,9 @@
         "desc": "Slot cash is not enough for this order."
       }
     },
-    "harvest_armed": "🌾 <b>Harvest mode armed</b>\n\n<b>{ticker_name}</b> ({ticker})\nObserved base ${base_price:.2f} → now ${current_price:.2f} (<b>+{gain_pct:.1f}%</b>)\n\nTracking the peak from here; sells if it falls <b>{trailing_pct:.1f}%</b> from the peak.\nCurrent stop: about ${stop_price:.2f}\n\n<i>It will not sell below the observed base.</i>",
+    "harvest_armed": "🌾 <b>Harvest mode tracking started</b>\n\n<b>{ticker_name}</b> ({ticker})\nObserved base ${base_price:.2f} → now ${current_price:.2f} (<b>+{gain_pct:.1f}%</b>)\n\nTracking the peak from here. A sell order is attempted after a drop of <b>at least {trailing_pct:.1f}% from the peak</b> is confirmed on {sustain_cycles} or more consecutive checks and at least {sustain_minutes} minutes have passed since the first breach.\nCurrent sell threshold: about ${stop_price:.2f}\nThe threshold changes with the peak and volatility; the actual fill price may differ.\n\n<i>{floor_note} The gain shown is not a return on your purchase price.</i>",
+    "harvest_floor_known": "Harvest sell orders are attempted only above your break-even price (purchase price plus fees), about ${floor_price:.2f}. Harvest never sells below your purchase price.",
+    "harvest_floor_unknown": "Your purchase price is unknown, so harvest will not sell. Peak tracking and alerts continue.",
     "guard_alert": "🛡️ <b>{ticker_name} ({ticker}) — keeps getting worse</b>\n\nCompared with when you turned these alerts on\n· The price has fallen further   ${baseline_low:.2f} → <b>${current_price:.2f}</b>\n· The health score dropped too   {baseline_score:.0f} → <b>{current_score:.0f}</b>\n  <i>(the bot's 0-100 score for how sound the stock looks)</i>\n\n<b>The bot did not sell. Selling is your call.</b>\n\n<i>Whether it falls further or rebounds cannot be known. This is context, not a recommendation.</i>",
     "guard_shadow": "📝 <b>{ticker_name} ({ticker}) — this was a sell point</b>\n<b>Nothing was actually sold.</b>\n\nThe weakness held for more than {minutes} minutes.\nYou set this to 'Sell-point alerts', so the bot only tells you instead of selling.\n\n<b>Had it sold here</b>\n· <b>{sell_qty:,}</b> of {total_qty:,} shares\n· ${current_price:.2f} per share\n· about <b>${proceeds:,.0f}</b>\n\n<i>Compare this moment's price with today's later on, and you can judge for yourself whether the alert was useful.</i>"
   },
@@ -546,6 +548,9 @@
       "harvest_armed_tip": "A surge was confirmed and the peak is being tracked. It sells once the price falls the set amount from that peak.",
       "harvest_arm_threshold": "Arm threshold",
       "harvest_trailing_width": "Trailing width",
+      "harvest_floor": "Sell floor (break-even)",
+      "harvest_floor_unknown": "Purchase price unknown, so harvest will not sell",
+      "harvest_no_sell_zone": "The sell line is below your break-even price, so harvest will not sell right now. Harvest never sells below your purchase price.",
       "harvest_toggle_failed": "Could not change the harvest setting.",
       "guard_on": "Alerts on",
       "guard_off": "Alerts off",
@@ -592,7 +597,22 @@
       "history_col_price": "Fill Price",
       "history_col_qty": "Qty",
       "history_col_total": "Amount",
-      "history_col_pnl": "Realized PnL"
+      "history_col_pnl": "Realized PnL",
+      "info_action": "Stock info",
+      "info_levels_title": "Price levels",
+      "info_current_price": "Current price",
+      "info_peak": "Peak (while held)",
+      "info_risk_basis": "Delegation basis (stop-loss is measured from here)",
+      "info_harvest_arm": "Harvest tracking starts at",
+      "info_harvest_stop": "Harvest sell line",
+      "info_harvest_floor": "Harvest sell floor (break-even)",
+      "info_vs_current": "now {pct}",
+      "info_levels_hint": "The % on the right shows where the current price sits relative to each level. Prices come from the broker balance and the bot's stored state; the harvest line moves with the peak and volatility.",
+      "info_score_title": "Scanner score",
+      "info_news_title": "AI news analysis",
+      "info_no_news": "No recent news analysis for this stock.",
+      "info_not_scanned_title": "Not in the latest scan results",
+      "info_not_scanned_hint": "Scanner scores and news are only available for the top 10 market stocks and your watchlist. Add it to your watchlist to see them from the next scan."
     },
     "balance": {
       "load_failed": "Could not load account information",

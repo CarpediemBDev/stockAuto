@@ -268,7 +268,7 @@ graph TD
 
 - **`components/MarketHeader.tsx`**: 실시간 시장 지수 및 심리 상태 표시.
 
-- **`components/PortfolioView.tsx`**: 보유 종목 현황 및 트레일링 스탑 시각화.
+- **`components/PortfolioView.tsx`**: 보유 종목 현황 및 트레일링 스탑 시각화. 카드의 진입점은 둘로 나뉩니다. 종목명·코드와 뉴스 흐름 줄은 **종목 정보 모달**(`HoldingInfo.tsx`: 가격 기준선, 스캐너 점수, AI 뉴스)을 열고, 푸터의 "매수 이력" 버튼은 **체결 이력 모달**(`HoldingHistory.tsx`)을 엽니다. 이력 모달은 같은 종목 카드가 둘 이상일 때(SIMULATED 슬라이스 단위)만 카드의 전략으로 좁힙니다(`docs/API_STANDARD.md` 7절). 스캐너 채점표 표시는 `ScoreBreakdown.tsx`, 수확 기준선 계산은 `lib/holdingLevels.ts` 한 곳에서 합니다. 수확 매도 하한(본전가)은 서버가 내려준 `harvest_floor_price`를 그대로 쓰고, 매도 기준선이 하한 이하이면 "지금은 수확 매도가 일어나지 않음"을 표시합니다.
 
 - **`components/BotSignals.tsx`**: 봇이 실시간 탐지한 상위 시그널 표시 (Bot's View).
 

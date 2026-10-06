@@ -7,8 +7,9 @@
 여기서 고정하는 계약은 네 가지다.
   1. 기본값 off. 켜지 않으면 EXTERNAL은 여전히 봇이 아무것도 하지 않는다.
   2. 무장 전에는 아무것도 하지 않는다. 급등해야 감시가 시작된다.
-  3. 관측 시작가 아래에서는 절대 팔지 않는다 (하한 가드).
-  4. 앵커는 avg_price(본전)가 아니라 observed_base_price(봇이 처음 본 가격)다.
+  3. 매도 하한은 관측 시작가와 수수료 포함 본전가 중 높은 값이다. 매입가 아래에서는
+     수확으로 팔지 않는다(2026-09-24 HCTI 손실 수확 매도 이후).
+  4. 무장 앵커는 avg_price(본전)가 아니라 observed_base_price(봇이 처음 본 가격)다.
      본전을 앵커로 쓰면 반토막 종목은 영원히 무장되지 않는다.
 
 설계 정본은 docs/plans/holding_management_modes.md 5.2절.
@@ -16,8 +17,10 @@
 
 import asyncio
 from datetime import timedelta
+from html import escape, unescape
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine, inspect as sa_inspect
@@ -25,12 +28,17 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.bot.scheduler as scheduler
+import app.core.telegram as telegram
 import app.trades.router_account as account_router
+from decimal import Decimal
+
 from app.bot.trade_calculations import (
     HARVEST_SUSTAIN_MINUTES,
+    calculate_realized_pnl,
     check_harvest_arm,
     check_harvest_breach,
     get_harvest_arm_pct,
+    get_harvest_floor_price,
     get_harvest_trailing_pct,
 )
 from app.core.database import Base
@@ -44,6 +52,20 @@ from app.core.models import (
     UserSettings,
     utc_now_aware,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_harvest_memory():
+    """사이클 간 인메모리 상태(이탈 횟수, 하한 보류 로그 표식)를 테스트마다 비운다.
+
+    모든 테스트가 같은 (user 1, HCTI, external) 키를 쓰므로 앞 테스트의 잔여 값이 뒤 테스트의
+    판정·로그를 바꾼다. 운영에서는 재기동이 이 초기화에 해당한다.
+    """
+    scheduler.BREACH_COUNT_CACHE.clear()
+    scheduler.HARVEST_FLOOR_HOLD_LOGGED.clear()
+    yield
+    scheduler.BREACH_COUNT_CACHE.clear()
+    scheduler.HARVEST_FLOOR_HOLD_LOGGED.clear()
 
 
 def _age_breach(db, holding_id, minutes=HARVEST_SUSTAIN_MINUTES + 1):
@@ -72,10 +94,13 @@ def test_arm_threshold_scales_with_volatility():
     assert get_harvest_arm_pct(0.0, 1.0) == 15.0
 
 
-def test_trailing_is_wider_than_bot_positions():
-    """수확 트레일링은 봇 진입분(최소 2%, ATR 1배)보다 넓다."""
-    assert get_harvest_trailing_pct(0.01, 1.0) == 5.0    # 하한
-    assert get_harvest_trailing_pct(0.10, 1.0) == 20.0   # ATR 10% * 2.0
+def test_trailing_is_fixed_five_percent():
+    """수확 트레일링 폭은 ATR과 무관하게 고점 대비 5%다.
+
+    예전 max(5%, 5분봉 ATR% x 2)는 급등 중에 20~60%로 부풀어 "고점에서 5% 꺾이면 판다"는
+    의도가 정작 필요한 순간에 깨졌다(2026-09-24 HCTI 20.7%). 2026-09-26 시뮬레이션으로 고정 5% 채택.
+    """
+    assert get_harvest_trailing_pct() == 5.0
 
 
 def test_arm_requires_gain_above_threshold():
@@ -221,12 +246,14 @@ def test_disabled_harvest_does_nothing_even_on_huge_spike(monkeypatch):
     db.close()
 
 
-def test_full_harvest_lifecycle_on_halved_position(monkeypatch):
-    """반토막 종목의 전체 수명주기: 관측 -> 무장 -> 추적 -> 노이즈 버퍼 -> 수확."""
+def test_full_harvest_lifecycle_on_dipped_position(monkeypatch):
+    """물린 종목의 전체 수명주기: 관측 -> 무장 -> 추적 -> 노이즈 버퍼 -> 수확.
+
+    본전 $60에서 $50까지 빠졌다가 $90까지 급등 후 꺾이는 상황. 매도가 $83은 본전가 위라서 판다.
+    """
     db = _make_db()
     user = _make_user(db)
-    # 본전 $100, 현재 $50 언저리로 반토막 난 상태.
-    holding = _add_holding(db, user, harvest_enabled=True, avg_price=100.0, highest_price=50.0)
+    holding = _add_holding(db, user, harvest_enabled=True, avg_price=60.0, highest_price=50.0)
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
     broker = _Broker()
 
@@ -270,6 +297,77 @@ def test_full_harvest_lifecycle_on_halved_position(monkeypatch):
     db.close()
 
 
+@pytest.mark.parametrize("lang", ["ko", "en"])
+@pytest.mark.parametrize(
+    "ticker,ticker_name",
+    [("HCTI", "Health & Care <Labs> _One_"), ("HC&T<I>", None)],
+)
+def test_harvest_alert_reaches_transport_with_html_and_actual_conditions(monkeypatch, lang, ticker, ticker_name):
+    """실제 수확 사이클부터 HTTP 경계까지 서식·문자 보존·조건 안내를 확인한다."""
+    db = _make_db()
+    user = _make_user(db)
+    holding = _add_holding(
+        db, user, ticker=ticker, ticker_name=ticker_name, harvest_enabled=True,
+    )
+    broker = _Broker()
+    payloads = []
+    futures = []
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+    monkeypatch.setattr(scheduler, "_resolve_lang", lambda _user_id: lang)
+    # 조건이 바뀌어도 안내가 기존 숫자에 머무르지 않아야 한다.
+    monkeypatch.setattr(scheduler, "HARVEST_SUSTAIN_CYCLES", 3)
+    monkeypatch.setattr(scheduler, "HARVEST_SUSTAIN_MINUTES", 4)
+    monkeypatch.setattr(telegram.settings, "TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setattr(telegram, "resolve_target_chat_id", lambda user_id, db=None: "test-chat")
+
+    def fake_post(_client, url, *, json, timeout):
+        payloads.append(json)
+        return httpx.Response(200, json={"ok": True})
+
+    def capture_send(*args, **kwargs):
+        future = telegram.send_message_async(*args, **kwargs)
+        futures.append(future)
+        return future
+
+    monkeypatch.setattr(httpx.Client, "post", fake_post)
+    monkeypatch.setattr(scheduler, "send_message_async", capture_send)
+    try:
+        _run_cycle(db, user, broker, holding, price=0.75, atr=0.001)
+        assert futures == []
+        _run_cycle(db, user, broker, holding, price=0.87, atr=0.001)
+        _run_cycle(db, user, broker, holding, price=0.90, atr=0.001)
+        assert len(futures) == 1  # 추적 시작 이후 고점 갱신 때마다 재전송하지 않는다.
+        assert futures[0].result(timeout=5) is True
+        assert broker.sell_calls == []
+        assert len(payloads) == 1
+        payload = payloads[0]
+        assert payload["chat_id"] == "test-chat"
+        assert payload["parse_mode"] == "HTML"
+        text = payload["text"]
+        assert f"<b>{escape(ticker_name or ticker)}</b> ({escape(ticker)})" in text
+        assert (ticker_name or ticker) in unescape(text)
+        assert all(value in text for value in ("$0.75", "$0.87", "+16.0%", "5.0%", "$0.83"))
+        assert "{" not in text and "}" not in text  # 번역 포맷 실패로 원문이 반환되면 안 된다.
+        if lang == "ko":
+            assert "추적 시작" in text
+            assert "3회 이상 연속" in text and "최소 4분" in text
+            assert "매도 주문을 시도" in text
+            assert "본전가(매입가+수수료) 약 $100.20를 웃돌 때만" in text
+            assert "매입가 아래에서는 수확으로 팔지 않습니다" in text
+            assert "매입가 기준 수익률이 아닙니다" in text
+        else:
+            assert "tracking started" in text
+            assert "3 or more consecutive checks" in text and "at least 4 minutes" in text
+            assert "sell order is attempted" in text
+            assert "above your break-even price" in text and "$100.20" in text
+            assert "never sells below your purchase price" in text
+            assert "not a return on your purchase price" in text
+    finally:
+        for future in futures:
+            future.result(timeout=5)
+        db.close()
+
+
 def test_crash_below_observed_base_is_never_sold(monkeypatch):
     """무장 후 폭락 - 관측 시작가 아래로 떨어지면 팔지 않고 사용자에게 돌려둔다."""
     db = _make_db()
@@ -295,7 +393,7 @@ def test_recovery_between_breaches_resets_noise_buffer(monkeypatch):
     """한 번 찔렀다 회복하면 카운터가 리셋되어 꼬리에 털리지 않는다."""
     db = _make_db()
     user = _make_user(db)
-    holding = _add_holding(db, user, harvest_enabled=True, avg_price=100.0, highest_price=50.0)
+    holding = _add_holding(db, user, harvest_enabled=True, avg_price=60.0, highest_price=50.0)
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
     broker = _Broker()
 
@@ -365,6 +463,8 @@ def test_toggle_off_also_disarms():
     )
     assert result["harvest_enabled"] is False
     assert result["harvest_armed"] is False
+    # 화면이 보여주는 하한은 스케줄러와 같은 함수 값이다(평단 100, 관측가 50 -> 본전가).
+    assert result["harvest_floor_price"] == pytest.approx(100.2030)
 
     back_on = account_router.update_holding_management(
         ticker="HCTI",
@@ -386,7 +486,7 @@ def test_recovery_clears_both_buffer_axes(monkeypatch):
     """
     db = _make_db()
     user = _make_user(db)
-    holding = _add_holding(db, user, harvest_enabled=True, avg_price=100.0, highest_price=50.0)
+    holding = _add_holding(db, user, harvest_enabled=True, avg_price=60.0, highest_price=50.0)
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
     broker = _Broker()
 
@@ -414,7 +514,7 @@ def test_restart_does_not_reset_the_breach_clock(monkeypatch):
     """
     db = _make_db()
     user = _make_user(db)
-    holding = _add_holding(db, user, harvest_enabled=True, avg_price=100.0, highest_price=50.0)
+    holding = _add_holding(db, user, harvest_enabled=True, avg_price=60.0, highest_price=50.0)
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
     broker = _Broker()
 
@@ -458,7 +558,7 @@ def test_thresholds_are_recorded_even_while_harvest_is_off(monkeypatch):
     refreshed = db.query(Holding).filter_by(id=holding.id).one()
     # ATR% = 1.0/50.0 = 2% → 무장 min(40, max(15, 8)) = 15, 트레일링 max(5, 4) = 5
     assert refreshed.harvest_arm_pct == pytest.approx(get_harvest_arm_pct(1.0, 50.0))
-    assert refreshed.harvest_trailing_pct == pytest.approx(get_harvest_trailing_pct(1.0, 50.0))
+    assert refreshed.harvest_trailing_pct == pytest.approx(get_harvest_trailing_pct())
     assert refreshed.harvest_enabled is False  # 기록이 스위치를 켜지는 않는다
     db.close()
 
@@ -476,10 +576,10 @@ def test_thresholds_follow_volatility_across_cycles(monkeypatch):
     _run_cycle(db, user, _Broker(), holding, price=50.0, atr=5.0)
     volatile = db.query(Holding).filter_by(id=holding.id).one()
 
-    # ATR% 2% → 무장 15%(하한). ATR% 10% → 40%(상한에 걸림).
+    # ATR% 2% → 무장 15%(하한). ATR% 10% → 40%(상한에 걸림). 트레일링은 변동성과 무관하게 5%.
     assert calm == pytest.approx(15.0)
     assert volatile.harvest_arm_pct == pytest.approx(40.0)
-    assert volatile.harvest_trailing_pct == pytest.approx(20.0)
+    assert volatile.harvest_trailing_pct == pytest.approx(5.0)
     db.close()
 
 
@@ -544,5 +644,156 @@ def test_threshold_record_leaves_the_shared_holding_clean(monkeypatch):
     # 값은 DB에 정상적으로 남아 있어야 한다 - 깨끗함을 얻자고 기록을 포기한 것이 아니다.
     stored = db.query(Holding).filter_by(id=holding.id).one()
     assert stored.harvest_arm_pct == pytest.approx(get_harvest_arm_pct(1.0, 50.0))
-    assert stored.harvest_trailing_pct == pytest.approx(get_harvest_trailing_pct(1.0, 50.0))
+    assert stored.harvest_trailing_pct == pytest.approx(get_harvest_trailing_pct())
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# 본전가 하한 (2026-09-24)
+#
+# 관측 시작가만 하한으로 쓰던 시절, 매입가 $1.49·관측가 $0.75인 HCTI가 $1.60까지 반등했다가
+# $1.19로 꺾이자 수확으로 전량 매도되어 -$1,374가 확정됐다. 수확은 "올라갔을 때 판다"는 기능이므로
+# 매입가 아래 매도는 계약 위반이다. 하한 = max(관측 시작가, 수수료 포함 본전가).
+# ---------------------------------------------------------------------------
+
+def test_floor_is_exact_break_even_after_fees():
+    """하한에서 팔면 순손익이 0 이상이고, 한 틱 아래에서 팔면 손실이다(calculate_realized_pnl 기준)."""
+    fee = Decimal("0.0010")
+    floor = get_harvest_floor_price(0.75, 1.4852, fee)
+    assert floor == Decimal("1.4883")
+
+    qty = 100000  # 수량이 커야 소수 넷째 자리 양자화에 가리지 않고 차이가 드러난다.
+    at_floor = calculate_realized_pnl(1.4852, floor, qty, fee)
+    below = calculate_realized_pnl(1.4852, floor - Decimal("0.0001"), qty, fee)
+    assert at_floor.realized_pnl >= 0
+    assert below.realized_pnl < 0
+
+
+def test_floor_takes_the_higher_of_base_and_break_even():
+    fee = Decimal("0.0010")
+    # 이익 구간에서 관측이 시작됐으면 관측 시작가가 하한이다(종전 동작 유지).
+    assert get_harvest_floor_price(50.0, 40.0, fee) == Decimal("50.0")
+    # 물린 종목은 본전가가 하한이다.
+    assert get_harvest_floor_price(50.0, 100.0, fee) == Decimal("100.2030")
+    # 평단을 모르면 0 -> check_harvest_breach가 판정 불가로 보고 팔지 않는다.
+    assert get_harvest_floor_price(50.0, 0, fee) == Decimal("0")
+    assert get_harvest_floor_price(50.0, None, fee) == Decimal("0")
+    assert check_harvest_breach(85.0, 90.0, 5.0, get_harvest_floor_price(50.0, None, fee)) is False
+
+
+def test_underwater_spike_is_not_harvested_below_cost(monkeypatch):
+    """본전 $100, 관측 $50, $90 급등 후 $83 꺾임 - 종전에는 팔렸지만 이제는 보유를 유지한다."""
+    db = _make_db()
+    user = _make_user(db)
+    holding = _add_holding(db, user, harvest_enabled=True, avg_price=100.0, highest_price=50.0)
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+    broker = _Broker()
+
+    _run_cycle(db, user, broker, holding, price=50.0)
+    _run_cycle(db, user, broker, holding, price=90.0)   # 무장, 고점 90
+    assert db.query(Holding).one().harvest_armed is True
+
+    _run_cycle(db, user, broker, holding, price=84.0)
+    _run_cycle(db, user, broker, holding, price=83.5)
+    _age_breach(db, holding.id)
+    _run_cycle(db, user, broker, holding, price=83.0)
+
+    assert broker.sell_calls == []
+    row = db.query(Holding).one()
+    assert row.quantity == 100
+    # 본전가 아래에서는 이탈 시계도 돌리지 않는다 - 나중에 본전 위로 올라왔을 때 옛 시계를 물려받지 않게.
+    assert row.harvest_breach_started_at is None
+    withheld = [m for m in _logs(db, user) if "sell withheld" in m]
+    assert len(withheld) == 1, withheld   # 이탈 구간당 한 번만 남긴다.
+    assert "$100.2030" in withheld[0]
+    assert not any("EXIT SIGNAL" in m for m in _logs(db, user))
+    db.close()
+
+
+def test_underwater_spike_sells_only_inside_the_band_above_cost(monkeypatch):
+    """본전 $80, 관측 $50, 고점 $90, 폭 5% -> 기준선 $85.5가 본전가($80.16) 위라서 그 사이에서는 판다."""
+    db = _make_db()
+    user = _make_user(db)
+    holding = _add_holding(db, user, harvest_enabled=True, avg_price=80.0, highest_price=50.0)
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+    broker = _Broker()
+
+    _run_cycle(db, user, broker, holding, price=50.0)
+    _run_cycle(db, user, broker, holding, price=90.0)
+    _run_cycle(db, user, broker, holding, price=85.0)
+    _run_cycle(db, user, broker, holding, price=84.0)
+    _age_breach(db, holding.id)
+    _run_cycle(db, user, broker, holding, price=83.0)
+
+    assert broker.sell_calls == [("HCTI", 100)]
+    assert not any("sell withheld" in m for m in _logs(db, user))
+    db.close()
+
+
+def test_hcti_2026_09_24_replay_is_not_sold(monkeypatch):
+    """실측 재현: 평단 $1.4852, 관측 $0.75, 고점 $1.60, 트레일링 약 20%, $1.19 - 팔지 않는다."""
+    db = _make_db()
+    user = _make_user(db)
+    holding = _add_holding(
+        db, user, harvest_enabled=True, avg_price=1.4852, quantity=4762, highest_price=0.75,
+    )
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+    broker = _Broker()
+
+    _run_cycle(db, user, broker, holding, price=0.75, atr=0.12)
+    _run_cycle(db, user, broker, holding, price=1.20, atr=0.12)   # +60% -> 무장(상한 40%)
+    _run_cycle(db, user, broker, holding, price=1.60, atr=0.12)   # 고점
+    assert db.query(Holding).one().harvest_armed is True
+
+    _run_cycle(db, user, broker, holding, price=1.19, atr=0.12)
+    _run_cycle(db, user, broker, holding, price=1.19, atr=0.12)
+    _age_breach(db, holding.id)
+    _run_cycle(db, user, broker, holding, price=1.19, atr=0.12)
+
+    assert broker.sell_calls == []
+    assert db.query(Holding).one().quantity == 4762
+    db.close()
+
+
+def test_unknown_avg_price_never_harvests(monkeypatch):
+    """평단을 확인할 수 없으면 본전 여부를 판단할 수 없으므로 팔지 않고 경고를 남긴다."""
+    db = _make_db()
+    user = _make_user(db)
+    holding = _add_holding(db, user, harvest_enabled=True, avg_price=0.0, highest_price=50.0)
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+    broker = _Broker()
+
+    _run_cycle(db, user, broker, holding, price=50.0)
+    _run_cycle(db, user, broker, holding, price=90.0)
+    _run_cycle(db, user, broker, holding, price=84.0)
+    _age_breach(db, holding.id)
+    _run_cycle(db, user, broker, holding, price=83.0)
+
+    assert broker.sell_calls == []
+    assert any("avg price unknown" in m for m in _logs(db, user))
+    db.close()
+
+
+def test_trailing_stays_five_percent_during_volatile_spike(monkeypatch):
+    """급등으로 ATR이 치솟아도 매도선은 고점 -5%다.
+
+    본전 $0.80, 관측 $0.80, 고점 $1.60에서 $1.50(-6.25%)로 꺾인 상황. 5분봉 ATR $0.40(ATR% 약 27%)이면
+    예전 규칙은 폭 53%(매도선 $0.75)라 본전 아래로 떨어질 때까지 팔지 못했다. 고정 5%는 $1.52 아래에서 판다.
+    """
+    db = _make_db()
+    user = _make_user(db)
+    holding = _add_holding(db, user, harvest_enabled=True, avg_price=0.80, highest_price=0.80)
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
+    broker = _Broker()
+
+    _run_cycle(db, user, broker, holding, price=0.80, atr=0.001)
+    _run_cycle(db, user, broker, holding, price=1.20, atr=0.40)   # 무장
+    _run_cycle(db, user, broker, holding, price=1.60, atr=0.40)   # 고점
+    _run_cycle(db, user, broker, holding, price=1.50, atr=0.40)
+    _run_cycle(db, user, broker, holding, price=1.50, atr=0.40)
+    _age_breach(db, holding.id)
+    _run_cycle(db, user, broker, holding, price=1.50, atr=0.40)
+
+    assert broker.sell_calls == [("HCTI", 100)]
+    assert any("-5.0%" in m for m in _logs(db, user) if "EXIT SIGNAL" in m)
     db.close()
