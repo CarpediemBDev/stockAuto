@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from 'react';
 import {
-  Target, MessageSquare, ExternalLink,
+  Target,
   TrendingUp, TrendingDown, Newspaper, ArrowUpRight, ArrowDownRight, Info, ShieldAlert, Sprout,
   SlidersHorizontal, HandCoins, History
 } from 'lucide-react';
@@ -15,6 +15,8 @@ import { Modal } from '@/components/ui';
 import { useTranslations } from "next-intl";
 import { useStrategyCatalog } from "@/hooks/useStrategyCatalog";
 import { HoldingHistory } from "@/components/HoldingHistory";
+import { HoldingInfo, type HoldingScanSignal } from "@/components/HoldingInfo";
+import { harvestLevels } from "@/lib/holdingLevels";
 
 interface Holding {
   id: number;
@@ -48,6 +50,8 @@ interface Holding {
    */
   harvest_arm_pct?: number | null;
   harvest_trailing_pct?: number | null;
+  /** 수확 매도 하한(수수료 포함 본전가와 관측 시작가 중 높은 값). 평단을 모르면 null. */
+  harvest_floor_price?: number | null;
   /** 방어 경보 - EXTERNAL 전용 opt-in. 기본값에서는 알림만 보내고 매도는 하지 않는다. */
   guard_enabled?: boolean;
   /** 방어 조건 충족 시 동작. 기본 ALERT_ONLY. LIQUIDATE만 실제로 매도한다. */
@@ -73,16 +77,11 @@ interface SellPreview {
   estimated_return_rate: number;
 }
 
-interface NewsInfo {
-  sentiment: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL';
-  sentiment_score: number;
-  summary: string;
-  url?: string;
-}
-
 const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | "USD" }) => {
   const t = useTranslations("components");
-  const [activeNewsItem, setActiveNewsItem] = useState<{ ticker: string; name: string; news: NewsInfo } | null>(null);
+  // 종목 정보 모달의 대상. 종목명·코드와 뉴스 흐름 줄이 여는 곳이다. 체결 이력은 푸터 버튼만 연다 -
+  // 같은 모달로 가는 입구가 둘이면 종목명 클릭이 "이 종목 지금 어떤가"에 답하지 못한다.
+  const [infoTarget, setInfoTarget] = useState<Holding | null>(null);
 
   // 매도는 되돌릴 수 없으므로 2단계다 - 먼저 서버 프리뷰를 받아 보여주고, 사용자가 확인 버튼을
   // 누르면 그때 실제 주문이 나간다. pendingTicker는 중복 탭 가드를 겸한다.
@@ -223,21 +222,23 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
 
   const { data: scannerData } = useSWR('/scanner/latest', fetcher, { refreshInterval: pollInterval(60000) });
 
-  const newsMap = React.useMemo(() => {
-    const map: Record<string, NewsInfo> = {};
+  // 티커 → 스캐너 신호. 응답은 시장 상위 10개 + 관심종목뿐이라 보유 종목이 없을 수 있다(정보 모달이 안내).
+  const signalMap = React.useMemo(() => {
+    const map: Record<string, HoldingScanSignal> = {};
     const signals = scannerData ? (Array.isArray(scannerData) ? scannerData : (scannerData.signals || [])) : [];
     for (const item of signals) {
-      if (item.news_summary && item.news_sentiment) {
-        map[item.ticker] = {
-          sentiment: item.news_sentiment,
-          sentiment_score: item.news_sentiment_score ?? 50,
-          summary: item.news_summary,
-          url: item.news_url,
-        };
-      }
+      if (item?.ticker) map[String(item.ticker).toUpperCase()] = item;
     }
     return map;
   }, [scannerData]);
+
+  // 같은 티커의 카드 수. SIMULATED는 슬라이스마다 카드가 한 장이라 2장 이상이면 카드가 슬라이스 단위다.
+  // KIS·Toss는 티커당 한 장으로 합쳐 오고 strategy_type은 여러 슬라이스 중 하나일 뿐이다.
+  const cardCountByTicker = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const h of (holdingsData || []) as Holding[]) counts[h.ticker] = (counts[h.ticker] || 0) + 1;
+    return counts;
+  }, [holdingsData]);
 
   if (isLoading) return <div className="text-zinc-500 text-sm p-8 text-center animate-pulse">Loading portfolio...</div>;
 
@@ -260,6 +261,9 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
       ) ?? null
     : null;
 
+  // 수확 기준선은 종목 정보 모달과 같은 계산(lib/holdingLevels)을 쓴다.
+  const delegationLevels = delegationHolding ? harvestLevels(delegationHolding) : null;
+
   // 이력 모달도 같은 규칙을 따른다. 전량 매도로 보유분이 사라지면 요약(평단가·수량)이
   // 실재하지 않는 포지션을 가리키게 되므로 닫는다. 지나간 체결은 대시보드의 전체 거래 로그에 남는다.
   const historyHolding = historyTarget
@@ -268,9 +272,11 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
       ) ?? null
     : null;
 
-  const selectedNews = activeNewsItem?.news;
-  const isPositive = selectedNews?.sentiment === 'POSITIVE';
-  const isNegative = selectedNews?.sentiment === 'NEGATIVE';
+  const infoHolding = infoTarget
+    ? holdings.find(
+        (x) => x.ticker === infoTarget.ticker && x.strategy_type === infoTarget.strategy_type,
+      ) ?? null
+    : null;
 
   return (
     <>
@@ -288,7 +294,8 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
           const currentPrice = h.current_price !== undefined ? h.current_price : h.avg_price * 1.02;
           const profitRate = h.avg_price > 0 ? ((currentPrice - h.avg_price) / h.avg_price) * 100 : 0;
           const dropFromPeak = h.highest_price > 0 ? ((currentPrice - h.highest_price) / h.highest_price) * 100 : 0;
-          const news = newsMap[cleanTicker];
+          const signal = signalMap[cleanTicker.toUpperCase()];
+          const news = signal?.news_summary ? signal : undefined;
           const isProfitable = profitRate >= 0;
 
           return (
@@ -299,16 +306,15 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
               <div className="flex justify-between items-start mb-4">
                 <div className="min-w-0 flex-1 mr-3">
                   <h4 className="text-xs font-bold text-zinc-400 tracking-wider uppercase flex items-center gap-1.5 flex-wrap">
-                    {/* 티커 자체가 이력 진입점이다 - 사용자가 "이 종목을 언제 샀나"를 물을 때
-                        가장 먼저 누르는 곳이 종목 코드다. 아래 푸터에도 같은 진입점을 둔다. */}
+                    {/* 종목 코드·이름은 종목 정보(점수·뉴스·기준선)를 연다. 체결 이력은 푸터 버튼 전용이다. */}
                     <button
                       type="button"
-                      onClick={() => setHistoryTarget(h)}
-                      title={t("portfolio.history_action")}
+                      onClick={() => setInfoTarget(h)}
+                      title={t("portfolio.info_action")}
                       className="inline-flex items-center gap-1 text-zinc-300 hover:text-indigo-300 hover:underline underline-offset-2 decoration-dotted transition-colors cursor-pointer"
                     >
                       {cleanTicker}
-                      <History size={10} className="text-zinc-600 group-hover:text-indigo-400 transition-colors" />
+                      <Info size={10} className="text-zinc-600 group-hover:text-indigo-400 transition-colors" />
                     </button>
                     {/* EXTERNAL은 서버가 strategy_name을 "봇 관리 안 함"으로 치환해 내려주므로
                         아래 전용 배지와 문구가 겹친다. 관할권 표시는 전용 배지 하나로만 한다. */}
@@ -364,7 +370,16 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                     </span>
                   </h4>
                   <div className="flex items-baseline gap-2 mt-0.5">
-                    <h3 className="text-base font-bold text-slate-100 truncate">{h.ticker_name}</h3>
+                    <h3 className="min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => setInfoTarget(h)}
+                        title={t("portfolio.info_action")}
+                        className="block max-w-full text-base font-bold text-slate-100 truncate hover:text-indigo-300 transition-colors cursor-pointer text-left"
+                      >
+                        {h.ticker_name}
+                      </button>
+                    </h3>
                     <span className={`text-xs font-bold font-mono shrink-0 ${getProfitColor(profitRate)}`}>
                       {displayCurrency === "USD"
                         ? `$${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
@@ -376,26 +391,26 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                   {/* 뉴스 마퀴 — 스캐너에서 뉴스 있을 때만 표시 */}
                   {news && (
                     <button
-                      onClick={() => setActiveNewsItem({ ticker: cleanTicker, name: h.ticker_name, news })}
+                      onClick={() => setInfoTarget(h)}
                       className="mt-1.5 overflow-hidden w-full text-left cursor-pointer"
                       title={t("common.news_click")}
                     >
                       <div className={cn(
                         'flex items-center gap-1 text-[9px] font-bold',
-                        news.sentiment === 'POSITIVE' ? 'text-emerald-400' :
-                        news.sentiment === 'NEGATIVE' ? 'text-rose-400' :
+                        news.news_sentiment === 'POSITIVE' ? 'text-emerald-400' :
+                        news.news_sentiment === 'NEGATIVE' ? 'text-rose-400' :
                         'text-sky-400'
                       )}>
-                        {news.sentiment === 'POSITIVE' ? (
+                        {news.news_sentiment === 'POSITIVE' ? (
                           <TrendingUp size={8} className="shrink-0" />
-                        ) : news.sentiment === 'NEGATIVE' ? (
+                        ) : news.news_sentiment === 'NEGATIVE' ? (
                           <TrendingDown size={8} className="shrink-0" />
                         ) : (
                           <Newspaper size={8} className="shrink-0" />
                         )}
                         <span className="overflow-hidden flex-1">
                           <span className="portfolio-news-ticker opacity-75 hover:opacity-100">
-                            {news.summary}
+                            {news.news_summary}
                           </span>
                         </span>
                       </div>
@@ -539,8 +554,9 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
       >
         {historyHolding && (
           <HoldingHistory
-            // 티커가 바뀌면 모달 내부 상태를 새로 만든다. 이전 종목의 이력이 잠깐 비치지 않게 한다.
-            key={historyHolding.ticker}
+            // 카드 단위((ticker, strategy_type))가 바뀌면 모달 내부 상태를 새로 만든다.
+            // 티커만으로 키를 잡으면 같은 종목의 다른 전략 카드로 옮겨도 이전 이력이 남는다.
+            key={`${historyHolding.ticker}:${historyHolding.strategy_type ?? ''}`}
             displayCurrency={displayCurrency}
             target={{
               ticker: historyHolding.ticker.replace(/^[A-Z0-9]+_/, ""),
@@ -548,6 +564,12 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
               avg_price: historyHolding.avg_price,
               quantity: historyHolding.quantity,
               fx_rate: historyHolding.fx_rate,
+              // 카드가 슬라이스 단위일 때만 전략으로 좁힌다. 요약(평단가·수량)과 체결 목록이 같은
+              // 범위를 가리켜야 대조가 된다. 합쳐진 카드에서 좁히면 반대로 다른 슬라이스 체결이 빠진다.
+              strategy_type:
+                (cardCountByTicker[historyHolding.ticker] ?? 0) > 1
+                  ? historyHolding.strategy_type
+                  : undefined,
             }}
           />
         )}
@@ -669,13 +691,10 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                       <dt className="text-zinc-500">{t("portfolio.harvest_arm_threshold")}</dt>
                       <dd className="text-right font-mono text-slate-300">
                         +{delegationHolding.harvest_arm_pct.toFixed(1)}%
-                        {(delegationHolding.observed_base_price ?? delegationHolding.current_price) != null && (
+                        {delegationLevels?.armPrice != null && (
                           <span className="text-zinc-500">
                             {" · "}
-                            {`$${(
-                              (delegationHolding.observed_base_price ?? delegationHolding.current_price ?? 0) *
-                              (1 + delegationHolding.harvest_arm_pct / 100)
-                            ).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                            {`$${delegationLevels.armPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                           </span>
                         )}
                       </dd>
@@ -686,19 +705,26 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
                       <dt className="text-zinc-500">{t("portfolio.harvest_trailing_width")}</dt>
                       <dd className="text-right font-mono text-slate-300">
                         -{delegationHolding.harvest_trailing_pct.toFixed(1)}%
-                        {delegationHolding.harvest_armed && delegationHolding.highest_price > 0 && (
+                        {delegationLevels?.stopPrice != null && (
                           <span className="text-zinc-500">
                             {" · "}
-                            {`$${(
-                              delegationHolding.highest_price *
-                              (1 - delegationHolding.harvest_trailing_pct / 100)
-                            ).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                            {`$${delegationLevels.stopPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                           </span>
                         )}
                       </dd>
                     </>
                   )}
+                  {/* 기준선을 이탈해도 하한 이하에서는 팔지 않는다. 매입가 아래 수확 매도를 막는 선이다. */}
+                  <dt className="text-zinc-500">{t("portfolio.harvest_floor")}</dt>
+                  <dd className="text-right font-mono text-slate-300">
+                    {delegationLevels?.floorPrice != null
+                      ? `$${delegationLevels.floorPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                      : <span className="text-amber-400/90 font-sans">{t("portfolio.harvest_floor_unknown")}</span>}
+                  </dd>
                 </dl>
+              )}
+              {delegationLevels?.noSellZone && (
+                <p className="text-[11px] text-amber-400/90 leading-relaxed">{t("portfolio.harvest_no_sell_zone")}</p>
               )}
             </div>
 
@@ -873,94 +899,28 @@ const PortfolioView = ({ displayCurrency = "KRW" }: { displayCurrency?: "KRW" | 
         </div>
       )}
 
-      {/* AI 뉴스 분석 모달 */}
+      {/* 종목 정보 모달 — ① 스캐너 점수 ② AI 뉴스 ③ 가격 기준선. 카드가 이미 가진 값만 쓴다 */}
       <Modal
-        isOpen={!!activeNewsItem}
-        onClose={() => setActiveNewsItem(null)}
+        isOpen={!!infoHolding}
+        onClose={() => setInfoTarget(null)}
         maxWidth="lg"
         title={
-          activeNewsItem && (
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
-                <MessageSquare size={18} />
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-white tracking-wide uppercase">AI Sentiment & Signals</h3>
-                <p className="text-[10px] text-zinc-500 font-mono tracking-wider mt-0.5">
-                  {activeNewsItem.name} ({activeNewsItem.ticker})
-                </p>
-              </div>
-            </div>
-          )
+          infoHolding ? (
+            <span className="flex items-center gap-2">
+              <Info size={16} className="text-indigo-400" />
+              <span className="font-mono">{infoHolding.ticker.replace(/^[A-Z0-9]+_/, "")}</span>
+              <span className="text-zinc-400 font-normal text-sm">{infoHolding.ticker_name}</span>
+            </span>
+          ) : undefined
         }
       >
-        {selectedNews && (
-          <div className="flex flex-col gap-4">
-            {/* 뉴스 심리 스펙트럼 */}
-            <div className="bg-surface-card-subtle p-4 rounded-xl border border-zinc-800 shadow-inner">
-              <div className="flex justify-between items-center text-[10px] text-zinc-500 font-extrabold tracking-wide mb-2.5">
-                <span>BEARISH 📉</span>
-                <span className="text-xs font-black text-white font-mono flex items-center gap-1.5">
-                  {t("common.sentiment_label")}
-                  <span className={cn(
-                    'px-1.5 py-0.5 rounded text-[10px] font-mono',
-                    selectedNews.sentiment_score >= 60 ? 'bg-emerald-500/10 text-emerald-400' :
-                    selectedNews.sentiment_score <= 40 ? 'bg-rose-500/10 text-rose-400' :
-                    'bg-zinc-800 text-zinc-400'
-                  )}>
-                    {selectedNews.sentiment_score}%
-                  </span>
-                </span>
-                <span>BULLISH 📈</span>
-              </div>
-              <div className="relative w-full h-1.5 bg-gradient-to-r from-rose-500/70 via-amber-400/70 to-emerald-500/70 rounded-full border border-zinc-900 shadow-inner">
-                <div
-                  className="absolute w-3 h-3 -top-0.5 bg-white rounded-full border border-zinc-950 -translate-x-1/2 shadow-[0_0_12px_rgba(255,255,255,0.9)] animate-pulse transition-all duration-1000 ease-out"
-                  style={{ left: `${selectedNews.sentiment_score}%` }}
-                />
-              </div>
-            </div>
-
-            {/* AI 요약 */}
-            <div className="bg-surface-card-subtle/90 border border-zinc-800 p-5 rounded-xl shadow-inner flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <span className={cn(
-                  'text-[9px] font-black px-2 py-0.5 rounded border tracking-widest',
-                  isPositive ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                  isNegative ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
-                  'bg-zinc-500/10 text-zinc-400 border-zinc-800'
-                )}>
-                  {selectedNews.sentiment}
-                </span>
-                <span className="text-[9px] text-zinc-500 font-bold font-mono tracking-wider">AI REAL-TIME ANALYSIS</span>
-              </div>
-              <div className="relative pl-4 border-l-2 border-indigo-500/30">
-                <p className="text-xs text-zinc-300 font-semibold leading-relaxed tracking-wide">
-                  {selectedNews.summary}
-                </p>
-              </div>
-              {selectedNews.url && (
-                <a
-                  href={selectedNews.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="self-end flex items-center gap-1.5 text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors font-black uppercase tracking-widest group/link"
-                >
-                  {t("common.read_article")}
-                  <ExternalLink size={11} className="group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5 transition-transform" />
-                </a>
-              )}
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <button
-                onClick={() => setActiveNewsItem(null)}
-                className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-bold transition-all active:scale-95 border border-zinc-700/40 cursor-pointer"
-              >
-                {t("common.close")}
-              </button>
-            </div>
-          </div>
+        {infoHolding && (
+          <HoldingInfo
+            key={`${infoHolding.ticker}:${infoHolding.strategy_type ?? ''}`}
+            holding={infoHolding}
+            signal={signalMap[infoHolding.ticker.replace(/^[A-Z0-9]+_/, "").toUpperCase()] ?? null}
+            displayCurrency={displayCurrency}
+          />
         )}
       </Modal>
     </>

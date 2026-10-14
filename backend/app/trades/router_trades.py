@@ -33,6 +33,10 @@ def get_trade_logs(
         str | None,
         Query(description="특정 종목의 체결 이력만 조회. 접두 유무는 무관하다(AAPL == NAS_AAPL)"),
     ] = None,
+    strategy_type: Annotated[
+        str | None,
+        Query(description="특정 전략 슬라이스의 체결만 조회. 한 종목을 여러 전략이 나눠 보유할 때 카드 단위와 맞춘다"),
+    ] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -43,6 +47,11 @@ def get_trade_logs(
         normalized = normalize_ticker(ticker)
         if normalized:
             query = query.filter(TradeLog.ticker == normalized)
+    # 티커 필터와 같은 이유로 limit보다 먼저 DB에서 건다. 화면에서 거르면 같은 종목의
+    # 다른 전략 체결에 밀려 이 슬라이스의 매수가 응답 창 밖으로 나갈 수 있다.
+    # 전략 키는 저장 정본 그대로 비교한다(대소문자 정규화 없음 - 키가 소문자 스네이크로 고정).
+    if strategy_type and strategy_type.strip():
+        query = query.filter(TradeLog.strategy_type == strategy_type.strip())
 
     logs = query.order_by(TradeLog.executed_at.desc())\
                 .offset(skip)\

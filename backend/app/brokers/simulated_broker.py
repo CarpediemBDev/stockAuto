@@ -6,10 +6,84 @@ from decimal import Decimal, ROUND_HALF_UP
 from app.brokers.base_broker import BaseBroker
 from app.core.database import SessionLocal
 from app.core.holding_audit import delete_holding
-from app.core.models import Holding, TradeLog, UnfilledOrder, MANAGEMENT_BOT_OWNED
+from app.core.models import Holding, SimCashTransfer, TradeLog, UnfilledOrder, MANAGEMENT_BOT_OWNED
 from app.core.config import settings
 from app.bot.fx_cache import FXRateCache
 from app.bot.trade_calculations import to_decimal, calculate_realized_pnl, fee_rate_for_trade_mode
+
+def purge_orphan_sell_orders(db, user_ids: list[int] | None = None) -> int:
+    """팔 물건이 없는 매도 미체결 주문을 지운다. 시세를 조회하기 전에 먼저 돌린다.
+
+    미체결 매도 주문은 체결되면 사라지지만, 체결되기 전에 같은 보유분이 다른 경로로 팔리면
+    주문만 남는다. 그 주문은 가리키는 보유분이 없어 영원히 체결될 수 없는데도, 기존 정리
+    코드가 "지정가 도달" 조건 안쪽에 있어 가격이 닿지 않으면 삭제 기회조차 오지 않았다.
+    그래서 2026-09 기준 매도 미체결 605건 중 595건이 이런 고아 주문이었고, 매 사이클
+    이들의 시세를 받느라 정규장 사이클의 72%를 썼다.
+
+    매수 주문은 대상이 아니다. 매수는 체결되어야 보유분이 생기므로 보유분이 없는 것이 정상이다.
+    """
+    query = db.query(UnfilledOrder).filter(UnfilledOrder.trade_type == "SELL")
+    if user_ids is not None:
+        if not user_ids:
+            return 0
+        query = query.filter(UnfilledOrder.user_id.in_(user_ids))
+
+    removed = 0
+    for order in query.all():
+        holding = db.query(Holding).filter(
+            Holding.user_id == order.user_id,
+            Holding.ticker == order.ticker,
+            Holding.strategy_type == order.strategy_type,
+        ).first()
+        if holding is None or (holding.quantity or 0) <= 0:
+            db.delete(order)
+            removed += 1
+    if removed:
+        db.commit()
+    return removed
+
+
+def collect_unfilled_tickers(db, user_ids: list[int] | None = None) -> list[str]:
+    """미체결 주문이 걸린 티커 목록. 유저가 달라도 같은 티커는 한 번만 담는다."""
+    query = db.query(UnfilledOrder.ticker).distinct()
+    if user_ids is not None:
+        if not user_ids:
+            return []
+        query = query.filter(UnfilledOrder.user_id.in_(user_ids))
+    return [row[0] for row in query.all() if row[0]]
+
+
+def fetch_unfilled_prices(tickers: list[str]) -> dict:
+    """미체결 판정에 쓸 현재가를 한 번에 받는다.
+
+    유저마다 따로 받으면 같은 티커를 여러 번 내려받고, 그 호출이 이벤트 루프 위에서
+    순차로 돌아 사이클을 통째로 붙잡는다(실측: 유저 54명 순회에 241초). 티커를 합쳐
+    한 번만 받으면 호출 수가 유저 수와 무관해진다.
+    """
+    if not tickers:
+        return {}
+    prices: dict = {}
+    try:
+        data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[SimulatedBroker] Failed to fetch prices for unfilled orders: {exc}")
+        return prices
+
+    for ticker in tickers:
+        try:
+            if isinstance(data.columns, pd.MultiIndex):
+                if len(tickers) == 1:
+                    df = data[ticker].dropna() if ticker in data.columns.levels[0] else data.dropna()
+                else:
+                    df = data[ticker].dropna() if ticker in data.columns.levels[0] else pd.DataFrame()
+            else:
+                df = data.dropna()
+            if not df.empty:
+                prices[ticker] = to_decimal(df['Close'].iloc[-1])
+        except Exception as exc:  # noqa: BLE001
+            print(f"[SimulatedBroker] Failed to parse price for {ticker}: {exc}")
+    return prices
+
 
 class LocalSimulatedBroker(BaseBroker):
     """
@@ -34,18 +108,26 @@ class LocalSimulatedBroker(BaseBroker):
                 TradeLog.trade_type == "SELL",
                 TradeLog.realized_pnl != None,
             )
+            # 입출금 원장 합계. 실현손익과 같은 범위(사용자 단위)로 집계한다.
+            transfers_query = db.query(func.sum(SimCashTransfer.amount_krw))
             if self.user_id:
                 holdings = db.query(Holding).filter(Holding.user_id == self.user_id).all()
                 realized_pnl_query = realized_pnl_query.filter(TradeLog.user_id == self.user_id)
+                transfers_query = transfers_query.filter(SimCashTransfer.user_id == self.user_id)
             else:
                 holdings = db.query(Holding).all()
             total_realized_pnl_usd = to_decimal(realized_pnl_query.scalar()).quantize(
                 Decimal('0.0001'), rounding=ROUND_HALF_UP
             )
+            total_transfers_krw = to_decimal(transfers_query.scalar()).quantize(
+                Decimal('0.0001'), rounding=ROUND_HALF_UP
+            )
         finally:
             db.close()
 
-        initial_cash = to_decimal(settings.SIMULATED_INITIAL_CASH_KRW)
+        # 투입 자본 = 초기자금 + 입출금 합계. 현금·손익·수익률이 모두 이 값을 기준으로 한다.
+        # 손익을 초기자금 기준으로 두면 1천만원 입금이 +100% 수익으로 잡힌다.
+        invested_capital = to_decimal(settings.SIMULATED_INITIAL_CASH_KRW) + total_transfers_krw
         if exchange_rate is None:
             exchange_rate = FXRateCache.get_rate()
         dec_exchange_rate = to_decimal(exchange_rate)
@@ -64,15 +146,15 @@ class LocalSimulatedBroker(BaseBroker):
                 total_eval_usd += (current_price * h.quantity)
 
         # 수익률은 외화 기준으로 계산합니다.
-        strategy_initial_cash_usd = initial_cash / to_decimal(settings.SIMULATED_INITIAL_FX_RATE)
-        cash_balance_usd = max(Decimal('0.0000'), strategy_initial_cash_usd + total_realized_pnl_usd - total_purchase_usd)
+        invested_capital_usd = invested_capital / to_decimal(settings.SIMULATED_INITIAL_FX_RATE)
+        cash_balance_usd = max(Decimal('0.0000'), invested_capital_usd + total_realized_pnl_usd - total_purchase_usd)
         cash_balance = cash_balance_usd * to_decimal(settings.SIMULATED_INITIAL_FX_RATE)
         stock_balance = total_eval_usd * to_decimal(settings.SIMULATED_INITIAL_FX_RATE)
         total_asset = cash_balance + stock_balance
-        profit_loss = total_asset - initial_cash
+        profit_loss = total_asset - invested_capital
 
         # 가상 수익률 계산
-        profit_rate = ((profit_loss / initial_cash) * Decimal('100.0')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if initial_cash > 0 else Decimal('0.0000')
+        profit_rate = ((profit_loss / invested_capital) * Decimal('100.0')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if invested_capital > 0 else Decimal('0.0000')
 
         return {
             "total_asset": int(total_asset.quantize(Decimal('1'), rounding=ROUND_HALF_UP)),
@@ -126,36 +208,23 @@ class LocalSimulatedBroker(BaseBroker):
             })
         return result
 
-    def process_unfilled_orders(self, db):
-        """미체결 가상 지정가 주문들을 현재 실시간 시세 기준으로 체크하여 체결 처리합니다."""
+    def process_unfilled_orders(self, db, prices: dict | None = None):
+        """미체결 가상 지정가 주문들을 현재 실시간 시세 기준으로 체크하여 체결 처리합니다.
+
+        prices를 받으면 그 값을 쓰고 네트워크를 타지 않는다. 사이클이 모든 유저의 티커를
+        한 번에 받아 넘겨주기 위한 통로다(scheduler.async_trading_loop). 넘어오지 않으면
+        예전처럼 스스로 받는다 - 테스트와 단독 호출 경로를 그대로 유지한다.
+        """
+        # 팔 물건이 없는 매도 주문을 먼저 지운다. 시세를 받아 봐야 체결될 수 없고,
+        # 남겨 두면 다음 사이클에도 같은 조회를 반복한다.
+        purge_orphan_sell_orders(db, [self.user_id] if self.user_id else None)
+
         orders = db.query(UnfilledOrder).filter(UnfilledOrder.user_id == self.user_id).all() if self.user_id else db.query(UnfilledOrder).all()
         if not orders:
             return
 
-        tickers = list({order.ticker for order in orders})
-        prices = {}
-        try:
-            data = fetch_bulk_ohlcv_sync(tickers, period="1d", interval="1m", group_by="ticker")
-            for ticker in tickers:
-                clean_t = ticker
-                try:
-                    if len(tickers) == 1:
-                        if isinstance(data.columns, pd.MultiIndex):
-                            df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else data.dropna()
-                        else:
-                            df = data.dropna()
-                    else:
-                        if isinstance(data.columns, pd.MultiIndex):
-                            df = data[clean_t].dropna() if clean_t in data.columns.levels[0] else pd.DataFrame()
-                        else:
-                            df = data.dropna()
-
-                    if not df.empty:
-                        prices[ticker] = to_decimal(df['Close'].iloc[-1])
-                except Exception as e:
-                    print(f"[SimulatedBroker] Failed to parse price for {ticker}: {e}")
-        except Exception as e:
-            print(f"[SimulatedBroker] Failed to fetch prices for unfilled orders: {e}")
+        if prices is None:
+            prices = fetch_unfilled_prices(list({order.ticker for order in orders}))
 
         for order in orders:
             live_price = prices.get(order.ticker)
@@ -427,6 +496,41 @@ class LocalSimulatedBroker(BaseBroker):
         live_price = self._get_live_price(ticker)
         dec_price = to_decimal(price)
         dec_live_price = to_decimal(live_price) if live_price is not None else dec_price
+
+        # 같은 보유분에 걸린 기존 대기 주문을 먼저 거둔다 - 재시도는 주문을 쌓는 것이 아니라
+        # 갱신(정정)이어야 한다.
+        #
+        # 실제 증권사는 매도 주문을 걸면 그 수량을 묶어 두어 같은 물량을 다시 팔 수 없다.
+        # 이 시뮬레이터에는 그 예약이 없어서, 체결되지 않은 주문을 남겨 둔 채 다음 사이클에
+        # 또 매도하면 같은 87주에 주문이 겹쳤다(실측 최대 10건). 그렇게 겹친 주문은 하나가
+        # 체결되어 보유분이 사라지는 순간 전부 고아가 된다.
+        #
+        # 막는 방향(대기 주문이 있으면 매도 금지)은 택하지 않았다. 체결되지 않은 손절이
+        # 다음 사이클에 다시 시도되는 것이 지금의 재시도 경로인데, 그것을 막으면 주문 하나가
+        # 걸려 있는 동안 그 종목은 아무리 떨어져도 팔지 못한다. 손절을 얼리는 대가로
+        # 고아 주문을 막는 셈이라 더 나쁘다.
+        #
+        # 한 보유분에 대기 주문이 최대 하나만 존재한다는 불변식이 곧 이중 매도 방지다.
+        # 그래서 아래 가용 수량 검사는 보유 수량을 그대로 써도 안전하다.
+        replaced = 0
+        if self.user_id is not None:
+            db = SessionLocal()
+            try:
+                stale = db.query(UnfilledOrder).filter(
+                    UnfilledOrder.user_id == self.user_id,
+                    UnfilledOrder.ticker == ticker,
+                    UnfilledOrder.strategy_type == strategy_type,
+                    UnfilledOrder.trade_type == "SELL",
+                ).all()
+                for order in stale:
+                    db.delete(order)
+                    replaced += 1
+                if replaced:
+                    db.commit()
+            finally:
+                db.close()
+        if replaced:
+            print(f"[SimulatedBroker] Replaced {replaced} pending SELL order(s) for {ticker} before re-submitting.")
 
         if live_price is not None and dec_live_price >= dec_price:
             if self.user_id is None:

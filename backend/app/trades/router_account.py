@@ -13,7 +13,11 @@ from app.bot.order_reconciler import (
     has_unresolved_orders,
     has_unresolved_orders_for_ticker,
 )
-from app.bot.trade_calculations import calculate_realized_pnl, fee_rate_for_trade_mode
+from app.bot.trade_calculations import (
+    calculate_realized_pnl,
+    fee_rate_for_trade_mode,
+    get_harvest_floor_price,
+)
 import app.bot.scheduler as scheduler_mod
 from app.trades.equity_snapshot import record_equity_snapshot
 from app.core.equity_repository import get_latest_equity_snapshot
@@ -24,7 +28,7 @@ from decimal import Decimal
 
 from app.core.logging import logger
 from app.core.models import (
-    User, Holding, TradeLog, ActionLog, Strategy, utc_now_aware,
+    User, Holding, TradeLog, ActionLog, Strategy, SimCashTransfer, utc_now_aware,
     MANAGEMENT_BOT_OWNED, MANAGEMENT_EXTERNAL, MANAGEMENT_DELEGATED,
     EXTERNAL_STRATEGY_TYPE,
     GUARD_ACTIONS, GUARD_ACTION_ALERT_ONLY,
@@ -213,6 +217,18 @@ async def get_balance(
 
     return balance
 
+def _harvest_floor_price(holding: Holding, trade_mode: str | None) -> float | None:
+    """수확 매도 하한(관측 시작가와 수수료 포함 본전가 중 높은 값). 평단을 모르면 None.
+
+    스케줄러 판정과 같은 get_harvest_floor_price를 쓴다. 화면이 따로 계산하면 표시한 선과
+    실제로 팔리는 선이 어긋난다.
+    """
+    floor = get_harvest_floor_price(
+        holding.observed_base_price, holding.avg_price, fee_rate_for_trade_mode(trade_mode)
+    )
+    return float(floor) if floor > 0 else None
+
+
 @router.get("/holdings")
 def get_holdings(
     current_user: User = Depends(get_current_user),
@@ -301,6 +317,9 @@ def get_holdings(
             # 호출 0건 원칙). 아직 관측되지 않았으면 null이며 클라이언트는 값을 감춘다.
             holding["harvest_arm_pct"] = external_row.harvest_arm_pct
             holding["harvest_trailing_pct"] = external_row.harvest_trailing_pct
+            holding["harvest_floor_price"] = _harvest_floor_price(
+                external_row, getattr(current_user.settings, "trade_mode", None)
+            )
             holding["guard_enabled"] = bool(external_row.guard_enabled)
             holding["guard_baseline_score"] = external_row.guard_baseline_score
             holding["guard_baseline_low"] = (
@@ -343,6 +362,8 @@ def reset_balance(
         db.query(Holding).filter(Holding.user_id == current_user.id).delete()
         db.query(TradeLog).filter(TradeLog.user_id == current_user.id).delete()
         db.query(ActionLog).filter(ActionLog.user_id == current_user.id).delete()
+        # 입출금 원장도 비운다. 남겨 두면 초기화 뒤에도 투입 자본이 초기자금보다 커져 있다.
+        db.query(SimCashTransfer).filter(SimCashTransfer.user_id == current_user.id).delete()
         db.commit()
 
         # 초기화 직후 대시보드에 낡은 스냅샷이 보이지 않도록 즉시 재계산·영속화 (dedup 우회)
@@ -654,6 +675,9 @@ def update_holding_management(
         ),
         "harvest_arm_pct": holding.harvest_arm_pct,
         "harvest_trailing_pct": holding.harvest_trailing_pct,
+        "harvest_floor_price": _harvest_floor_price(
+            holding, getattr(current_user.settings, "trade_mode", None)
+        ),
         "guard_enabled": bool(holding.guard_enabled),
         "guard_baseline_score": holding.guard_baseline_score,
         "guard_baseline_low": (

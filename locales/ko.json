@@ -69,7 +69,9 @@
         "desc": "이 주문을 체결하기에 슬롯 예수금이 부족합니다."
       }
     },
-    "harvest_armed": "🌾 <b>수확 모드 무장</b>\n\n<b>{ticker_name}</b> ({ticker})\n관측 시작가 ${base_price:.2f} → 현재 ${current_price:.2f} (<b>+{gain_pct:.1f}%</b>)\n\n지금부터 고점을 따라가다가 고점 대비 <b>{trailing_pct:.1f}%</b> 내려오면 매도합니다.\n현재 기준 스탑: 약 ${stop_price:.2f}\n\n<i>관측 시작가 아래에서는 팔지 않습니다.</i>",
+    "harvest_armed": "🌾 <b>수확 모드 추적 시작</b>\n\n<b>{ticker_name}</b> ({ticker})\n관측 시작가 ${base_price:.2f} → 현재 ${current_price:.2f} (<b>+{gain_pct:.1f}%</b>)\n\n지금부터 고점을 추적합니다. 고점 대비 <b>{trailing_pct:.1f}% 이상 하락</b>한 상태를 {sustain_cycles}회 이상 연속 확인하고, 최초 이탈 후 최소 {sustain_minutes}분이 지나면 매도 주문을 시도합니다.\n현재 매도 기준선: 약 ${stop_price:.2f}\n기준선은 고점·변동성에 따라 바뀌며, 실제 체결가는 다를 수 있습니다.\n\n<i>{floor_note} 위 상승률은 매입가 기준 수익률이 아닙니다.</i>",
+    "harvest_floor_known": "수확 매도는 본전가(매입가+수수료) 약 ${floor_price:.2f}를 웃돌 때만 시도합니다. 매입가 아래에서는 수확으로 팔지 않습니다.",
+    "harvest_floor_unknown": "매입가를 확인할 수 없어 수확 매도는 하지 않습니다. 고점 추적과 알림만 계속합니다.",
     "guard_alert": "🛡️ <b>{ticker_name} ({ticker}) — 계속 나빠지고 있습니다</b>\n\n방어 알림을 켜신 시점과 비교하면\n· 주가가 그때보다 더 내려갔습니다   ${baseline_low:.2f} → <b>${current_price:.2f}</b>\n· 종목 상태 점수도 크게 떨어졌습니다  {baseline_score:.0f}점 → <b>{current_score:.0f}점</b>\n  <i>(봇이 종목의 튼튼함을 100점 만점으로 매긴 점수입니다)</i>\n\n<b>봇은 팔지 않았습니다. 팔지 말지는 직접 정하세요.</b>\n\n<i>앞으로 더 빠질지 오를지는 알 수 없습니다. 이 알림은 참고용이지 매도 권유가 아닙니다.</i>",
     "guard_shadow": "📝 <b>{ticker_name} ({ticker}) — 팔 만한 시점이었습니다</b>\n<b>실제로 팔지는 않았습니다.</b>\n\n나빠진 상태가 {minutes}분 넘게 이어졌습니다.\n'매도 시점 알림'으로 설정해두셔서, 봇은 팔지 않고 알려만 드립니다.\n\n<b>만약 이때 팔았다면</b>\n· {total_qty:,}주 중 <b>{sell_qty:,}주</b>\n· 주당 ${current_price:.2f}\n· 약 <b>${proceeds:,.0f}</b>\n\n<i>나중에 이 시점의 주가와 지금을 비교해보시면, 이 알림이 쓸모 있었는지 직접 판단하실 수 있습니다.</i>"
   },
@@ -548,6 +550,9 @@
       "harvest_armed_tip": "급등이 확인되어 고점을 추적 중입니다. 고점 대비 정해진 폭만큼 내려오면 매도합니다.",
       "harvest_arm_threshold": "무장 임계",
       "harvest_trailing_width": "트레일링 폭",
+      "harvest_floor": "매도 하한 (본전가)",
+      "harvest_floor_unknown": "매입가를 알 수 없어 수확 매도를 하지 않습니다",
+      "harvest_no_sell_zone": "매도 기준선이 본전가보다 낮아 지금은 수확 매도가 일어나지 않습니다. 매입가 아래에서는 수확으로 팔지 않습니다.",
       "harvest_toggle_failed": "수확 설정을 변경하지 못했습니다.",
       "guard_on": "방어 켜짐",
       "guard_off": "방어 꺼짐",
@@ -594,7 +599,22 @@
       "history_col_price": "체결가",
       "history_col_qty": "수량",
       "history_col_total": "체결 금액",
-      "history_col_pnl": "실현 손익"
+      "history_col_pnl": "실현 손익",
+      "info_action": "종목 정보",
+      "info_levels_title": "가격 기준선",
+      "info_current_price": "현재가",
+      "info_peak": "최고가(보유 중 고점)",
+      "info_risk_basis": "위임 기준가(손절선 계산의 기준)",
+      "info_harvest_arm": "수확 추적 시작가",
+      "info_harvest_stop": "수확 매도 기준선",
+      "info_harvest_floor": "수확 매도 하한 (본전가)",
+      "info_vs_current": "현재가 {pct}",
+      "info_levels_hint": "오른쪽 %는 각 기준가에서 본 현재가의 위치입니다. 가격은 브로커 잔고와 봇이 저장한 상태값이며, 수확 기준선은 고점·변동성에 따라 바뀝니다.",
+      "info_score_title": "스캐너 점수",
+      "info_news_title": "AI 뉴스 분석",
+      "info_no_news": "이 종목의 최근 뉴스 분석이 없습니다.",
+      "info_not_scanned_title": "최근 스캔 결과에 없는 종목입니다",
+      "info_not_scanned_hint": "스캐너 점수와 뉴스는 시장 상위 10개 종목과 관심종목에 대해서만 제공됩니다. 관심종목에 추가하면 이후 스캔부터 표시됩니다."
     },
     "balance": {
       "load_failed": "계좌 정보를 불러올 수 없습니다",

@@ -1,6 +1,6 @@
 import math
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_HALF_UP
 from app.core.config import settings
 
 
@@ -248,8 +248,7 @@ def check_rolling_box_breach(
 HARVEST_ARM_BASE_PCT = 15.0     # 최소 무장 임계 - 이보다 작은 상승은 급등으로 보지 않는다
 HARVEST_ARM_ATR_MULT = 4.0      # ATR 배수. 변동성이 큰 종목일수록 더 크게 올라야 급등이다
 HARVEST_ARM_MAX_PCT = 40.0      # 상한. 이 이상을 요구하면 무장 자체가 사실상 불가능해진다
-HARVEST_TRAILING_BASE_PCT = 5.0  # 최소 트레일링 폭. 봇 진입분(2.0%)보다 넓다
-HARVEST_TRAILING_ATR_MULT = 2.0  # ATR 배수. 급등주는 눌림이 깊어 봇 진입분(1.0배)보다 넓게 잡는다
+HARVEST_TRAILING_PCT = 5.0       # 트레일링 폭(고점 대비 %). 고정값이다 - get_harvest_trailing_pct 참조
 
 # 노이즈 버퍼의 시간 하한. 사이클 수만으로는 주기 변동에 시간이 휘둘린다(실측 104~846초).
 # 방어의 20분과 달리 짧게 잡는 이유는 역할이 다르기 때문이다 - 방어는 추세 붕괴가 실재하는지
@@ -292,15 +291,19 @@ def get_harvest_arm_pct(atr: float | Decimal | None, price: float | Decimal | No
     return float(min(value, Decimal(str(HARVEST_ARM_MAX_PCT))))
 
 
-def get_harvest_trailing_pct(atr: float | Decimal | None, price: float | Decimal | None) -> float:
-    """수확 트레일링 폭(고점 대비 %)을 ATR에 맞춰 계산합니다.
+def get_harvest_trailing_pct() -> float:
+    """수확 트레일링 폭(고점 대비 %). ATR과 무관한 고정값이다.
 
-    봇 진입분(최소 2.0%, ATR 1.0배)보다 넓다. 두 가지 이유다 - 급등 종목은 상승 도중
-    눌림이 깊어 좁은 폭이면 상승 중에 털리고, 봇이 진입 근거를 갖지 않은 포지션이라
-    조기 청산의 기회비용이 봇 소유 포지션보다 크다.
+    예전에는 max(5%, ATR% x 2)였다. 스케줄러가 넘기는 ATR은 5분봉이라 평소에는 하한 5%로
+    동작했지만, 급등하는 순간에는 ATR이 치솟아 폭이 20~60%로 부풀었다. 수확이 일하는 때가
+    바로 그 순간이라 "고점에서 5% 꺾이면 판다"는 설계 의도가 정작 필요할 때 깨졌다
+    (2026-09-24 HCTI는 폭 20.7%로 매도).
+
+    고정 5%는 2026-09-26 시뮬레이션에서 채택했다. 최근 60일 급등·급등실패 56건(5분봉)과
+    19건(1분봉, 2분 주기)에서 ATR 연동·고정 10/15%·상한·일봉 ATR·확인 단축보다 평균과
+    중앙값이 고르게 나았다. 상세는 docs/plans/holding_management_modes.md 5.2절.
     """
-    dynamic = _atr_pct(atr, price) * Decimal(str(HARVEST_TRAILING_ATR_MULT))
-    return float(max(Decimal(str(HARVEST_TRAILING_BASE_PCT)), dynamic))
+    return HARVEST_TRAILING_PCT
 
 
 def check_harvest_arm(
@@ -328,6 +331,9 @@ def check_harvest_breach(
     무장이 래치(한번 켜지면 유지)이므로 이 가드가 없으면 급등 후 폭락한 종목에서
     고점만 높게 남아 즉시 이탈 판정이 나고, "위로 갔다 꺾일 때만 판다"는 EXTERNAL의
     계약이 정면으로 뒤집힌다. 손실 구간 방어는 수확 모드의 책임이 아니다.
+
+    라이브 스케줄러는 observed_base_price 자리에 get_harvest_floor_price의 결과(관측 시작가와
+    수수료 포함 본전가 중 높은 값)를 넘긴다. 시그니처는 그대로 두고 호출부에서 하한만 올린다.
     """
     if trailing_pct is None:
         return False
@@ -346,6 +352,39 @@ def check_harvest_breach(
 
     threshold = dec_highest * (Decimal("1.0") - dec_trailing / Decimal("100.0"))
     return dec_current <= threshold
+
+
+def get_harvest_floor_price(
+    observed_base_price: float | Decimal | None,
+    avg_price: float | Decimal | None,
+    fee_rate: float | Decimal,
+    sec_fee_rate: float | Decimal = settings.SEC_FEE_RATE,
+) -> Decimal:
+    """수확 매도 하한 = max(관측 시작가, 수수료 포함 본전가).
+
+    수확은 "올라갔을 때 판다"는 기능이다. 관측 시작가만 하한으로 쓰면 매입가보다 한참 아래에서
+    관측이 시작된 종목이 반등하다 꺾일 때 손실 확정 매도가 난다(2026-09-24 HCTI, 매입가 $1.49·
+    관측가 $0.75·매도가 $1.20, 실현손실 -$1,374). 손실 구간은 방어 모드의 몫이다.
+
+    본전가는 calculate_realized_pnl과 같은 비용 구조(매수 수수료, 매도 수수료, SEC fee)에서
+    순손익이 0이 되는 가격이며, 하한을 낮춰 잡지 않도록 소수 넷째 자리에서 올림한다.
+    판정은 check_harvest_breach의 엄격 부등식(current > floor)을 그대로 쓴다.
+
+    평단을 모르면(0 이하) 0을 돌려준다. check_harvest_breach는 하한 0을 "판정 불가"로 보고
+    False를 내므로, 매입가를 확인할 수 없는 보유분은 수확 매도를 하지 않는다(fail-closed).
+    """
+    dec_avg = to_decimal(avg_price)
+    if dec_avg <= 0:
+        return Decimal("0")
+    dec_fee = to_decimal(fee_rate)
+    dec_sec = to_decimal(sec_fee_rate)
+    net_ratio = Decimal("1") - dec_fee - dec_sec
+    if net_ratio <= 0:
+        return Decimal("0")
+    break_even = (dec_avg * (Decimal("1") + dec_fee) / net_ratio).quantize(
+        Decimal("0.0001"), rounding=ROUND_CEILING
+    )
+    return max(to_decimal(observed_base_price), break_even)
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +502,7 @@ def resolve_guard_sell_qty(quantity: int, sell_ratio: float | Decimal | None) ->
         return quantity
     qty = int((to_decimal(quantity) * ratio).to_integral_value(rounding=ROUND_DOWN))
     return max(1, min(qty, quantity))
+
 
 # ---------------------------------------------------------------------------
 # 갭상승 청산 (2026-10-04 A/B)

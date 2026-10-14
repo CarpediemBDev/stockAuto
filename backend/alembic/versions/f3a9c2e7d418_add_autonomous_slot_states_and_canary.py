@@ -5,7 +5,7 @@
 설계: docs/plans/canary_allocation_live_port.md
 
 Revision ID: f3a9c2e7d418
-Revises: d4e1c8b7f206
+Revises: e7a2c4d9b153
 Create Date: 2026-10-05 12:00:00.000000
 
 """
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'f3a9c2e7d418'
-down_revision: Union[str, None] = 'd4e1c8b7f206'
+down_revision: Union[str, None] = 'e7a2c4d9b153'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

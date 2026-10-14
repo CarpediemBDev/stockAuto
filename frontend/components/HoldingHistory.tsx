@@ -8,7 +8,7 @@ import { useTranslations } from "next-intl";
 import { fetcher } from "@/lib/api";
 import { pollInterval } from "@/lib/sse";
 import { getProfitColor } from "@/lib/theme";
-import { cn, formatKrw, usdToKrw } from "@/lib/utils";
+import { cn, formatUsdAs } from "@/lib/utils";
 import { useTimezone } from "@/store/timezoneStore";
 import type { TradeLog } from "./TradeLogs";
 
@@ -26,6 +26,12 @@ export interface HoldingHistoryTarget {
   avg_price: number;
   quantity: number;
   fx_rate?: number;
+  /**
+   * 있으면 이 전략 슬라이스의 체결만 조회한다. 카드가 슬라이스 단위일 때만 채운다 - KIS·Toss처럼
+   * 한 티커가 한 카드로 합쳐지는 경우 채우면 카드 수량에 포함된 다른 슬라이스의 체결이 빠진다.
+   * 판정 규칙은 docs/API_STANDARD.md 7절.
+   */
+  strategy_type?: string;
 }
 
 interface SliceHistory {
@@ -110,7 +116,11 @@ export function HoldingHistory({
   const { selectedTimezone } = useTimezone();
 
   const { data, isLoading, error } = useSWR(
-    target ? `/trades?ticker=${encodeURIComponent(target.ticker)}&limit=${HISTORY_LIMIT}` : null,
+    target
+      ? `/trades?ticker=${encodeURIComponent(target.ticker)}` +
+        (target.strategy_type ? `&strategy_type=${encodeURIComponent(target.strategy_type)}` : "") +
+        `&limit=${HISTORY_LIMIT}`
+      : null,
     fetcher,
     { refreshInterval: pollInterval(30000) },
   );
@@ -119,10 +129,7 @@ export function HoldingHistory({
   const slices = React.useMemo(() => buildSlices(logs), [logs]);
   const truncated = logs.length >= HISTORY_LIMIT;
 
-  const money = (usd: number) =>
-    displayCurrency === "USD"
-      ? `$${usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-      : formatKrw(usdToKrw(usd, target?.fx_rate));
+  const money = (usd: number) => formatUsdAs(usd, displayCurrency, target?.fx_rate);
 
   const formatTime = (iso: string) => {
     const parsed = new Date(iso);

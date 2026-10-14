@@ -256,7 +256,7 @@ graph TD
 
 - **`scanner/`**: 스캐너 도메인. 공용 시장 신호와 현재 사용자의 관심종목 신호를 안전하게 재결합하는 API(`router.py`), QQQ 나스닥 지수 기반의 단타 돌파 전용 2-Stage expert 필터 모듈(`scanner.py`), 그리고 120일 일봉 기반 스윙 예측 모듈(`swing_predictor.py`)을 포함하는 **투트랙(Two-track) 스캐닝 엔진**입니다. 공용·사용자 데이터 경계는 `docs/SCANNER_DATA_FLOW.md`를 단일 기준으로 사용합니다.
 
-- **`bot/`**: 자동매매 제어 도메인. 봇 구동 제어 API(`router.py`), 하이브리드 트레이딩 메인 루프 스케줄러(`scheduler.py`), 한국투자증권 API 클라이언트(`kis_api.py`), 공통 추상 브로커 인터페이스(`base_broker.py`), 한투 래퍼 브로커(`kis_broker.py`), 가상 예수금 및 실시간 가격 연동 시뮬레이터 브로커(`simulated_broker.py`), 이들을 설정에 따라 동적으로 생산 및 반환하는 팩토리(`broker_factory.py`).
+- **`bot/`**: 자동매매 제어 도메인. 봇 구동 제어 API(`router.py`), 하이브리드 트레이딩 메인 루프 스케줄러(`scheduler.py`), 한국투자증권 API 클라이언트(`kis_api.py`), 공통 추상 브로커 인터페이스(`base_broker.py`), 한투 래퍼 브로커(`kis_broker.py`), 가상 예수금 및 실시간 가격 연동 시뮬레이터 브로커(`simulated_broker.py`, 투입 자본 = 초기자금 1,000만 원 + 사용자별 입출금 원장 `sim_cash_transfers` 합계, 등록은 `scripts/sim_cash_transfer.py`), 이들을 설정에 따라 동적으로 생산 및 반환하는 팩토리(`broker_factory.py`).
 
 - **`trades/`**: 거래 및 계좌 도메인. 실시간 매매 및 시스템 활동 로그 API(`router_trades.py`), 브로커 팩토리를 통해 잔고/보유량을 통합 처리하는 초경량 라우터(`router_account.py`), 지수 및 시장 종합 센티먼트 API(`router_market.py`).
 
@@ -268,7 +268,7 @@ graph TD
 
 - **`components/MarketHeader.tsx`**: 실시간 시장 지수 및 심리 상태 표시.
 
-- **`components/PortfolioView.tsx`**: 보유 종목 현황 및 트레일링 스탑 시각화.
+- **`components/PortfolioView.tsx`**: 보유 종목 현황 및 트레일링 스탑 시각화. 카드의 진입점은 둘로 나뉩니다. 종목명·코드와 뉴스 흐름 줄은 **종목 정보 모달**(`HoldingInfo.tsx`: 가격 기준선, 스캐너 점수, AI 뉴스)을 열고, 푸터의 "매수 이력" 버튼은 **체결 이력 모달**(`HoldingHistory.tsx`)을 엽니다. 이력 모달은 같은 종목 카드가 둘 이상일 때(SIMULATED 슬라이스 단위)만 카드의 전략으로 좁힙니다(`docs/API_STANDARD.md` 7절). 스캐너 채점표 표시는 `ScoreBreakdown.tsx`, 수확 기준선 계산은 `lib/holdingLevels.ts` 한 곳에서 합니다. 수확 매도 하한(본전가)은 서버가 내려준 `harvest_floor_price`를 그대로 쓰고, 매도 기준선이 하한 이하이면 "지금은 수확 매도가 일어나지 않음"을 표시합니다.
 
 - **`components/BotSignals.tsx`**: 봇이 실시간 탐지한 상위 시그널 표시 (Bot's View).
 
@@ -308,6 +308,7 @@ graph TD
 - **`loop.blocked`가 사이클 시간의 대부분이면** 사용자 흐름이 병렬로 돌지 못하고 있다는 뜻이다. 사용자별 흐름은 `asyncio.gather`로 한 이벤트 루프에서 도는데, 동기 DB·브로커·pandas 작업이 루프를 붙잡으면 순차 실행으로 무너진다. 해법은 캐시·중복 제거가 아니라 동기 작업을 루프 밖으로 빼는 것이다.
 - **`cycle.user_flows_wall`과 `user.*` 합을 비교한다.** 합이 벽시계를 크게 넘으면 병렬이 살아 있고, 비슷하면 무너진 것이다.
 - **`exit.analyze_single_ticker` 호출 횟수**는 시그널 캐시에 없는 보유 종목을 사용자마다 따로 조회한 횟수다. 같은 티커를 여러 계정이 들고 있어도 중복 제거되지 않는다.
+- **`cycle.unfilled_*` 세 구간**은 모의투자 미체결 주문 처리다. `purge_orphans`(팔 물건 없는 매도 주문 정리) → `price_fetch`(전체 티커 일괄 조회, 스레드에서 실행) → `fill_check`(유저별 체결 판정) 순서다. 2026-09-19 이전에는 이 셋이 `cycle.simulated_unfilled_orders` 하나였고 유저마다 시세를 따로 받아 정규장 사이클의 72%를 썼다. `price_fetch`가 다시 커지면 미체결 주문이 걸린 **고유 티커 수**가 늘어난 것이고, `fill_check`가 커지면 주문 건수·유저 수가 늘어난 것이다.
 
 **기준선을 잴 때는 휴장 표본을 반드시 뺀다.** 휴장이면 매도·매수 판정을 건너뛰어 사이클이 짧게 끝나므로, 섞으면 회귀가 가려진다.
 
